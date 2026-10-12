@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">GBADuo</string>
+    <string name="choose_rom_folder">Choose ROM folder</string>
+    <string name="no_roms">No .gba files found in this folder</string>
+    <string name="load_failed">Could not load %s</string>
+    <string name="resume">Resume</string>
+    <string name="save_state">Save state</string>
+    <string name="load_state">Load state</string>
+    <string name="quit">Quit</string>
+    <string name="slot_n">Slot %d</string>
+    <string name="slot_empty">Slot %d — empty</string>
+    <string name="ff_speed">Fast-forward: %dx</string>
+    <string name="shader_label">Shader: %s</string>
+    <string name="swap_ab">Swap A/B</string>
+</resources>
