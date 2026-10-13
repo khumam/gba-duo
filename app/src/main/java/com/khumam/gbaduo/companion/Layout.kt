@@ -15,6 +15,7 @@ sealed class Widget {
         val size: Int,
         val color: String,
         val bold: Boolean,
+        val font: String?,
         override val visibleIf: String?,
     ) : Widget()
     data class Bar(
@@ -31,6 +32,17 @@ sealed class Widget {
         val itemsPath: String,
         val template: Widget,
         val emptyText: String?,
+        override val visibleIf: String?,
+    ) : Widget()
+    data class Box(
+        val child: Widget,
+        val width: Int?,
+        val height: Int?,
+        val background: String?,
+        val cornerRadius: Int,
+        val borderColor: String?,
+        val borderWidth: Int,
+        val padding: Int,
         override val visibleIf: String?,
     ) : Widget()
 }
@@ -69,6 +81,7 @@ object LayoutParser {
                 size = obj.optInt("size", 14),
                 color = obj.optString("color", "#FFFFFF"),
                 bold = obj.optBoolean("bold", false),
+                font = if (obj.has("font")) obj.getString("font") else null,
                 visibleIf = visibleIf,
             )
             "bar" -> Widget.Bar(
@@ -92,6 +105,21 @@ object LayoutParser {
                     itemsPath = bindingKey(obj.optString("items", "")),
                     template = parseWidget(templateObj),
                     emptyText = if (obj.has("empty")) obj.getString("empty") else null,
+                    visibleIf = visibleIf,
+                )
+            }
+            "box" -> {
+                val childObj = obj.optJSONObject("child")
+                    ?: throw InvalidLayoutException("box needs a 'child'")
+                Widget.Box(
+                    child = parseWidget(childObj),
+                    width = if (obj.has("width")) obj.getInt("width") else null,
+                    height = if (obj.has("height")) obj.getInt("height") else null,
+                    background = if (obj.has("background")) obj.getString("background") else null,
+                    cornerRadius = obj.optInt("cornerRadius", 0),
+                    borderColor = if (obj.has("borderColor")) obj.getString("borderColor") else null,
+                    borderWidth = obj.optInt("borderWidth", 0),
+                    padding = obj.optInt("padding", 0),
                     visibleIf = visibleIf,
                 )
             }

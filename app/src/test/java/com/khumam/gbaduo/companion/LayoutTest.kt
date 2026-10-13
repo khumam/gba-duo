@@ -78,4 +78,52 @@ class LayoutTest {
     fun listWithoutTemplateIsRejected() {
         LayoutParser.parse("""{"type":"list","items":"${'$'}party"}""")
     }
+
+    @Test
+    fun parsesBoxWithAllFields() {
+        val widget = LayoutParser.parse(
+            """{"type":"box","width":340,"height":160,"background":"#192134","cornerRadius":16,"borderColor":"#DC2626","borderWidth":2,"padding":12,"child":{"type":"text","text":"hi"}}""",
+        ) as Widget.Box
+        assertEquals(340, widget.width)
+        assertEquals(160, widget.height)
+        assertEquals("#192134", widget.background)
+        assertEquals(16, widget.cornerRadius)
+        assertEquals("#DC2626", widget.borderColor)
+        assertEquals(2, widget.borderWidth)
+        assertEquals(12, widget.padding)
+        assertTrue(widget.child is Widget.Text)
+    }
+
+    @Test
+    fun parsesBoxWithOnlyChildUsesDefaults() {
+        val widget = LayoutParser.parse(
+            """{"type":"box","child":{"type":"spacer","size":4}}""",
+        ) as Widget.Box
+        assertNull(widget.width)
+        assertNull(widget.height)
+        assertNull(widget.background)
+        assertEquals(0, widget.cornerRadius)
+        assertNull(widget.borderColor)
+        assertEquals(0, widget.borderWidth)
+        assertEquals(0, widget.padding)
+    }
+
+    @Test(expected = LayoutParser.InvalidLayoutException::class)
+    fun boxWithoutChildIsRejected() {
+        LayoutParser.parse("""{"type":"box","background":"#000000"}""")
+    }
+
+    @Test
+    fun parsesTextWithFont() {
+        val widget = LayoutParser.parse(
+            """{"type":"text","text":"hi","font":"fonts/PressStart2P.ttf"}""",
+        ) as Widget.Text
+        assertEquals("fonts/PressStart2P.ttf", widget.font)
+    }
+
+    @Test
+    fun textWithoutFontIsNull() {
+        val widget = LayoutParser.parse("""{"type":"text","text":"hi"}""") as Widget.Text
+        assertNull(widget.font)
+    }
 }

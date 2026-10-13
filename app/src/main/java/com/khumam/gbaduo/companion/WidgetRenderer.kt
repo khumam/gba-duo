@@ -3,6 +3,8 @@ package com.khumam.gbaduo.companion
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -72,7 +74,13 @@ class WidgetRenderer(private val context: Context, private val packDir: File) {
         is Widget.Text -> TextView(context).apply {
             textSize = widget.size.toFloat()
             setTextColor(runCatching { Color.parseColor(widget.color) }.getOrDefault(Color.WHITE))
-            if (widget.bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            widget.font?.let { fontPath ->
+                val fontFile = File(packDir, "assets/$fontPath")
+                if (fontFile.exists()) {
+                    runCatching { Typeface.createFromFile(fontFile) }.getOrNull()?.let { typeface = it }
+                }
+            }
+            if (widget.bold) setTypeface(typeface, Typeface.BOLD)
             text = widget.text
             bindings += Bound(this) { ctx -> text = Binding.interpolate(widget.text, ctx) }
             applyVisibility(this, widget.visibleIf)
@@ -108,6 +116,25 @@ class WidgetRenderer(private val context: Context, private val packDir: File) {
             applyVisibility(this, widget.visibleIf)
         }
         is Widget.ItemList -> buildItemList(widget)
+        is Widget.Box -> FrameLayout(context).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                widget.width?.let { px(it) } ?: ViewGroup.LayoutParams.WRAP_CONTENT,
+                widget.height?.let { px(it) } ?: ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            setPadding(px(widget.padding), px(widget.padding), px(widget.padding), px(widget.padding))
+            background = GradientDrawable().apply {
+                widget.background?.let { bg ->
+                    runCatching { Color.parseColor(bg) }.getOrNull()?.let { setColor(it) }
+                }
+                if (widget.cornerRadius > 0) cornerRadius = px(widget.cornerRadius).toFloat()
+                if (widget.borderColor != null && widget.borderWidth > 0) {
+                    runCatching { Color.parseColor(widget.borderColor) }.getOrNull()
+                        ?.let { setStroke(px(widget.borderWidth), it) }
+                }
+            }
+            addView(inflate(widget.child))
+            applyVisibility(this, widget.visibleIf)
+        }
     }
 
     private fun setGfxImage(view: ImageView, key: String) {
