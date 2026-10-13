@@ -10,8 +10,6 @@ import android.widget.Toast
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.companion.CompanionPresentation
 import com.khumam.gbaduo.companion.PackAssignments
-import com.khumam.gbaduo.companion.PackInstaller
-import com.khumam.gbaduo.companion.PackManifest
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.emu.AudioOut
 import com.khumam.gbaduo.emu.EmuThread
@@ -45,7 +43,6 @@ class PlayerActivity : Activity() {
                 View.SYSTEM_UI_FLAG_FULLSCREEN
             )
         setContentView(R.layout.activity_player)
-        installBuiltinPacksIfMissing()
 
         val romUriString = intent.getStringExtra(EXTRA_ROM_URI)
         val saveName = intent.getStringExtra(EXTRA_SAVE_NAME)
@@ -74,21 +71,6 @@ class PlayerActivity : Activity() {
         // crc32() is only valid once the core has finished loading on the emu thread;
         // poll briefly on the UI thread before building the quick menu (needs it for save-state paths).
         waitForLoadThenBuildQuickMenu(gameView, saveName)
-    }
-
-    private fun installBuiltinPacksIfMissing() {
-        val packsDir = File(filesDir, "packs")
-        val installedManifest = File(packsDir, "demo-pipeline/manifest.json")
-        val installedVersion = installedManifest.takeIf { it.exists() }
-            ?.let { runCatching { PackManifest.parse(it.readText()).version }.getOrNull() }
-        if (installedVersion == DEMO_PACK_VERSION) return
-
-        val tempZip = File(cacheDir, "demo-pipeline.gbaduo.zip")
-        assets.open("packs/demo-pipeline.gbaduo.zip").use { input ->
-            tempZip.outputStream().use { output -> input.copyTo(output) }
-        }
-        runCatching { PackInstaller.install(tempZip, packsDir) }
-        tempZip.delete()
     }
 
     private fun waitForLoadThenBuildQuickMenu(gameView: GameView, saveName: String) {
@@ -172,8 +154,5 @@ class PlayerActivity : Activity() {
     companion object {
         const val EXTRA_ROM_URI = "rom_uri"
         const val EXTRA_SAVE_NAME = "save_name"
-
-        /** Bumped whenever `assets/packs/demo-pipeline.gbaduo.zip` changes, to force a reinstall. */
-        private const val DEMO_PACK_VERSION = "2.0.0"
     }
 }
