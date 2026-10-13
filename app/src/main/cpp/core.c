@@ -25,6 +25,11 @@ struct GbaDuoState {
 
 static struct GbaDuoState g_state;
 
+/** Used by script.c's mem.* Lua API; NULL when no ROM is loaded. */
+struct mCore* gbaduo_active_core(void) {
+    return g_state.core;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_load(JNIEnv* env, jobject thiz, jbyteArray rom, jstring savePath) {
     if (g_state.core) {
@@ -183,6 +188,38 @@ Java_com_khumam_gbaduo_emu_NativeCore_crc32(JNIEnv* env, jobject thiz) {
     uint32_t crc = 0;
     g_state.core->checksum(g_state.core, &crc, mCHECKSUM_CRC32);
     return (jlong) crc;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_rawRead8(JNIEnv* env, jobject thiz, jlong address) {
+    if (!g_state.core) {
+        return 0;
+    }
+    return (jint) g_state.core->rawRead8(g_state.core, (uint32_t) address, -1);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_rawRead16(JNIEnv* env, jobject thiz, jlong address) {
+    if (!g_state.core) {
+        return 0;
+    }
+    return (jint) g_state.core->rawRead16(g_state.core, (uint32_t) address, -1);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_rawRead32(JNIEnv* env, jobject thiz, jlong address) {
+    if (!g_state.core) {
+        return 0;
+    }
+    return (jlong) (uint32_t) g_state.core->rawRead32(g_state.core, (uint32_t) address, -1);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_frameCounter(JNIEnv* env, jobject thiz) {
+    if (!g_state.core) {
+        return 0;
+    }
+    return (jlong) g_state.core->frameCounter(g_state.core);
 }
 
 JNIEXPORT void JNICALL

@@ -26,6 +26,34 @@ object NativeCore {
     external fun loadState(path: String): Boolean
     external fun gameCode(): String
     external fun crc32(): Long
+
+    /** Raw bus reads, any GBA address (including ROM 0x08000000+). 0 if no core loaded. */
+    external fun rawRead8(address: Long): Int
+    external fun rawRead16(address: Long): Int
+    external fun rawRead32(address: Long): Long
+
+    /** Frames run so far on the current core. 0 if no core loaded. */
+    external fun frameCounter(): Long
+
+    /**
+     * Replaces any currently-loaded pack script with [source], run in a sandboxed Lua
+     * state ([packDir] is where `pack.require` looks for sibling `.lua` modules). Runs
+     * the script's top level, then its `init()` if defined. False on any failure —
+     * check [lastScriptError] for why.
+     */
+    external fun loadScript(source: String, packDir: String): Boolean
+
+    /** Calls the loaded script's `update()`; returns its JSON-serialized table, or null on error. */
+    external fun tickScript(): String?
+
+    /** Reason the last [loadScript]/[tickScript] call failed, if any. */
+    external fun lastScriptError(): String?
+
+    external fun unloadScript()
+
+    /** `[width, height, ...ARGB8888 pixels]` for a `"gfx:..."` key from `gfx.decode`, or null if unknown. */
+    external fun nativeImage(key: String): IntArray?
+
     external fun unload()
 }
 

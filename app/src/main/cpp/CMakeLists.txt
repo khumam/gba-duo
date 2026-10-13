@@ -41,13 +41,32 @@ set(SKIP_INSTALL_ALL    ON  CACHE BOOL "" FORCE)
 
 add_subdirectory("${MGBA_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/mgba" EXCLUDE_FROM_ALL)
 
-add_library(gbaduo SHARED core.c)
+# ---------------------------------------------------------------------------
+# Vendored Lua 5.4.7 (plain source tree, not a submodule — see engine/lua).
+# Compiled generic/ANSI (no LUA_USE_* define): no dynamic C module loading,
+# no OS-specific features. lua.c/luac.c are the standalone CLI tools (each has
+# its own main()) and are excluded from the library.
+# ---------------------------------------------------------------------------
+get_filename_component(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine/lua" ABSOLUTE)
+
+if(NOT EXISTS "${LUA_DIR}/src/lua.h")
+    message(FATAL_ERROR "Lua source missing at ${LUA_DIR}")
+endif()
+
+file(GLOB LUA_SOURCES "${LUA_DIR}/src/*.c")
+list(FILTER LUA_SOURCES EXCLUDE REGEX "/lua\\.c$|/luac\\.c$")
+
+add_library(lua STATIC ${LUA_SOURCES})
+target_include_directories(lua PUBLIC "${LUA_DIR}/src")
+
+add_library(gbaduo SHARED core.c script.c)
 
 target_compile_definitions(gbaduo PRIVATE USE_PTHREADS M_CORE_GBA)
 
 target_include_directories(gbaduo PRIVATE
     "${MGBA_DIR}/include"
     "${MGBA_DIR}/src"
-    "${CMAKE_CURRENT_BINARY_DIR}/mgba/include")
+    "${CMAKE_CURRENT_BINARY_DIR}/mgba/include"
+    "${LUA_DIR}/src")
 
-target_link_libraries(gbaduo mgba android log)
+target_link_libraries(gbaduo mgba lua android log)
