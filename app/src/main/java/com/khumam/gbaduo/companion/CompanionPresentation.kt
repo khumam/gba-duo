@@ -2,23 +2,39 @@ package com.khumam.gbaduo.companion
 
 import android.app.Presentation
 import android.content.Context
-import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.view.Display
-import android.view.Gravity
 import android.view.KeyEvent
-import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.TextView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.companion.android.AndroidCompanionPlatform
+import com.khumam.gbaduo.companion.android.PresentationComposeOwner
+import com.khumam.gbaduo.companion.style.CssWarning
+import com.khumam.gbaduo.companion.tree.CompanionTree
+import com.khumam.gbaduo.companion.ui.CompanionScreen
 import java.io.File
 
 /**
- * Shown on the Thor's second display. Renders the assigned pack's layout, or a fallback message.
+ * Shown on the Thor's second display, in Jetpack Compose: the assigned pack's
+ * layout ([CompanionScreen]), or a fallback message.
  *
  * Its window is not focusable, so touching this screen never pulls controller
  * focus away from the game on the main display (touch input still works). If a
@@ -33,16 +49,41 @@ class CompanionPresentation(
     private val onKey: (KeyEvent) -> Boolean,
 ) : Presentation(context, display) {
 
-    private lateinit var root: FrameLayout
-    private var renderer: WidgetRenderer? = null
+    private sealed class Content {
+        data class Message(val text: String) : Content()
+        class Pack(val tree: CompanionTree, val platform: AndroidCompanionPlatform) : Content()
+    }
+
+    private val owner = PresentationComposeOwner()
+    private var content: Content by mutableStateOf(Content.Message(""))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window?.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-        root = FrameLayout(context).apply { setBackgroundColor(Color.BLACK) }
-        setContentView(root)
+        val view = ComposeView(context).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent {
+                Box(Modifier.fillMaxSize().background(Color.Black)) {
+                    when (val c = content) {
+                        is Content.Pack -> CompanionScreen(c.tree, c.platform)
+                        is Content.Message -> BasicText(
+                            text = c.text,
+                            modifier = Modifier.align(Alignment.Center),
+                            style = TextStyle(color = Color.LightGray, fontSize = 16.sp, textAlign = TextAlign.Center),
+                        )
+                    }
+                }
+            }
+        }
+        owner.attach(view)
+        setContentView(view)
         goFullScreen()
-        showMessage(context.getString(R.string.no_companion_pack))
+        if ((content as? Content.Message)?.text.isNullOrEmpty()) showMessage(context.getString(R.string.no_companion_pack))
+    }
+
+    override fun onStop() {
+        owner.destroy()
+        super.onStop()
     }
 
     /**
@@ -65,19 +106,7 @@ class CompanionPresentation(
     override fun dispatchKeyEvent(event: KeyEvent): Boolean = onKey(event) || super.dispatchKeyEvent(event)
 
     private fun showMessage(message: String) {
-        root.removeAllViews()
-        renderer = null
-        val label = TextView(context).apply {
-            setTextColor(Color.LTGRAY)
-            textSize = 16f
-            gravity = Gravity.CENTER
-            text = "$gameTitle\n$gameCode · ${"%08x".format(crc32)}\n\n$message"
-        }
-        root.addView(
-            label,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                .apply { gravity = Gravity.CENTER },
-        )
+        content = Content.Message("$gameTitle\n$gameCode · ${"%08x".format(crc32)}\n\n$message")
     }
 
     /**
@@ -85,30 +114,34 @@ class CompanionPresentation(
      * False if its layout couldn't be loaded (the screen then explains why instead).
      */
     fun showPack(manifest: PackManifest, packDir: File): Boolean {
-        val view = runCatching {
+        content = runCatching {
             val layout = LayoutParser.parseWithWarnings(File(packDir, manifest.layoutFile).readText())
-            WidgetRenderer.logWarnings(manifest.layoutFile, layout.warnings)
-            val newRenderer = WidgetRenderer(context, packDir, PackStyles.builtIn(context), PackStyles.forPack(manifest, packDir))
-            newRenderer.build(layout.root).also {
-                WidgetRenderer.logWarnings("styles", newRenderer.warnings)
-                renderer = newRenderer
-            }
+            logWarnings(manifest.layoutFile, layout.warnings)
+            val styles = PackStyles.forPack(manifest, packDir)
+            val builtIn = PackStyles.builtIn(context)
+            val platform = AndroidCompanionPlatform(packDir, (builtIn + styles).flatMap { it.fontFaces })
+            val tree = CompanionTree(layout.root, builtIn, styles, platform::loadImage)
+            logWarnings("styles", tree.warnings)
+            Content.Pack(tree, platform)
         }.getOrElse { error ->
             Log.e(TAG, "Could not load layout of pack '${manifest.id}'", error)
             showMessage("${manifest.name}: ${error.message}")
             return false
         }
-        root.removeAllViews()
-        root.addView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         return true
     }
 
     /** Call from the main thread with each new snapshot (hop off the emu thread first). */
     fun update(values: Map<String, Any?>) {
-        renderer?.update(values)
+        (content as? Content.Pack)?.tree?.update(values)
     }
 
-    private companion object {
-        const val TAG = "CompanionPresentation"
+    companion object {
+        private const val TAG = "CompanionPresentation"
+
+        /** Logs CSS/layout problems for pack authors (`adb logcat -s CompanionPresentation`). */
+        fun logWarnings(source: String, warnings: Collection<Any>) {
+            for (w in warnings) Log.w(TAG, "$source: ${if (w is CssWarning) w.message else w}")
+        }
     }
 }

@@ -1,6 +1,6 @@
 # Styling companion packs with CSS
 
-The companion screen is rendered with native Android views, styled by real CSS
+The companion screen is rendered natively with Jetpack Compose, styled by real CSS
 syntax: **structure in `layout.json`, look in `style.css`, logic in Lua.**
 Anything a pack doesn't style looks the way layouts always did, so existing
 packs need no changes.
@@ -146,8 +146,6 @@ stretch them.
 - `min-width`/`min-height: auto` mean 0 (no min-content sizing), baseline
   alignment acts like `start`, `padding` doesn't take `%`.
 - Grid uses row-major auto-placement; there's no `grid-template-areas`.
-- `overflow: hidden` clips to rounded corners only when all four radii are
-  equal (on Android 13+ any shape).
 - Unsupported (skipped with a warning): `@keyframes`/`animation`, `filter`,
   radial gradients, multiple backgrounds/shadows.
 
@@ -156,5 +154,5 @@ stretch them.
 Every skipped rule, unknown property or invalid value is logged:
 
 ```
-adb logcat -s WidgetRenderer CompanionPresentation
+adb logcat -s CompanionPresentation PackStyles
 ```

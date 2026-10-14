@@ -2,28 +2,36 @@ package com.khumam.gbaduo.companion
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.Color
-import android.view.View
-import android.view.ViewGroup
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onRoot
+import com.khumam.gbaduo.companion.android.AndroidCompanionPlatform
 import com.khumam.gbaduo.companion.style.CssParser
+import com.khumam.gbaduo.companion.tree.CompanionTree
+import com.khumam.gbaduo.companion.ui.CompanionScreen
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import org.robolectric.shadows.ShadowLooper
 import java.io.File
 import kotlin.math.abs
+import androidx.compose.ui.graphics.Color as ComposeColor
 
 /**
  * Renders the example packs in `docs-packs/examples` with their sample
- * snapshots, the way the companion screen does, and compares them with the
- * reference images in `src/test/screenshots`. Catches visual regressions in the
- * CSS renderer that position checks miss (colors, borders, gradients, text).
+ * snapshots through the real companion UI ([CompanionScreen]) and compares
+ * them with the reference images in `src/test/screenshots`. Catches visual
+ * regressions in the CSS renderer (colors, borders, gradients, text, layout).
  *
  * After an intended visual change, re-record with:
  *   ./gradlew :app:testDebugUnitTest --tests '*PackScreenshotTest' -PrecordScreenshots
@@ -33,16 +41,18 @@ import kotlin.math.abs
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 // The Thor's bottom screen is 1080x1240; half size keeps the reference images small.
-@Config(sdk = [34], manifest = Config.NONE, qualifiers = "w360dp-h413dp-hdpi")
+@Config(sdk = [34], qualifiers = "w360dp-h413dp-hdpi")
 class PackScreenshotTest {
 
-    private val context get() = RuntimeEnvironment.getApplication()
+    @get:Rule
+    val compose = createComposeRule()
+
     private val examples = File("../docs-packs/examples")
     private val references = File("src/test/screenshots")
     private val output = File("build/screenshots")
     private val record = System.getProperty("gbaduo.recordScreenshots", "false") != "false"
 
-    private fun renderPack(name: String, afterBuild: (View) -> Unit = {}): Bitmap {
+    private fun renderPack(name: String, afterBuild: (CompanionTree) -> Unit = {}): Bitmap {
         val packDir = File(examples, name)
         val manifest = PackManifest.parse(File(packDir, "manifest.json").readText())
         val builtIn = CssParser.parse(File("src/main/assets/${PackStyles.BUILT_IN_ASSET}").readText())
@@ -51,31 +61,19 @@ class PackScreenshotTest {
         val layout = LayoutParser.parseWithWarnings(File(packDir, manifest.layoutFile).readText())
         assertTrue("$name layout warnings: ${layout.warnings}", layout.warnings.isEmpty())
 
-        val renderer = WidgetRenderer(context, packDir, listOf(builtIn), styles)
-        val view = renderer.build(layout.root)
-        renderer.update(JsonTree.parseObject(File(packDir, "sample-snapshot.json").readText()))
-        val metrics = context.resources.displayMetrics
-        layout(view, metrics.widthPixels, metrics.heightPixels)
-        afterBuild(view)
-        layout(view, metrics.widthPixels, metrics.heightPixels)
-        assertTrue("$name: renderer warnings ${renderer.warnings}", renderer.warnings.isEmpty())
-
-        val bitmap = Bitmap.createBitmap(metrics.widthPixels, metrics.heightPixels, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.BLACK) // the companion screen's own background
-        view.draw(canvas)
-        return bitmap
-    }
-
-    private fun layout(view: View, width: Int, height: Int) {
-        repeat(2) { // the second pass picks up the viewport-size restyle posted by the first
-            view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
-            view.layout(0, 0, width, height)
-            ShadowLooper.idleMainLooper()
+        val platform = AndroidCompanionPlatform(packDir, (listOf(builtIn) + styles).flatMap { it.fontFaces })
+        val tree = CompanionTree(layout.root, listOf(builtIn), styles, platform::loadImage)
+        tree.update(JsonTree.parseObject(File(packDir, "sample-snapshot.json").readText()))
+        compose.setContent {
+            // The companion screen's own background, as in CompanionPresentation.
+            Box(Modifier.fillMaxSize().background(ComposeColor.Black)) { CompanionScreen(tree, platform) }
         }
+        compose.waitForIdle()
+        compose.runOnUiThread { afterBuild(tree) }
+        compose.waitForIdle()
+        assertTrue("$name: style warnings ${tree.warnings}", tree.warnings.isEmpty())
+        return compose.onRoot().captureToImage().asAndroidBitmap()
     }
-
-    private fun View.child(vararg path: Int): View = path.fold(this) { v, i -> (v as ViewGroup).getChildAt(i) }
 
     private fun verify(name: String, actual: Bitmap) {
         val reference = File(references, "$name.png")
@@ -124,10 +122,8 @@ class PackScreenshotTest {
     @Test
     fun cssPackBagTab() = verify(
         "party-css-bag",
-        renderPack("party-css") { viewport ->
-            // viewport > .screen > tabs > tab-bar > second tab
-            viewport.child(0, 1, 0, 1).performClick()
-        },
+        // .screen > tabs > tab-bar > second tab ("Bag")
+        renderPack("party-css") { tree -> tree.root.children[1].children[0].children[1].onClick!!.invoke() },
     )
 
     private companion object {
