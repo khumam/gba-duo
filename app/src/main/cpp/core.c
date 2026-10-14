@@ -4,6 +4,7 @@
 #include <string.h>
 #include <android/log.h>
 
+#include <mgba/core/config.h>
 #include <mgba/core/core.h>
 #include <mgba/core/blip_buf.h>
 #include <mgba/core/serialize.h>
@@ -13,13 +14,13 @@
 #define LOG_TAG "GBADuoCore"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-#define GBA_VIDEO_WIDTH 240
-#define GBA_VIDEO_HEIGHT 160
 #define AUDIO_SAMPLE_RATE 32768
 
 struct GbaDuoState {
     struct mCore* core;
     color_t* videoBuffer;
+    unsigned videoWidth;
+    unsigned videoHeight;
     void* romBuffer;
 };
 
@@ -43,8 +44,14 @@ Java_com_khumam_gbaduo_emu_NativeCore_load(JNIEnv* env, jobject thiz, jbyteArray
     }
     (*env)->GetByteArrayRegion(env, rom, 0, romSize, (jbyte*) romBuffer);
 
-    struct mCore* core = mCoreCreate(mPLATFORM_GBA);
+    // mCoreFindVF picks the GBA or GB core (the GB core also runs GBC) from the ROM itself.
+    struct VFile* romFile = VFileFromMemory(romBuffer, (size_t) romSize);
+    struct mCore* core = romFile ? mCoreFindVF(romFile) : NULL;
     if (!core) {
+        LOGE("not a GBA/GB/GBC ROM");
+        if (romFile) {
+            romFile->close(romFile);
+        }
         free(romBuffer);
         return JNI_FALSE;
     }
@@ -52,18 +59,30 @@ Java_com_khumam_gbaduo_emu_NativeCore_load(JNIEnv* env, jobject thiz, jbyteArray
     mCoreInitConfig(core, NULL);
     core->init(core);
 
-    color_t* videoBuffer = malloc(GBA_VIDEO_WIDTH * GBA_VIDEO_HEIGHT * sizeof(color_t));
+    // Super Game Boy borders default to on, which would turn SGB-enhanced games' output
+    // into 256x224 with a frame around it. Keep every GB/GBC game at its native 160x144.
+    // reloadConfigOption touches only this option (a full mCoreLoadConfig would also
+    // apply the config's unset volume of 0 and mute the GB core). No-op on GBA.
+    mCoreConfigSetIntValue(&core->config, "sgb.borders", 0);
+    core->reloadConfigOption(core, "sgb.borders", NULL);
+
+    unsigned videoWidth = 0;
+    unsigned videoHeight = 0;
+    core->desiredVideoDimensions(core, &videoWidth, &videoHeight);
+    color_t* videoBuffer = malloc((size_t) videoWidth * videoHeight * sizeof(color_t));
     if (!videoBuffer) {
+        mCoreConfigDeinit(&core->config);
         core->deinit(core);
+        romFile->close(romFile);
         free(romBuffer);
         return JNI_FALSE;
     }
-    core->setVideoBuffer(core, videoBuffer, GBA_VIDEO_WIDTH);
+    core->setVideoBuffer(core, videoBuffer, videoWidth);
 
-    struct VFile* romFile = VFileFromMemory(romBuffer, (size_t) romSize);
     if (!core->loadROM(core, romFile)) {
         LOGE("loadROM failed");
-        core->deinit(core);
+        mCoreConfigDeinit(&core->config);
+        core->deinit(core); // owns (and closes) romFile once loadROM has seen it
         free(videoBuffer);
         free(romBuffer);
         return JNI_FALSE;
@@ -84,6 +103,8 @@ Java_com_khumam_gbaduo_emu_NativeCore_load(JNIEnv* env, jobject thiz, jbyteArray
 
     g_state.core = core;
     g_state.videoBuffer = videoBuffer;
+    g_state.videoWidth = videoWidth;
+    g_state.videoHeight = videoHeight;
     g_state.romBuffer = romBuffer;
     return JNI_TRUE;
 }
@@ -102,7 +123,17 @@ Java_com_khumam_gbaduo_emu_NativeCore_videoBuffer(JNIEnv* env, jobject thiz) {
     if (!g_state.videoBuffer) {
         return NULL;
     }
-    return (*env)->NewDirectByteBuffer(env, g_state.videoBuffer, GBA_VIDEO_WIDTH * GBA_VIDEO_HEIGHT * sizeof(color_t));
+    return (*env)->NewDirectByteBuffer(env, g_state.videoBuffer, (jlong) g_state.videoWidth * g_state.videoHeight * sizeof(color_t));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_videoWidth(JNIEnv* env, jobject thiz) {
+    return (jint) g_state.videoWidth;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_videoHeight(JNIEnv* env, jobject thiz) {
+    return (jint) g_state.videoHeight;
 }
 
 JNIEXPORT jint JNICALL
@@ -227,6 +258,7 @@ Java_com_khumam_gbaduo_emu_NativeCore_unload(JNIEnv* env, jobject thiz) {
     if (!g_state.core) {
         return;
     }
+    mCoreConfigDeinit(&g_state.core->config);
     g_state.core->deinit(g_state.core);
     free(g_state.videoBuffer);
     free(g_state.romBuffer);

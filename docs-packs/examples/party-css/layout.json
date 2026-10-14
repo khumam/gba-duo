@@ -1,0 +1,37 @@
+{
+  "type": "column", "class": "screen",
+  "children": [
+    { "type": "row", "class": "header", "children": [
+      { "type": "text", "class": "title", "text": "{trainer}'s party" },
+      { "type": "text", "class": "money", "text": "₽{money}" }
+    ]},
+    { "type": "tabs", "tabs": [
+      { "title": "Party", "child":
+        { "type": "list", "class": "party", "items": "$party", "template":
+          { "type": "box", "class": "mon",
+            "classIf": { "fainted": "$fainted", "low": "$low" },
+            "bindStyle": { "--type": "{typeColor}" },
+            "children": [
+              { "type": "row", "class": "mon-head", "children": [
+                { "type": "image", "class": "sprite", "src": "$icon" },
+                { "type": "box", "class": "mon-info", "children": [
+                  { "type": "text", "class": "name", "text": "{name}" },
+                  { "type": "text", "class": "level", "text": "Lv{level}" }
+                ]}
+              ]},
+              { "type": "bar", "value": "$hp", "maxKey": "$maxHp", "label": "{hp}/{maxHp}" }
+            ]
+          }
+        }
+      },
+      { "title": "Bag", "child":
+        { "type": "list", "class": "bag", "items": "$bag", "empty": "Bag is empty", "template":
+          { "type": "row", "class": "item", "children": [
+            { "type": "text", "class": "item-name", "text": "{name}" },
+            { "type": "text", "class": "qty", "text": "×{qty}" }
+          ]}
+        }
+      }
+    ]}
+  ]
+}

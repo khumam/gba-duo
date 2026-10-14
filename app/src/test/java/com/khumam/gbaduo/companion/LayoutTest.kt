@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.companion
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -108,9 +109,71 @@ class LayoutTest {
         assertEquals(0, widget.padding)
     }
 
+    @Test
+    fun boxWithoutChildrenIsAllowed() {
+        // e.g. a bar fill or divider drawn purely with CSS.
+        val widget = LayoutParser.parse("""{"type":"box","background":"#000000"}""") as Widget.Box
+        assertTrue(widget.children.isEmpty())
+        assertNull(widget.child)
+    }
+
+    @Test
+    fun boxChildrenFormIsNotLegacy() {
+        val widget = LayoutParser.parse("""{"type":"box","children":[{"type":"text"},{"type":"spacer"}]}""") as Widget.Box
+        assertEquals(2, widget.children.size)
+        assertFalse(widget.legacyChild)
+        assertTrue((LayoutParser.parse("""{"type":"box","child":{"type":"text"}}""") as Widget.Box).legacyChild)
+    }
+
     @Test(expected = LayoutParser.InvalidLayoutException::class)
-    fun boxWithoutChildIsRejected() {
-        LayoutParser.parse("""{"type":"box","background":"#000000"}""")
+    fun tabsWithoutTabsAreRejected() {
+        LayoutParser.parse("""{"type":"tabs","tabs":[]}""")
+    }
+
+    private fun inline(widget: Widget) = widget.meta.inline.associate { it.property to it.value }
+
+    @Test
+    fun parsesStylingHooks() {
+        val widget = LayoutParser.parse(
+            """{"type":"text","id":"title","class":"name  big","style":{"letter-spacing":"1px","--glow":"#f00"},
+               "classIf":{"low":"${'$'}hpLow"},"bindStyle":{"color":"{typeColor}"}}""",
+        )
+        assertEquals("title", widget.meta.id)
+        assertEquals(setOf("name", "big"), widget.meta.classes)
+        assertEquals("1px", inline(widget)["letter-spacing"])
+        assertEquals("#f00", inline(widget)["--glow"])
+        assertEquals(mapOf("low" to "hpLow"), widget.meta.classIf)
+        assertEquals(mapOf("color" to "{typeColor}"), widget.meta.bindStyle)
+    }
+
+    @Test
+    fun styleMayBeACssString() {
+        val widget = LayoutParser.parse("""{"type":"box","style":"padding: 4px; border-radius: 50%"}""")
+        assertEquals(mapOf("padding" to "4px", "border-radius" to "50%"), inline(widget))
+    }
+
+    @Test
+    fun explicitLegacyKeysBecomeInlineCssButDefaultsDoNot() {
+        val text = LayoutParser.parse("""{"type":"text","size":18,"bold":true,"color":"#80FF0000"}""")
+        assertEquals("18px", inline(text)["font-size"])
+        assertEquals("700", inline(text)["font-weight"])
+        assertEquals("rgba(255, 0, 0, 0.502)", inline(text)["color"]) // Android #AARRGGBB kept meaning the same
+        assertTrue(LayoutParser.parse("""{"type":"text","text":"x"}""").meta.inline.isEmpty())
+
+        val box = LayoutParser.parse("""{"type":"box","width":340,"background":"#192134","cornerRadius":16,"borderColor":"#DC2626","borderWidth":2,"padding":12}""")
+        assertEquals(
+            mapOf("width" to "340px", "padding" to "12px", "border-radius" to "16px", "background-color" to "#192134", "border" to "2px solid #DC2626"),
+            inline(box),
+        )
+        assertEquals(mapOf("width" to "32px", "height" to "32px"), inline(LayoutParser.parse("""{"type":"image","size":32}""")))
+        assertEquals("\"${LayoutParser.ASSET_FONT_PREFIX}fonts/a.ttf\"", inline(LayoutParser.parse("""{"type":"text","font":"fonts/a.ttf"}"""))["font-family"])
+    }
+
+    @Test
+    fun invalidInlineCssIsReportedAndSkipped() {
+        val parsed = LayoutParser.parseWithWarnings("""{"type":"box","style":{"colr":"red","width":"wide","height":"4px"}}""")
+        assertEquals(mapOf("height" to "4px"), parsed.root.meta.inline.associate { it.property to it.value })
+        assertEquals(2, parsed.warnings.size)
     }
 
     @Test

@@ -89,4 +89,18 @@ class PackManifestTest {
         assertFalse(PackManifest.isValidId("UPPER"))
         assertFalse(PackManifest.isValidId("a".repeat(65)))
     }
+
+    @Test
+    fun formatVersion2AcceptsStyles() {
+        val v2 = validJson.replace(""""formatVersion": 1""", """"formatVersion": 2, "styles": ["style.css", "theme/dark.css"]""")
+        val manifest = PackManifest.parse(v2)
+        assertEquals(2, manifest.formatVersion)
+        assertEquals(listOf("style.css", "theme/dark.css"), manifest.styleFiles)
+        assertEquals(emptyList<String>(), PackManifest.parse(validJson).styleFiles)
+    }
+
+    @Test(expected = PackManifest.InvalidManifestException::class)
+    fun stylesNeedFormatVersion2() {
+        PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 1, "styles": ["style.css"]"""))
+    }
 }

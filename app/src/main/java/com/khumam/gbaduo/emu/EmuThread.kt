@@ -47,6 +47,7 @@ class EmuThread(
         loaded = NativeCore.load(romBytes, savePath)
         if (!loaded) return
 
+        gameView.setVideoSize(NativeCore.videoWidth(), NativeCore.videoHeight())
         gameView.frameBuffer = NativeCore.videoBuffer()
         audioOut.start()
         running = true

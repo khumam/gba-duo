@@ -1,0 +1,54 @@
+/* Example companion styling: see docs-packs/companion-styling.md. */
+
+:root {
+    --bg: #10131f;
+    --panel: #1c2133;
+    --accent: #ffcb05;
+    --muted: #9aa3c7;
+    background: var(--bg);
+    color: #eef1ff;
+    font-size: 13px;
+}
+
+.screen { padding: 12px; gap: 10px; }
+
+.header {
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: linear-gradient(90deg, #3b4cca, #2a75bb);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+}
+.title { font-size: 16px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+.money { color: var(--accent); font-weight: bold; }
+
+tabs { flex: 1 1 auto; }
+tab-bar { gap: 6px; margin-bottom: 10px; }
+tab { padding: 6px 14px; border-radius: 999px; color: var(--muted); background: var(--panel); }
+tab:active { background: var(--accent); color: var(--panel); font-weight: bold; }
+
+.party { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.mon {
+    padding: 8px;
+    gap: 6px;
+    background: var(--panel);
+    border-radius: 10px;
+    border-left: 4px solid var(--type, #888);
+}
+.mon:nth-child(4n+2), .mon:nth-child(4n+3) { background: #20263b; }
+.mon.fainted { opacity: .45; }
+.mon-head { align-items: center; gap: 8px; }
+.sprite { width: 40px; height: 40px; border-radius: 50%; background: rgba(255, 255, 255, .06); }
+.mon-info { gap: 2px; }
+.name { font-weight: bold; }
+.level { color: var(--muted); font-size: 11px; }
+
+bar { height: 10px; border-radius: 5px; overflow: hidden; background: #2c3350; }
+bar > fill { border-radius: 5px; background: linear-gradient(90deg, #4caf50, #8bc34a); }
+.mon.low bar > fill { background: linear-gradient(90deg, #e3350d, #ff7043); }
+bar > label { font-size: 8px; }
+
+.bag { gap: 4px; }
+.item { justify-content: space-between; padding: 6px 10px; border-radius: 6px; background: var(--panel); }
+.qty { color: var(--accent); }

@@ -2,7 +2,10 @@ package com.khumam.gbaduo.emu
 
 import java.nio.ByteBuffer
 
-/** Thin JNI wrapper around the native mGBA core. One loaded ROM at a time (process-global). */
+/**
+ * Thin JNI wrapper around the native mGBA core (GBA, GB and GBC; the platform is
+ * detected from the ROM). One loaded ROM at a time (process-global).
+ */
 object NativeCore {
     init {
         System.loadLibrary("gbaduo")
@@ -13,11 +16,15 @@ object NativeCore {
     /** Loads [rom] bytes and attaches/creates SRAM at [savePath]. False on failure (bad ROM). */
     external fun load(rom: ByteArray, savePath: String): Boolean
 
-    /** Runs one frame with the given GBA key bitmask (see [GbaKeys]). */
+    /** Runs one frame with the given key bitmask (see [GbaKeys]; GB/GBC ignore L and R). */
     external fun runFrame(keys: Int)
 
-    /** Direct RGBA8888 buffer, 240x160, valid until the next [unload]. */
+    /** Direct RGBA8888 buffer, [videoWidth] x [videoHeight], valid until the next [unload]. */
     external fun videoBuffer(): ByteBuffer?
+
+    /** Video output size of the loaded game: 240x160 for GBA, 160x144 for GB/GBC. 0 if no core loaded. */
+    external fun videoWidth(): Int
+    external fun videoHeight(): Int
 
     /** Fills [out] (interleaved stereo s16) with as many frames as available; returns frame count. */
     external fun audio(out: ShortArray): Int

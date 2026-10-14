@@ -1,0 +1,16 @@
+{
+  "trainer": "Red",
+  "money": 3175,
+  "badges": 2,
+  "party": [
+    { "name": "Charmeleon", "level": 22, "hp": 61, "maxHp": 68, "fainted": false, "low": false, "typeColor": "#f08030", "icon": "asset:mon-fire.png" },
+    { "name": "Pidgeotto", "level": 19, "hp": 12, "maxHp": 55, "fainted": false, "low": true, "typeColor": "#a890f0", "icon": "asset:mon-air.png" },
+    { "name": "Pikachu", "level": 18, "hp": 0, "maxHp": 44, "fainted": true, "low": false, "typeColor": "#f8d030", "icon": "asset:mon-volt.png" },
+    { "name": "Geodude", "level": 15, "hp": 39, "maxHp": 39, "fainted": false, "low": false, "typeColor": "#b8a038", "icon": "asset:mon-rock.png" }
+  ],
+  "bag": [
+    { "name": "Potion", "qty": 4 },
+    { "name": "Poké Ball", "qty": 11 },
+    { "name": "Antidote", "qty": 1 }
+  ]
+}

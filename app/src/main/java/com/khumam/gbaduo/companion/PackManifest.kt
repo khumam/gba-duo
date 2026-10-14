@@ -23,6 +23,8 @@ data class PackManifest(
     val layoutFile: String,
     val scriptFile: String?,
     val values: Map<String, ValueSpec>,
+    /** CSS files (relative to the pack root), applied in order after the app's built-in styles. */
+    val styleFiles: List<String> = emptyList(),
 ) {
     /** [crc32] ignored (any match) when this pack declares no CRCs. */
     fun matches(gameCode: String, crc32: Long): Boolean =
@@ -31,7 +33,9 @@ data class PackManifest(
     class InvalidManifestException(message: String) : Exception(message)
 
     companion object {
-        const val SUPPORTED_FORMAT_VERSION = 1
+        /** 1: original format. 2: adds `styles` (CSS). */
+        const val SUPPORTED_FORMAT_VERSION = 2
+        private const val STYLES_FORMAT_VERSION = 2
         private val ID_REGEX = Regex("^[a-z0-9-]{1,64}$")
 
         fun isValidId(id: String): Boolean = ID_REGEX.matches(id)
@@ -46,7 +50,7 @@ data class PackManifest(
             }
 
             val formatVersion = root.optInt("formatVersion", -1)
-            if (formatVersion != SUPPORTED_FORMAT_VERSION) {
+            if (formatVersion !in 1..SUPPORTED_FORMAT_VERSION) {
                 throw InvalidManifestException("Unsupported formatVersion $formatVersion")
             }
 
@@ -72,6 +76,11 @@ data class PackManifest(
                 )
             }
 
+            val styleFiles = root.optJSONArray("styles")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList()
+            if (styleFiles.isNotEmpty() && formatVersion < STYLES_FORMAT_VERSION) {
+                throw InvalidManifestException("'styles' needs formatVersion $STYLES_FORMAT_VERSION")
+            }
+
             return PackManifest(
                 id = id,
                 name = root.optString("name", id),
@@ -84,6 +93,7 @@ data class PackManifest(
                 layoutFile = root.optString("layout", "layout.json"),
                 scriptFile = root.optString("script", "").ifBlank { null },
                 values = values,
+                styleFiles = styleFiles,
             )
         }
     }

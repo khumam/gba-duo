@@ -1,0 +1,99 @@
+/*
+ * GBADuo built-in companion styles. Applied before a pack's own stylesheets, so
+ * any rule here can be overridden. They reproduce how layouts looked before
+ * packs could use CSS, so older packs render the same.
+ *
+ * Element names are the widget types (column, row, box, text, bar, image,
+ * spacer, list, tabs) plus the parts the renderer generates:
+ *   bar > fill, bar > label      the bar's fill and its label
+ *   tabs > tab-bar > tab         the tab strip and each tab (`tab:active` = selected)
+ *   tabs > tab-content           the area showing the selected tab
+ *   list > empty                 the "empty" text of a list with no items
+ * Each part also carries a class of the same name (`.fill`, `.tab`, ...).
+ */
+
+:root {
+    width: 100%;
+    height: 100%;
+    color: #ffffff;
+    font-size: 14px;
+}
+
+column, list {
+    display: flex;
+    flex-direction: column;
+}
+
+row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+box {
+    display: flex;
+    flex-direction: column;
+}
+
+image {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    image-rendering: pixelated;
+}
+
+spacer {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+}
+
+bar {
+    display: stack;
+    height: 12px;
+    background-color: rgba(108, 74, 182, 0.3);
+    accent-color: #6c4ab6;
+}
+
+bar > fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+}
+
+bar > label {
+    align-self: center;
+    justify-self: center;
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+tabs {
+    display: flex;
+    flex-direction: column;
+}
+
+tab-bar {
+    display: flex;
+    flex-direction: row;
+}
+
+tab {
+    padding: 8px 12px;
+    color: #888888;
+}
+
+tab:active {
+    color: #ffffff;
+}
+
+tab-content {
+    display: stack;
+    place-items: stretch;
+    flex: 1 1 auto;
+}
+
+empty {
+    color: #888888;
+}

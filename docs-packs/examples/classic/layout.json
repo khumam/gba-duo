@@ -1,0 +1,20 @@
+{
+  "type": "column", "gap": 8,
+  "children": [
+    { "type": "text", "text": "{trainer}", "size": 18, "bold": true, "color": "#FFCB05" },
+    { "type": "row", "gap": 6, "children": [
+      { "type": "text", "text": "Money:" },
+      { "type": "text", "text": "{money}", "color": "#8BC34A" }
+    ]},
+    { "type": "box", "padding": 8, "background": "#1C2133", "cornerRadius": 8, "borderColor": "#3B4CCA", "borderWidth": 2,
+      "child": { "type": "list", "items": "$party", "template":
+        { "type": "column", "gap": 2, "children": [
+          { "type": "text", "text": "{name} Lv{level}" },
+          { "type": "bar", "value": "$hp", "maxKey": "$maxHp", "height": 6 },
+          { "type": "spacer", "size": 4 }
+        ]}
+      }
+    },
+    { "type": "text", "text": "Badges: {badges}", "visibleIf": "$badges" }
+  ]
+}

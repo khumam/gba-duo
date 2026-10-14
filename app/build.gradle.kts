@@ -51,6 +51,14 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.all { test ->
+            // PackScreenshotTest re-records its reference images with -PrecordScreenshots.
+            test.systemProperty("gbaduo.recordScreenshots", project.findProperty("recordScreenshots") != null)
+            // Files the screenshot/renderer tests read directly, so editing them re-runs the tests.
+            test.inputs.dir("../docs-packs/examples")
+            test.inputs.dir("src/test/screenshots")
+            test.inputs.file("src/main/assets/companion/default.css")
+        }
     }
 }
 
@@ -60,4 +68,6 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")
+    // Runs WidgetRendererTest against real Android views.
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
