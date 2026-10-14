@@ -1,0 +1,146 @@
+# Styling companion packs with CSS
+
+The companion screen is rendered with native Android views, styled by real CSS
+syntax: **structure in `layout.json`, look in `style.css`, logic in Lua.**
+Anything a pack doesn't style looks the way layouts always did, so existing
+packs need no changes.
+
+## Setup
+
+List your stylesheets in `manifest.json` (needs `formatVersion: 2`). They're
+applied in order, after the app's built-in styles
+(`app/src/main/assets/companion/default.css`).
+
+```json
+{
+  "formatVersion": 2,
+  "layout": "layout.json",
+  "styles": ["style.css"],
+  "script": "main.lua"
+}
+```
+
+`url(...)` in a stylesheet resolves relative to that stylesheet; in a widget's
+inline `style` it resolves relative to the pack folder. Paths can't leave the
+pack (`../` outside it, absolute paths and `http://` are ignored).
+
+## Hooking widgets to CSS
+
+Every widget in `layout.json` accepts:
+
+| Field | Purpose | Example |
+|---|---|---|
+| `id` | `#id` selector | `"id": "hp-panel"` |
+| `class` | `.class` selectors, space-separated | `"class": "card party"` |
+| `style` | Inline CSS (object or string); beats stylesheet rules | `"style": { "padding": "8px" }` or `"style": "padding: 8px"` |
+| `classIf` | Adds a class while a binding is truthy | `"classIf": { "low": "$hpLow" }` |
+| `bindStyle` | CSS values from bindings, re-applied each tick; beats `style` | `"bindStyle": { "--type": "{typeColor}" }` |
+
+Element names for selectors are the widget types, plus parts the renderer generates:
+
+| Element | What it is |
+|---|---|
+| `column`, `row`, `box`, `list`, `tabs`, `text`, `bar`, `image`, `spacer` | Widgets |
+| `bar > fill`, `bar > label` | A bar's fill (width = value/max) and its `label` text |
+| `tabs > tab-bar > tab` | The tab strip and each tab; the selected one matches `tab:active` |
+| `tabs > tab-content` | The area showing the selected tab |
+| `list > empty` | A list's `empty` text |
+
+Each part also has a class of the same name, so `.fill`, `.tab`, etc. work too.
+
+`box` takes either `"child": {...}` (the original form: a frame around one child)
+or `"children": [...]` (a flex column by default). It may also be empty.
+
+## Example
+
+```json
+{
+  "type": "list", "class": "party", "items": "$party",
+  "template": {
+    "type": "box", "class": "mon", "classIf": { "fainted": "$fainted" },
+    "bindStyle": { "--type": "{typeColor}" },
+    "children": [
+      { "type": "image", "class": "sprite", "src": "$sprite" },
+      { "type": "text", "class": "name", "text": "{name}" },
+      { "type": "bar", "value": "$hp", "maxKey": "$maxHp", "label": "{hp}/{maxHp}" }
+    ]
+  }
+}
+```
+
+```css
+:root        { --accent: #e63946; --panel: #1d1f2b; background: #0b0c10; }
+@font-face   { font-family: "Pixel"; src: url("fonts/Pixel.ttf"); }
+
+.party       { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px; }
+.mon         { gap: 4px; padding: 8px; align-items: center;
+               background: var(--panel); border: 1px solid var(--type, #2e3245);
+               border-radius: 10px; box-shadow: 0 2px 6px rgba(0, 0, 0, .5); }
+.mon.fainted { opacity: .4; }
+.mon:nth-child(odd) { background: #22263a; }
+.sprite      { width: 64px; height: 64px; }
+.name        { font-family: "Pixel"; text-transform: uppercase; }
+bar          { width: 100%; height: 6px; border-radius: 3px; overflow: hidden; background: #333; }
+bar > fill   { background: linear-gradient(90deg, var(--accent), #ffb703); transition: width 300ms ease-out; }
+bar > label  { font-size: 9px; }
+```
+
+## Selectors
+
+| Supported | Notes |
+|---|---|
+| `type`, `*`, `.class`, `#id`, compounds (`.mon.fainted`) | |
+| Descendant `A B` and child `A > B` | |
+| `:root`, `:empty`, `:first-child`, `:last-child`, `:nth-child()`, `:nth-last-child()` | `odd`, `even`, `3`, `2n+1`, `-n+3` |
+| `:pressed`, `:active`, `:disabled` | `:active` = selected tab |
+
+Cascade: built-in styles < pack stylesheets (by specificity, then source order)
+< inline `style` < `bindStyle`. `!important` is ignored. Not supported: sibling
+combinators (`+`, `~`), attribute selectors, pseudo-elements, `@media`,
+`@import` (the rule or block is skipped with a warning).
+
+## Properties
+
+Units: `px` (= Android dp; unitless numbers are px), `%`, `em`, `rem`, `vw`, `vh`,
+`vmin`, `vmax`. Colors: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`/`rgba()`
+(comma or space syntax), `hsl()`/`hsla()`, named colors, `transparent`,
+`currentcolor`. Custom properties (`--x`) and `var(--x, fallback)` work anywhere.
+
+| Group | Properties |
+|---|---|
+| Layout mode | `display: flex \| grid \| stack \| block \| none` |
+| Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `justify-content`, `align-items`, `align-self`, `align-content`, `flex`, `flex-grow`, `flex-shrink`, `flex-basis`, `order`, `gap`, `row-gap`, `column-gap` |
+| Grid | `grid-template-columns`, `grid-template-rows` (`px`, `%`, `fr`, `auto`, `repeat(n, …)`, `minmax(…, max)`), `grid-column`, `grid-row` (`span n`, `n`, `n / m`, `n / span m`), `justify-items`, `justify-self`, `place-items`, `place-self` |
+| Positioning | `position: static \| relative \| absolute`, `top`, `right`, `bottom`, `left`, `inset`, `z-index` |
+| Box | `width`, `height`, `min-*`, `max-*`, `aspect-ratio`, `margin` (incl. `auto`), `padding`, `box-sizing` |
+| Background | `background`, `background-color`, `background-image` (`url()`, `linear-gradient()`), `background-size`, `background-position`, `background-repeat` |
+| Border | `border`, `border-{top,right,bottom,left}`, `border-width/style/color`, `border-radius` (per corner, px or %) — styles `solid`, `dashed`, `dotted` |
+| Effects | `opacity`, `box-shadow` (first shadow, no `inset`), `transform` (`translate`, `scale`, `rotate`), `transform-origin`, `overflow: hidden`, `visibility` |
+| Transitions | `transition` for `opacity`, `color`, `background-color`, `transform`, `width`, `height` (`ms`/`s`, `linear`, `ease*`, `cubic-bezier()`, delay) |
+| Text | `color`, `font-family` (+ `@font-face`), `font-size`, `font-weight`, `font-style`, `letter-spacing`, `line-height`, `text-align`, `text-transform`, `text-shadow`, `text-decoration`, `white-space`, `text-overflow`, `line-clamp` |
+| Images | `object-fit`, `image-rendering: pixelated` (the default for `image`) |
+| Bars | `accent-color` on the bar colors its fill (or style `bar > fill` directly) |
+
+`display: stack` is GBADuo-specific: children are layered on top of each other
+at the top-left (like Android's FrameLayout); use `place-items` to center or
+stretch them.
+
+## Differences from browsers
+
+- `font-size` is in sp, so the system text-size setting scales text.
+- `box-sizing` defaults to `border-box`.
+- `min-width`/`min-height: auto` mean 0 (no min-content sizing), baseline
+  alignment acts like `start`, `padding` doesn't take `%`.
+- Grid uses row-major auto-placement; there's no `grid-template-areas`.
+- `overflow: hidden` clips to rounded corners only when all four radii are
+  equal (on Android 13+ any shape).
+- Unsupported (skipped with a warning): `@keyframes`/`animation`, `filter`,
+  radial gradients, multiple backgrounds/shadows.
+
+## Debugging
+
+Every skipped rule, unknown property or invalid value is logged:
+
+```
+adb logcat -s WidgetRenderer CompanionPresentation
+```

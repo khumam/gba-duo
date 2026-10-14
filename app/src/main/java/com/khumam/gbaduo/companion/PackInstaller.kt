@@ -33,6 +33,9 @@ object PackInstaller {
             if (!File(tempDir, manifest.layoutFile).exists()) {
                 throw InstallException("Pack is missing ${manifest.layoutFile}")
             }
+            for (style in manifest.styleFiles) {
+                if (!File(tempDir, style).isFile) throw InstallException("Pack is missing $style")
+            }
 
             val finalDir = File(packsDir, manifest.id)
             if (finalDir.exists()) finalDir.deleteRecursively()

@@ -13,6 +13,8 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.companion.style.CssParser
+import com.khumam.gbaduo.companion.style.Stylesheet
 import java.io.File
 
 /**
@@ -66,9 +68,13 @@ class CompanionPresentation(
      */
     fun showPack(manifest: PackManifest, packDir: File): Boolean {
         val view = runCatching {
-            val layoutJson = File(packDir, manifest.layoutFile).readText()
-            val newRenderer = WidgetRenderer(context, packDir)
-            newRenderer.build(LayoutParser.parse(layoutJson)).also { renderer = newRenderer }
+            val layout = LayoutParser.parseWithWarnings(File(packDir, manifest.layoutFile).readText())
+            WidgetRenderer.logWarnings(manifest.layoutFile, layout.warnings)
+            val newRenderer = WidgetRenderer(context, packDir, builtInStyles(context), packStyles(manifest, packDir))
+            newRenderer.build(layout.root).also {
+                WidgetRenderer.logWarnings("styles", newRenderer.warnings)
+                renderer = newRenderer
+            }
         }.getOrElse { error ->
             Log.e(TAG, "Could not load layout of pack '${manifest.id}'", error)
             showMessage("${manifest.name}: ${error.message}")
@@ -86,5 +92,23 @@ class CompanionPresentation(
 
     private companion object {
         const val TAG = "CompanionPresentation"
+        const val BUILT_IN_STYLES = "companion/default.css"
+
+        fun builtInStyles(context: Context): List<Stylesheet> {
+            val css = context.assets.open(BUILT_IN_STYLES).bufferedReader().use { it.readText() }
+            return listOf(CssParser.parse(css, sourceName = BUILT_IN_STYLES))
+        }
+
+        /** The manifest's `styles`, in order; a missing file or one outside the pack is skipped with a warning. */
+        fun packStyles(manifest: PackManifest, packDir: File): List<Stylesheet> = manifest.styleFiles.mapNotNull { path ->
+            val file = CssParser.resolveUrl(path, packDir, packDir)?.takeIf { it.isFile }
+            if (file == null) {
+                Log.w(TAG, "Pack '${manifest.id}': stylesheet '$path' not found")
+                return@mapNotNull null
+            }
+            CssParser.parse(file.readText(), baseDir = file.parentFile, packDir = packDir, sourceName = path).also {
+                WidgetRenderer.logWarnings(path, it.warnings)
+            }
+        }
     }
 }

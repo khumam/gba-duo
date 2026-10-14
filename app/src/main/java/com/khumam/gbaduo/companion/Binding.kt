@@ -66,6 +66,15 @@ object Binding {
         else -> 0L
     }
 
+    fun asDouble(value: Any?): Double = when (value) {
+        is Double -> value
+        is Float -> value.toDouble()
+        is Long -> value.toDouble()
+        is Int -> value.toDouble()
+        is String -> value.toDoubleOrNull() ?: 0.0
+        else -> 0.0
+    }
+
     @Suppress("UNCHECKED_CAST")
     fun asList(value: Any?): List<Any?> = value as? List<Any?> ?: emptyList()
 }

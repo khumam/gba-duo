@@ -88,4 +88,17 @@ class PackInstallerTest {
         assertTrue(File(packsDir, "demo-pipeline/manifest.json").exists())
         assertEquals(originalLayout, File(packsDir, "demo-pipeline/layout.json").readText())
     }
+
+    @Test
+    fun requiresDeclaredStylesheets() {
+        val tmp = createTempDir()
+        val packsDir = File(tmp, "packs").apply { mkdirs() }
+        val withStyles = validManifest.replace("\"formatVersion\":1", "\"formatVersion\":2,\"styles\":[\"style.css\"]")
+        val missing = zipOf(tmp, mapOf("manifest.json" to withStyles, "layout.json" to validLayout))
+        val error = runCatching { PackInstaller.install(missing, packsDir) }.exceptionOrNull()
+        assertTrue(error is PackInstaller.InstallException && error.message!!.contains("style.css"))
+
+        val complete = zipOf(tmp, mapOf("manifest.json" to withStyles, "layout.json" to validLayout, "style.css" to "text { color: red }"))
+        assertEquals(listOf("style.css"), PackInstaller.install(complete, packsDir).styleFiles)
+    }
 }
