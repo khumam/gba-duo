@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,10 @@
 #define HOOK_INSTRUCTION_INTERVAL 10000
 #define JSON_MAX_DEPTH 32
 #define IMAGE_CACHE_SIZE 16
+/* Caps on pack-controlled sizes: these buffers live outside the Lua memory limit
+ * and are filled by C loops the instruction budget doesn't count. */
+#define LZ77_MAX_OUTPUT (1024u * 1024u)
+#define IMAGE_MAX_DIMENSION 256
 
 /** Implemented in core.c; NULL when no ROM is loaded. */
 extern struct mCore* gbaduo_active_core(void);
@@ -43,6 +48,10 @@ struct GbaDuoScript {
 };
 
 static struct GbaDuoScript g_script;
+
+/* Guards g_script.images: gfx.decode/unloadScript run on the emu thread while
+ * nativeImage is called from the UI thread. */
+static pthread_mutex_t g_imageLock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ------------------------------------------------------------------------ */
 /* Capped allocator + instruction-count hook                                */
@@ -138,6 +147,9 @@ static int l_mem_read(lua_State* L) {
         return 1;
     }
     char* buf = malloc((size_t) n);
+    if (!buf) {
+        return luaL_error(L, "mem.read: out of memory");
+    }
     for (lua_Integer i = 0; i < n; i++) {
         buf[i] = core ? (char) core->rawRead8(core, addr + (uint32_t) i, -1) : 0;
     }
@@ -174,7 +186,15 @@ static uint8_t* lz77_decompress(uint32_t addr, size_t* outSize) {
         return NULL;
     }
     size_t size = (header >> 8) & 0xFFFFFF;
+    if (size > LZ77_MAX_OUTPUT) {
+        *outSize = 0;
+        return NULL;
+    }
     uint8_t* out = malloc(size > 0 ? size : 1);
+    if (!out) {
+        *outSize = 0;
+        return NULL;
+    }
     size_t outPos = 0;
     uint32_t src = addr + 4;
 
@@ -187,7 +207,13 @@ static uint8_t* lz77_decompress(uint32_t addr, size_t* outSize) {
                 uint8_t b0 = (uint8_t) core->rawRead8(core, src++, -1);
                 uint8_t b1 = (uint8_t) core->rawRead8(core, src++, -1);
                 int length = (b0 >> 4) + 3;
-                int disp = ((b0 & 0x0F) << 8 | b1) + 1;
+                size_t disp = (size_t) ((b0 & 0x0F) << 8 | b1) + 1;
+                if (disp > outPos) {
+                    /* Back-reference before the start of the output: not LZ77 data. */
+                    free(out);
+                    *outSize = 0;
+                    return NULL;
+                }
                 for (int i = 0; i < length && outPos < size; i++) {
                     out[outPos] = out[outPos - disp];
                     outPos++;
@@ -204,7 +230,10 @@ static int l_lz77(lua_State* L) {
     size_t size = 0;
     uint8_t* data = lz77_decompress(addr, &size);
     if (!data) {
-        return luaL_error(L, "lz77: no valid LZ77 header at 0x%08x", addr);
+        /* lua_pushfstring has no %x/%u, so format the message first. */
+        char message[96];
+        snprintf(message, sizeof(message), "lz77: no valid LZ77 data at 0x%08x (or larger than %u bytes)", addr, LZ77_MAX_OUTPUT);
+        return luaL_error(L, "%s", message);
     }
     lua_pushlstring(L, (const char*) data, size);
     free(data);
@@ -270,6 +299,9 @@ static int l_gfx_decode(lua_State* L) {
     if (width <= 0 || height <= 0 || width % 8 != 0 || height % 8 != 0) {
         return luaL_error(L, "gfx.decode: width/height must be positive multiples of 8");
     }
+    if (width > IMAGE_MAX_DIMENSION || height > IMAGE_MAX_DIMENSION) {
+        return luaL_error(L, "gfx.decode: width/height must be at most %d", IMAGE_MAX_DIMENSION);
+    }
 
     struct {
         uint32_t tilesAddr, paletteAddr;
@@ -278,7 +310,9 @@ static int l_gfx_decode(lua_State* L) {
     } descriptor = {tilesAddr, paletteAddr, width, height, bpp, useLz77};
     uint32_t key = fnv1a(&descriptor, sizeof(descriptor));
 
-    struct CachedImage* cached = image_cache_find(key);
+    pthread_mutex_lock(&g_imageLock);
+    bool cached = image_cache_find(key) != NULL;
+    pthread_mutex_unlock(&g_imageLock);
     if (cached) {
         char keyStr[32];
         snprintf(keyStr, sizeof(keyStr), "gfx:%08x", key);
@@ -301,10 +335,13 @@ static int l_gfx_decode(lua_State* L) {
         tileData = lz77_decompress(tilesAddr, &decodedSize);
         if (!tileData || decodedSize < tileBytes) {
             free(tileData);
-            return luaL_error(L, "gfx.decode: LZ77 tile data shorter than expected");
+            return luaL_error(L, "gfx.decode: LZ77 tile data missing or shorter than expected");
         }
     } else {
         tileData = malloc(tileBytes);
+        if (!tileData) {
+            return luaL_error(L, "gfx.decode: out of memory");
+        }
         for (size_t i = 0; i < tileBytes; i++) {
             tileData[i] = (uint8_t) core->rawRead8(core, tilesAddr + (uint32_t) i, -1);
         }
@@ -316,6 +353,10 @@ static int l_gfx_decode(lua_State* L) {
     }
 
     uint32_t* pixels = malloc((size_t) width * height * sizeof(uint32_t));
+    if (!pixels) {
+        free(tileData);
+        return luaL_error(L, "gfx.decode: out of memory");
+    }
     for (int ty = 0; ty < tilesHigh; ty++) {
         for (int tx = 0; tx < tilesWide; tx++) {
             int tileIndex = ty * tilesWide + tx;
@@ -343,7 +384,9 @@ static int l_gfx_decode(lua_State* L) {
     }
 
     free(tileData);
+    pthread_mutex_lock(&g_imageLock);
     image_cache_store(key, width, height, pixels);
+    pthread_mutex_unlock(&g_imageLock);
 
     char keyStr[32];
     snprintf(keyStr, sizeof(keyStr), "gfx:%08x", key);
@@ -359,6 +402,18 @@ static int l_gfx_decode(lua_State* L) {
 
 static int l_pack_require(lua_State* L) {
     const char* name = luaL_checkstring(L, 1);
+    /* Module names are plain names (letters, digits, '_', '-', '.'): no path separators,
+     * no "..", so a pack can only load .lua files from its own folder. */
+    if (name[0] == '\0' || strstr(name, "..") != NULL) {
+        return luaL_error(L, "pack.require: invalid module name '%s'", name);
+    }
+    for (const char* c = name; *c; c++) {
+        bool ok = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') ||
+                  *c == '_' || *c == '-' || *c == '.';
+        if (!ok) {
+            return luaL_error(L, "pack.require: invalid module name '%s'", name);
+        }
+    }
 
     lua_getfield(L, LUA_REGISTRYINDEX, PACK_CACHE_REGISTRY_KEY);
     lua_getfield(L, -1, name);
@@ -376,7 +431,11 @@ static int l_pack_require(lua_State* L) {
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char* source = malloc((size_t) size);
+    char* source = size >= 0 ? malloc((size_t) size + 1) : NULL;
+    if (!source) {
+        fclose(f);
+        return luaL_error(L, "pack.require: could not read module '%s'", name);
+    }
     size_t read = fread(source, 1, (size_t) size, f);
     fclose(f);
 
@@ -403,18 +462,26 @@ struct JsonBuf {
     char* data;
     size_t len;
     size_t cap;
+    bool failed;
 };
 
-static void json_reserve(struct JsonBuf* b, size_t extra) {
-    if (b->len + extra + 1 <= b->cap) return;
+static bool json_reserve(struct JsonBuf* b, size_t extra) {
+    if (b->failed) return false;
+    if (b->len + extra + 1 <= b->cap) return true;
     size_t newCap = b->cap == 0 ? 256 : b->cap;
     while (b->len + extra + 1 > newCap) newCap *= 2;
-    b->data = realloc(b->data, newCap);
+    char* data = realloc(b->data, newCap);
+    if (!data) {
+        b->failed = true;
+        return false;
+    }
+    b->data = data;
     b->cap = newCap;
+    return true;
 }
 
 static void json_append(struct JsonBuf* b, const char* s, size_t n) {
-    json_reserve(b, n);
+    if (!json_reserve(b, n)) return;
     memcpy(b->data + b->len, s, n);
     b->len += n;
     b->data[b->len] = '\0';
@@ -424,22 +491,83 @@ static void json_append_str(struct JsonBuf* b, const char* s) {
     json_append(b, s, strlen(s));
 }
 
-static void json_append_escaped(struct JsonBuf* b, const char* s, size_t n) {
+/**
+ * Length of the valid UTF-8 sequence starting at s[i] (1-4), or 0 if invalid
+ * (bad lead/continuation byte, overlong form, surrogate, or above U+10FFFF).
+ * *codepoint receives the decoded value.
+ */
+static size_t utf8_sequence(const unsigned char* s, size_t n, size_t i, uint32_t* codepoint) {
+    unsigned char c = s[i];
+    size_t len;
+    uint32_t cp;
+    if (c < 0x80) {
+        *codepoint = c;
+        return 1;
+    } else if ((c & 0xE0) == 0xC0) {
+        len = 2;
+        cp = c & 0x1F;
+    } else if ((c & 0xF0) == 0xE0) {
+        len = 3;
+        cp = c & 0x0F;
+    } else if ((c & 0xF8) == 0xF0) {
+        len = 4;
+        cp = c & 0x07;
+    } else {
+        return 0;
+    }
+    if (i + len > n) return 0;
+    for (size_t k = 1; k < len; k++) {
+        if ((s[i + k] & 0xC0) != 0x80) return 0;
+        cp = (cp << 6) | (s[i + k] & 0x3F);
+    }
+    static const uint32_t minimum[5] = {0, 0, 0x80, 0x800, 0x10000};
+    if (cp < minimum[len] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return 0;
+    *codepoint = cp;
+    return len;
+}
+
+/**
+ * Appends [s] as a JSON string. The result is handed to JNI's NewStringUTF, which
+ * aborts on anything but (modified) UTF-8: invalid bytes (e.g. raw game memory a
+ * pack returned as a string) become U+FFFD, and 4-byte sequences are written as
+ * escaped surrogate pairs.
+ */
+static void json_append_escaped(struct JsonBuf* b, const char* str, size_t n) {
+    const unsigned char* s = (const unsigned char*) str;
     json_append(b, "\"", 1);
-    for (size_t i = 0; i < n; i++) {
-        unsigned char c = (unsigned char) s[i];
+    for (size_t i = 0; i < n;) {
+        unsigned char c = s[i];
         if (c == '"' || c == '\\') {
             char esc[2] = {'\\', (char) c};
             json_append(b, esc, 2);
+            i++;
         } else if (c == '\n') {
             json_append_str(b, "\\n");
+            i++;
         } else if (c < 0x20) {
             char buf[8];
             snprintf(buf, sizeof(buf), "\\u%04x", c);
             json_append_str(b, buf);
+            i++;
+        } else if (c < 0x80) {
+            json_append(b, (const char*) &s[i], 1);
+            i++;
         } else {
-            char buf[1] = {(char) c};
-            json_append(b, buf, 1);
+            uint32_t cp = 0;
+            size_t len = utf8_sequence(s, n, i, &cp);
+            if (len == 0) {
+                json_append_str(b, "\\ufffd");
+                i++;
+            } else if (len == 4) {
+                char buf[16];
+                uint32_t v = cp - 0x10000;
+                snprintf(buf, sizeof(buf), "\\u%04x\\u%04x", 0xD800 + (v >> 10), 0xDC00 + (v & 0x3FF));
+                json_append_str(b, buf);
+                i += 4;
+            } else {
+                json_append(b, (const char*) &s[i], len);
+                i += len;
+            }
         }
     }
     json_append(b, "\"", 1);
@@ -608,12 +736,15 @@ static bool script_setup(lua_State** outL) {
 }
 
 static void free_images(void) {
+    pthread_mutex_lock(&g_imageLock);
     for (int i = 0; i < IMAGE_CACHE_SIZE; i++) {
         if (g_script.images[i].used) {
             free(g_script.images[i].pixels);
         }
     }
     memset(g_script.images, 0, sizeof(g_script.images));
+    g_script.nextImageSlot = 0;
+    pthread_mutex_unlock(&g_imageLock);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -699,6 +830,11 @@ Java_com_khumam_gbaduo_emu_NativeCore_tickScript(JNIEnv* env, jobject thiz) {
     struct JsonBuf buf = {0};
     json_serialize(L, -1, &buf, 0);
     lua_pop(L, 1);
+    if (buf.failed) {
+        free(buf.data);
+        strncpy(g_script.lastError, "update() result too large (out of memory)", sizeof(g_script.lastError) - 1);
+        return NULL;
+    }
 
     jstring result = (*env)->NewStringUTF(env, buf.data ? buf.data : "{}");
     free(buf.data);
@@ -707,7 +843,25 @@ Java_com_khumam_gbaduo_emu_NativeCore_tickScript(JNIEnv* env, jobject thiz) {
 
 JNIEXPORT jstring JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_lastScriptError(JNIEnv* env, jobject thiz) {
-    return (*env)->NewStringUTF(env, g_script.lastError);
+    /* Lua error messages can quote script bytes; keep only valid UTF-8 for NewStringUTF. */
+    char safe[sizeof(g_script.lastError)];
+    const unsigned char* s = (const unsigned char*) g_script.lastError;
+    size_t n = strlen(g_script.lastError);
+    size_t out = 0;
+    for (size_t i = 0; i < n && out < sizeof(safe) - 1;) {
+        uint32_t cp;
+        size_t len = utf8_sequence(s, n, i, &cp);
+        if (len == 0 || len == 4 || out + len > sizeof(safe) - 1) {
+            safe[out++] = '?';
+            i += len == 0 ? 1 : len;
+        } else {
+            memcpy(&safe[out], &s[i], len);
+            out += len;
+            i += len;
+        }
+    }
+    safe[out] = '\0';
+    return (*env)->NewStringUTF(env, safe);
 }
 
 JNIEXPORT void JNICALL
@@ -729,20 +883,31 @@ Java_com_khumam_gbaduo_emu_NativeCore_nativeImage(JNIEnv* env, jobject thiz, jst
     }
     (*env)->ReleaseStringUTFChars(env, key, keyChars);
 
+    /* Copy under the lock: the emu thread may evict or free this entry at any time. */
+    pthread_mutex_lock(&g_imageLock);
     struct CachedImage* image = image_cache_find(wanted);
-    if (!image) {
+    jint* buffer = NULL;
+    jsize total = 0;
+    if (image) {
+        total = 2 + image->width * image->height;
+        buffer = malloc((size_t) total * sizeof(jint));
+        if (buffer) {
+            buffer[0] = image->width;
+            buffer[1] = image->height;
+            for (int i = 0; i < image->width * image->height; i++) {
+                buffer[2 + i] = (jint) image->pixels[i];
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_imageLock);
+    if (!buffer) {
         return NULL;
     }
 
-    jsize total = 2 + image->width * image->height;
     jintArray result = (*env)->NewIntArray(env, total);
-    jint* buffer = malloc((size_t) total * sizeof(jint));
-    buffer[0] = image->width;
-    buffer[1] = image->height;
-    for (int i = 0; i < image->width * image->height; i++) {
-        buffer[2 + i] = (jint) image->pixels[i];
+    if (result) {
+        (*env)->SetIntArrayRegion(env, result, 0, total, buffer);
     }
-    (*env)->SetIntArrayRegion(env, result, 0, total, buffer);
     free(buffer);
     return result;
 }
