@@ -24,6 +24,20 @@ applied in order, after the app's built-in styles
 inline `style` it resolves relative to the pack folder. Paths can't leave the
 pack (`../` outside it, absolute paths and `http://` are ignored).
 
+## Examples
+
+[`examples/`](examples/) has two complete packs, each with a
+`sample-snapshot.json` showing the data its layout expects:
+
+- [`classic`](examples/classic/): the original format, no CSS.
+- [`party-css`](examples/party-css/): a styled party/bag screen (grid, tabs,
+  gradients, borders, shadows, pixel sprites, bar labels).
+
+Zip a folder's contents to install it as a pack. The app's tests render both
+and compare them with reference images (`app/src/test/screenshots`), so their
+look is pinned down; after an intended visual change, re-record with
+`./gradlew :app:testDebugUnitTest --tests '*PackScreenshotTest' -PrecordScreenshots`.
+
 ## Hooking widgets to CSS
 
 Every widget in `layout.json` accepts:

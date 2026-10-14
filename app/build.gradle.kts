@@ -51,6 +51,14 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.all { test ->
+            // PackScreenshotTest re-records its reference images with -PrecordScreenshots.
+            test.systemProperty("gbaduo.recordScreenshots", project.findProperty("recordScreenshots") != null)
+            // Files the screenshot/renderer tests read directly, so editing them re-runs the tests.
+            test.inputs.dir("../docs-packs/examples")
+            test.inputs.dir("src/test/screenshots")
+            test.inputs.file("src/main/assets/companion/default.css")
+        }
     }
 }
 

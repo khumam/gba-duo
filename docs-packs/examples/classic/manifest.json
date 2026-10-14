@@ -1,0 +1,10 @@
+{
+  "id": "example-classic",
+  "name": "Example: classic layout",
+  "version": "1.0.0",
+  "author": "GBADuo",
+  "formatVersion": 1,
+  "match": { "gameCode": ["BPRE"] },
+  "tickHz": 4,
+  "layout": "layout.json"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "example-party-css",
+  "name": "Example: party (CSS)",
+  "version": "1.0.0",
+  "author": "GBADuo",
+  "formatVersion": 2,
+  "match": { "gameCode": ["BPRE"] },
+  "tickHz": 4,
+  "layout": "layout.json",
+  "styles": ["style.css"]
+}
