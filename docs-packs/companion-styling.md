@@ -146,8 +146,6 @@ stretch them.
 - `min-width`/`min-height: auto` mean 0 (no min-content sizing), baseline
   alignment acts like `start`, `padding` doesn't take `%`.
 - Grid uses row-major auto-placement; there's no `grid-template-areas`.
-- `overflow: hidden` clips to rounded corners only when all four radii are
-  equal (on Android 13+ any shape).
 - Unsupported (skipped with a warning): `@keyframes`/`animation`, `filter`,
   radial gradients, multiple backgrounds/shadows.
 
