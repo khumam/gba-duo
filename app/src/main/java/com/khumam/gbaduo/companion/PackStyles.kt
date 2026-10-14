@@ -25,7 +25,7 @@ object PackStyles {
             return@mapNotNull null
         }
         CssParser.parse(file.readText(), baseDir = file.parentFile, packDir = packDir, sourceName = path).also {
-            WidgetRenderer.logWarnings(path, it.warnings)
+            CompanionPresentation.logWarnings(path, it.warnings)
         }
     }
 }

@@ -6,7 +6,7 @@ import com.khumam.gbaduo.companion.style.Length
 /**
  * CSS-like box layout: flexbox, a practical subset of grid, a layered "stack",
  * and absolute positioning. Works on abstract [LayoutChild]ren so it's pure and
- * unit-testable; `BoxLayout` (the Android view) feeds it real views.
+ * unit-testable; the Compose `CssLayout` feeds it real children.
  *
  * Deliberate simplifications (documented for pack authors): `min-width/height:
  * auto` is 0 (not min-content), baseline alignment acts as start, and grid
