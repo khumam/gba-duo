@@ -2,12 +2,15 @@ package com.khumam.gbaduo.emu
 
 import android.view.KeyEvent
 
-/** Maps Android gamepad/keyboard key codes to a GBA key bitmask. Not thread-safe; call from one thread. */
+/**
+ * Maps Android gamepad/keyboard key codes to a GBA key bitmask. Written from the
+ * main thread only; read by the emu thread each frame.
+ */
 class InputMapper {
     var swapAb: Boolean = false
 
-    private var pressed = 0
-    private var r2Held = false
+    @Volatile private var pressed = 0
+    @Volatile private var r2Held = false
 
     /** True for a mapped key (caller should consume the event); false otherwise. */
     fun onKey(keyCode: Int, down: Boolean): Boolean {
@@ -18,6 +21,15 @@ class InputMapper {
         val bit = bitFor(keyCode) ?: return false
         pressed = if (down) pressed or bit else pressed and bit.inv()
         return true
+    }
+
+    /**
+     * Lifts every held key. Call when the game window loses focus: the matching
+     * key-up may then go to another window, which would leave the key stuck down.
+     */
+    fun releaseAll() {
+        pressed = 0
+        r2Held = false
     }
 
     fun keys(): Int = pressed

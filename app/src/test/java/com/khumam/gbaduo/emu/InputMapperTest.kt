@@ -60,4 +60,17 @@ class InputMapperTest {
         mapper.onKey(KeyEvent.KEYCODE_BUTTON_R2, down = false)
         assertEquals(false, mapper.fastForward())
     }
+
+    @Test
+    fun releaseAllLiftsHeldKeysAndFastForward() {
+        val mapper = InputMapper()
+        mapper.onKey(KeyEvent.KEYCODE_BUTTON_B, down = true)
+        mapper.onKey(KeyEvent.KEYCODE_DPAD_LEFT, down = true)
+        mapper.onKey(KeyEvent.KEYCODE_BUTTON_R2, down = true)
+
+        mapper.releaseAll()
+
+        assertEquals(0, mapper.keys())
+        assertEquals(false, mapper.fastForward())
+    }
 }

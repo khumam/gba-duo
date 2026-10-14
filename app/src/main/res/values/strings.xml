@@ -1,8 +1,17 @@
 <resources>
     <string name="app_name">GBADuo</string>
-    <string name="choose_rom_folder">Choose ROM folder</string>
-    <string name="no_folder_chosen">Tap + to choose your ROMs folder</string>
-    <string name="no_roms">No .gba files found in this folder</string>
+    <string name="choose_rom_folder">Add ROM folder</string>
+    <string name="no_folder_chosen">Tap + to add a ROM folder</string>
+    <plurals name="no_roms">
+        <item quantity="one">No .gba, .gb or .gbc files found in your folder</item>
+        <item quantity="other">No .gba, .gb or .gbc files found in your %d folders</item>
+    </plurals>
+    <string name="scanning">Scanning your folders…</string>
+    <string name="manage_folders">ROM folders</string>
+    <string name="add_folder">Add folder…</string>
+    <string name="remove_folder_question">Remove “%s” from the library? Its files are not deleted.</string>
+    <string name="remove">Remove</string>
+    <string name="no_companion_pack">No companion pack</string>
     <string name="load_failed">Could not load %s</string>
     <string name="resume">Resume</string>
     <string name="save_state">Save state</string>

@@ -2,62 +2,126 @@ package com.khumam.gbaduo.library
 
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.khumam.gbaduo.storage.LegacyMigration
+import java.io.File
 
 data class RomEntry(
     val uri: Uri?,
     val fileName: String,
     val title: String,
     val gameCode: String,
+    val platform: Platform = Platform.GBA,
+    val size: Long = 0,
+    val lastModified: Long = 0,
 ) {
-    fun saveFileName(): String = fileName.substringBeforeLast('.', fileName) + ".sav"
+    /** Pre-GameStorage save name; still used to find old saves to migrate. */
+    fun saveFileName(): String = LegacyMigration.legacySaveName(fileName)
 
     companion object {
-        /** [header] must be at least 0xC0 bytes of the ROM's start. */
+        /** [header] should be [RomHeader.SIZE] bytes of the ROM's start (shorter still parses GBA). */
         fun fromHeader(fileName: String, header: ByteArray, uri: Uri? = null): RomEntry {
-            val title = String(header, 0xA0, 12).trim('\u0000', ' ')
-            val code = String(header, 0xAC, 4).trim('\u0000', ' ')
-            return RomEntry(uri, fileName, title.ifBlank { fileName }, code)
+            val parsed = RomHeader.parse(fileName, header)
+            return RomEntry(uri, fileName, parsed.title, parsed.gameCode, parsed.platform)
         }
     }
 }
 
-/** Lists `.gba` files in a user-picked folder (one level deep) via Storage Access Framework. */
+/** A library folder as shown in "Manage folders". */
+data class LibraryFolder(val uri: Uri, val name: String)
+
+/**
+ * Lists `.gba`/`.gb`/`.gbc` files in every user-picked folder (each scanned one
+ * level deep) via the Storage Access Framework. [list] does blocking I/O: call it
+ * off the main thread.
+ */
 class RomLibrary(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("library", Context.MODE_PRIVATE)
+    private val index = RomIndex(File(context.filesDir, "rom_index.json"))
 
-    var folderUri: Uri?
-        get() = prefs.getString("folder_uri", null)?.let(Uri::parse)
-        set(value) = prefs.edit().putString("folder_uri", value?.toString()).apply()
+    var folders: List<Uri>
+        get() {
+            val stored = prefs.getString(KEY_FOLDERS, null)
+            val folders = FolderList.decode(stored, prefs.getString(KEY_LEGACY_FOLDER, null))
+            if (stored == null && folders.isNotEmpty()) {
+                // One-time move of the single folder older versions stored.
+                prefs.edit().putString(KEY_FOLDERS, FolderList.encode(folders)).remove(KEY_LEGACY_FOLDER).apply()
+            }
+            return folders.map(Uri::parse)
+        }
+        private set(value) = prefs.edit().putString(KEY_FOLDERS, FolderList.encode(value.map(Uri::toString))).apply()
+
+    fun addFolder(uri: Uri) {
+        folders = FolderList.add(folders.map(Uri::toString), uri.toString()).map(Uri::parse)
+    }
+
+    fun removeFolder(uri: Uri) {
+        folders = FolderList.remove(folders.map(Uri::toString), uri.toString()).map(Uri::parse)
+        runCatching {
+            context.contentResolver.releasePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+    }
+
+    fun describeFolders(): List<LibraryFolder> = folders.map { uri ->
+        val name = runCatching { DocumentFile.fromTreeUri(context, uri)?.name }.getOrNull()
+        LibraryFolder(uri, name ?: uri.lastPathSegment ?: uri.toString())
+    }
 
     fun list(): List<RomEntry> {
-        val root = folderUri?.let { DocumentFile.fromTreeUri(context, it) } ?: return emptyList()
         val resolver = context.contentResolver
-        return collectGbaFiles(root).mapNotNull { file -> readEntry(resolver, file) }
+        return folders
+            .mapNotNull { runCatching { DocumentFile.fromTreeUri(context, it) }.getOrNull() }
+            .flatMap { root -> runCatching { collectRomFiles(root) }.getOrDefault(emptyList()) }
+            .distinctBy { it.uri.toString() }
+            .mapNotNull { file -> readEntry(resolver, file) }
             .sortedBy { it.title.lowercase() }
     }
 
-    private fun collectGbaFiles(dir: DocumentFile, depth: Int = 0): List<DocumentFile> {
+    /** Blocking (reads the whole ROM on a cache miss): call off the main thread. */
+    fun crc32(entry: RomEntry): Long? {
+        val uri = entry.uri ?: return null
+        val key = uri.toString()
+        index.crc32(key, entry.size, entry.lastModified)?.let { return it }
+        val crc = context.contentResolver.openInputStream(uri)?.use { RomIndex.crc32Of(it) } ?: return null
+        index.put(key, entry.size, entry.lastModified, crc)
+        return crc
+    }
+
+    private fun collectRomFiles(dir: DocumentFile, depth: Int = 0): List<DocumentFile> {
         val children = dir.listFiles()
-        val files = children.filter { it.isFile && it.name?.endsWith(".gba", ignoreCase = true) == true }
+        val files = children.filter { it.isFile && it.name?.let(RomHeader::isRomFileName) == true }
         if (depth >= 1) return files
         val subfolders = children.filter { it.isDirectory }
-        return files + subfolders.flatMap { collectGbaFiles(it, depth + 1) }
+        return files + subfolders.flatMap { collectRomFiles(it, depth + 1) }
     }
 
     private fun readEntry(resolver: ContentResolver, file: DocumentFile): RomEntry? {
         val uri = file.uri
-        val header = ByteArray(0xC0)
-        resolver.openInputStream(uri)?.use { stream ->
-            var read = 0
-            while (read < header.size) {
-                val n = stream.read(header, read, header.size - read)
-                if (n < 0) break
-                read += n
+        val name = file.name ?: return null
+        val header = ByteArray(RomHeader.SIZE)
+        val read = runCatching {
+            resolver.openInputStream(uri)?.use { stream ->
+                var read = 0
+                while (read < header.size) {
+                    val n = stream.read(header, read, header.size - read)
+                    if (n < 0) break
+                    read += n
+                }
+                read
             }
-        } ?: return null
-        return RomEntry.fromHeader(file.name ?: return null, header, uri)
+        }.getOrNull() ?: return null
+        return RomEntry.fromHeader(name, header.copyOf(read), uri)
+            .copy(size = file.length(), lastModified = file.lastModified())
+    }
+
+    companion object {
+        private const val KEY_FOLDERS = "folder_uris"
+        private const val KEY_LEGACY_FOLDER = "folder_uri"
     }
 }

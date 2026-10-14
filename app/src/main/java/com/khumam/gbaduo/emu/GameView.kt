@@ -12,15 +12,21 @@ import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
-private const val GBA_WIDTH = 240
-private const val GBA_HEIGHT = 160
 private const val TAG = "GameView"
 
-/** Aspect-fit blit of the emulator's RGBA8888 framebuffer, with a swappable post-process shader. */
+/**
+ * Aspect-fit blit of the emulator's RGBA8888 framebuffer (240x160 for GBA,
+ * 160x144 for GB/GBC), with a swappable post-process shader.
+ */
 class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(context, attrs) {
 
     @Volatile var frameBuffer: ByteBuffer? = null
     private val renderer = Renderer(context.assets)
+
+    /** Call before setting [frameBuffer]; the size of the core's video output in pixels. */
+    fun setVideoSize(width: Int, height: Int) {
+        renderer.videoSize = width to height
+    }
 
     init {
         setEGLContextClientVersion(2)
@@ -41,11 +47,15 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
 
     private inner class Renderer(private val assets: AssetManager) : GLSurfaceView.Renderer {
         @Volatile var pendingShader: ShaderPreset = ShaderPreset.OFF
+        @Volatile var videoSize: Pair<Int, Int> = 240 to 160
 
         private var activeShader: ShaderPreset? = null
         private var program = 0
         private var texture = 0
         private var positionHandle = 0
+        private var texSizeHandle = -1
+        private var surfaceWidth = 0
+        private var surfaceHeight = 0
         private lateinit var vertexBuffer: FloatBuffer
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -69,7 +79,16 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-            GLES20.glViewport(0, 0, width, height)
+            surfaceWidth = width
+            surfaceHeight = height
+        }
+
+        /** Largest viewport with the game's aspect ratio, centered (black bars on the rest). */
+        private fun applyAspectFitViewport(videoWidth: Int, videoHeight: Int) {
+            val scale = minOf(surfaceWidth.toFloat() / videoWidth, surfaceHeight.toFloat() / videoHeight)
+            val width = (videoWidth * scale).toInt()
+            val height = (videoHeight * scale).toInt()
+            GLES20.glViewport((surfaceWidth - width) / 2, (surfaceHeight - height) / 2, width, height)
         }
 
         override fun onDrawFrame(gl: GL10?) {
@@ -79,13 +98,18 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             }
 
             val buffer = frameBuffer ?: return
+            val (videoWidth, videoHeight) = videoSize
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            applyAspectFitViewport(videoWidth, videoHeight)
             GLES20.glUseProgram(program)
+            if (texSizeHandle >= 0) {
+                GLES20.glUniform2f(texSizeHandle, videoWidth.toFloat(), videoHeight.toFloat())
+            }
 
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
             buffer.rewind()
             GLES20.glTexImage2D(
-                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, GBA_WIDTH, GBA_HEIGHT, 0,
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, videoWidth, videoHeight, 0,
                 GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
             )
 
@@ -115,10 +139,8 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
 
             GLES20.glUseProgram(program)
             GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "tex"), 0)
-            val texSizeLoc = GLES20.glGetUniformLocation(program, "texSize")
-            if (texSizeLoc >= 0) {
-                GLES20.glUniform2f(texSizeLoc, GBA_WIDTH.toFloat(), GBA_HEIGHT.toFloat())
-            }
+            // Set per frame in onDrawFrame, since the video size depends on the loaded game.
+            texSizeHandle = GLES20.glGetUniformLocation(program, "texSize")
             for ((name, value) in preset.uniforms) {
                 val loc = GLES20.glGetUniformLocation(program, name)
                 if (loc >= 0) {

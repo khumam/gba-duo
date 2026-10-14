@@ -7,7 +7,7 @@ if(NOT EXISTS "${MGBA_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "mGBA source missing at ${MGBA_DIR}")
 endif()
 
-# Bare GBA core only: no frontends, no optional deps (zlib/png/sqlite/lua/ffmpeg/...).
+# Bare GBA + GB/GBC cores only: no frontends, no optional deps (zlib/png/sqlite/lua/ffmpeg/...).
 set(BUILD_STATIC        ON  CACHE BOOL "" FORCE)
 set(BUILD_SHARED        OFF CACHE BOOL "" FORCE)
 set(DISABLE_FRONTENDS   ON  CACHE BOOL "" FORCE)
@@ -35,7 +35,7 @@ set(USE_MINIZIP         OFF CACHE BOOL "" FORCE)
 set(USE_PNG             OFF CACHE BOOL "" FORCE)
 set(USE_ZLIB            OFF CACHE BOOL "" FORCE)
 set(M_CORE_GBA          ON  CACHE BOOL "" FORCE)
-set(M_CORE_GB           OFF CACHE BOOL "" FORCE)
+set(M_CORE_GB           ON  CACHE BOOL "" FORCE)
 set(BUILD_LTO           OFF CACHE BOOL "" FORCE)
 set(SKIP_INSTALL_ALL    ON  CACHE BOOL "" FORCE)
 
@@ -61,7 +61,7 @@ target_include_directories(lua PUBLIC "${LUA_DIR}/src")
 
 add_library(gbaduo SHARED core.c script.c)
 
-target_compile_definitions(gbaduo PRIVATE USE_PTHREADS M_CORE_GBA)
+target_compile_definitions(gbaduo PRIVATE USE_PTHREADS M_CORE_GBA M_CORE_GB)
 
 target_include_directories(gbaduo PRIVATE
     "${MGBA_DIR}/include"
