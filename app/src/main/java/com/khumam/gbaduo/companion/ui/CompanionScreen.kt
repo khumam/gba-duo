@@ -12,6 +12,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -126,6 +128,16 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
         }
         .drawBehind { drawCssBox(paint, platform) }
     if (style.keyword("overflow") != "visible") modifier = modifier.clip(CssShape(paint))
+    // `overflow: auto|scroll` makes this box's content actually scrollable (vertically — the
+    // engine has no per-axis overflow-x/overflow-y, and vertical lists are the overwhelmingly
+    // common case). Compose's verticalScroll modifier works transparently with CssMeasurePolicy
+    // below: it removes the incoming height constraint before the child content is measured
+    // (so e.g. a `list` can grow to its natural, un-clamped height) while still reporting a
+    // height clamped to what's actually available to this node's own parent, offsetting the
+    // oversized content by scroll position and clipping it to that available viewport.
+    if (style.keyword("overflow") == "auto" || style.keyword("overflow") == "scroll") {
+        modifier = modifier.verticalScroll(rememberScrollState())
+    }
     node.onClick?.let { onClick ->
         val interactions = remember { MutableInteractionSource() }
         val pressed by interactions.collectIsPressedAsState()
