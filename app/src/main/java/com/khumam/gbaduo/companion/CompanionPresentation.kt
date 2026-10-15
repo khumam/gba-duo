@@ -145,9 +145,16 @@ class CompanionPresentation(
         return true
     }
 
-    /** Call from the main thread with each new snapshot (hop off the emu thread first). */
+    /**
+     * Call from the main thread with each new snapshot (hop off the emu thread first). A `ui`
+     * entry returned by the script's `update()` runs as UI actions (e.g. `{ navigate = "battle" }`)
+     * after the data is applied — see [CompanionTree.updateFromScript].
+     */
     fun update(values: Map<String, Any?>) {
-        (content as? Content.Pack)?.tree?.update(values)
+        val tree = (content as? Content.Pack)?.tree ?: return
+        val warnings = mutableListOf<String>()
+        tree.updateFromScript(values, warnings)
+        logWarnings("update() ui", warnings)
     }
 
     /**
@@ -157,9 +164,7 @@ class CompanionPresentation(
     fun applyScriptResult(result: Any?) {
         val tree = (content as? Content.Pack)?.tree ?: return
         val warnings = mutableListOf<String>()
-        val actions = Actions.parse(result, warnings).filter { action ->
-            (action !is Action.Call).also { if (!it) warnings += "a script action can't 'call' another; call it directly in Lua" }
-        }
+        val actions = Actions.parseScriptResult(result, warnings)
         logWarnings("script action result", warnings)
         tree.perform(actions)
     }

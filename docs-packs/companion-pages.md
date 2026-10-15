@@ -143,6 +143,39 @@ A tap that changes the UI state triggers a fresh `update(ui)` right away, so a
 detail page fills in almost instantly instead of waiting for the next `tickHz`.
 This also works while the game is paused.
 
+## Changing pages from `update()`
+
+The game itself can switch pages, without a tap: return a `ui` entry from
+`update()`. It holds UI actions in the same shape as an `onClick` (`set`,
+`navigate`, `back`; not `call`) and runs right after the rest of the returned
+data is applied. For example, open a battle page while a battle is on:
+
+```lua
+local wasInBattle = false
+
+function update(ui)
+  local inBattle = mem.u8(BATTLE_FLAG) ~= 0   -- whatever your game's flag is
+  local out = { party = readParty() }
+  if inBattle then out.battle = readBattle() end
+
+  if inBattle and not wasInBattle then
+    out.ui = { navigate = "battle" }          -- the battle just started
+  elseif wasInBattle and not inBattle then
+    out.ui = { back = true }                  -- it ended: back to the previous page
+  end
+  wasInBattle = inBattle
+  return out
+end
+```
+
+- Return `ui` only when something changes, as above, if players should still be
+  able to tap away while it lasts. Returning `{ navigate = "battle" }` on every
+  tick is harmless (navigating to the page already shown does nothing) but sends
+  them back to it each tick.
+- `back` pops one page of history each time it's returned, so return it once.
+- `ui` is not passed to the layout as data: `$ui.*` is always the UI state.
+- It takes effect at the next snapshot, so within one `tickHz` interval.
+
 ## Script actions
 
 `{ "call": "name", "args": [...] }` runs `actions.name(...)` from the pack's script:

@@ -98,5 +98,15 @@ object Actions {
         return actions
     }
 
+    /**
+     * Parses UI actions the pack's script returned — from `actions.<name>()`, or as the `ui`
+     * entry of `update()`. Same shape as an `onClick`, minus `call` (a script calls its own
+     * functions directly), which is dropped with a warning.
+     */
+    fun parseScriptResult(value: Any?, warnings: MutableList<String>): List<Action> =
+        parse(value, warnings).filter { action ->
+            (action !is Action.Call).also { if (!it) warnings += "a script can't return 'call'; call the Lua function directly" }
+        }
+
     private val KNOWN = setOf("set", "navigate", "back", "state", "call", "args")
 }

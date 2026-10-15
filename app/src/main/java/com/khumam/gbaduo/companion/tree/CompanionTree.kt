@@ -2,6 +2,7 @@ package com.khumam.gbaduo.companion.tree
 
 import androidx.compose.ui.graphics.ImageBitmap
 import com.khumam.gbaduo.companion.Action
+import com.khumam.gbaduo.companion.Actions
 import com.khumam.gbaduo.companion.Binding
 import com.khumam.gbaduo.companion.ScopedValues
 import com.khumam.gbaduo.companion.Widget
@@ -69,6 +70,20 @@ class CompanionTree(
     fun update(context: Any?) {
         snapshot = context
         rebind()
+    }
+
+    /**
+     * Applies a snapshot built from the pack's `update()`. If the script returned a top-level
+     * `ui` entry (one action table or a list, like an `onClick` minus `call`), it's run after
+     * the data, e.g. `ui = { navigate = "battle" }` when the game enters a battle. Navigating
+     * to the page already shown, or setting a key to its current value, changes nothing, so a
+     * script can return the same `ui` every tick. `ui` never reaches the bindings as data —
+     * `$ui.*` is always the UI state.
+     */
+    fun updateFromScript(values: Map<String, Any?>, warnings: MutableList<String> = mutableListOf()) {
+        val uiActions = values[UI_KEY]
+        update(if (UI_KEY in values) values - UI_KEY else values)
+        if (uiActions != null) perform(Actions.parseScriptResult(uiActions, warnings))
     }
 
     private fun rebind() {

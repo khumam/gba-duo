@@ -50,4 +50,12 @@ class ActionTest {
         assertEquals(listOf<Action>(Action.Set(mapOf("ok" to 2L))), actions)
         assertEquals(7, warnings.size)
     }
+
+    @Test
+    fun scriptResultsDropCallWithAWarning() {
+        val warnings = mutableListOf<String>()
+        val actions = Actions.parseScriptResult(mapOf("navigate" to "battle", "call" to "heal"), warnings)
+        assertEquals(listOf<Action>(Action.Navigate("battle", "page")), actions)
+        assertEquals(1, warnings.size)
+    }
 }

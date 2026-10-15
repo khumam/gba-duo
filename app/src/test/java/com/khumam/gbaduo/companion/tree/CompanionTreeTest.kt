@@ -301,4 +301,48 @@ class CompanionTreeTest {
         t.setPressed(button, true)
         assertEquals(0.7f, button.computed!!.opacity, 0.001f)
     }
+
+    // ---- update() can drive pages: a top-level `ui` entry runs as UI actions --------------
+
+    private val battlePages = """{"type":"pages","pages":[
+        {"name":"overworld","child":{"type":"text","text":"walking"}},
+        {"name":"battle","child":{"type":"text","text":"vs {battle.foe} · {ui.page}"}}
+      ]}"""
+
+    @Test
+    fun aScriptUiEntryNavigatesAfterTheDataIsApplied() {
+        val t = tree(battlePages)
+        var changes = 0
+        t.onUiChange = { changes++ }
+        t.updateFromScript(mapOf("battle" to mapOf("foe" to "Brock")))
+        assertEquals("overworld", t.ui["page"])
+
+        // The game entered a battle: update() returns ui = { navigate = "battle" }.
+        t.updateFromScript(mapOf("battle" to mapOf("foe" to "Onix"), "ui" to mapOf("navigate" to "battle")))
+        assertEquals("battle", t.ui["page"])
+        assertTrue(t.root.child(0).hidden)
+        assertFalse(t.root.child(1).hidden)
+        assertEquals("vs Onix · battle", t.root.child(1).text) // data applied, and `ui` is still the UI state
+        assertEquals(1, changes)
+
+        // Returning the same thing every tick changes nothing.
+        t.updateFromScript(mapOf("battle" to mapOf("foe" to "Onix"), "ui" to mapOf("navigate" to "battle")))
+        assertEquals(1, changes)
+
+        // Battle over: back to where the player was.
+        t.updateFromScript(mapOf("ui" to mapOf("back" to true)))
+        assertEquals("overworld", t.ui["page"])
+    }
+
+    @Test
+    fun aScriptUiEntryCanSetKeysButNotCall() {
+        val t = tree(battlePages)
+        var calls = 0
+        t.onCall = { _, _ -> calls++ }
+        val warnings = mutableListOf<String>()
+        t.updateFromScript(mapOf("ui" to listOf(mapOf("set" to mapOf("turn" to 3L)), mapOf("call" to "heal"))), warnings)
+        assertEquals(3L, t.ui["turn"])
+        assertEquals(0, calls)
+        assertEquals(1, warnings.size)
+    }
 }
