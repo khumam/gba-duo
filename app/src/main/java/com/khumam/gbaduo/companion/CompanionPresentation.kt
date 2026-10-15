@@ -36,6 +36,9 @@ import java.io.File
  * Shown on the Thor's second display, in Jetpack Compose: the assigned pack's
  * layout ([CompanionScreen]), or a fallback message.
  *
+ * Taps that change UI state (pages, `set`) are reported to [onUiChange] and script
+ * actions to [onScriptCall], so the emulator thread can pass them to the pack's Lua.
+ *
  * Its window is not focusable, so touching this screen never pulls controller
  * focus away from the game on the main display (touch input still works). If a
  * key event reaches it anyway, it's handed to [onKey] so the game still gets it.
@@ -56,6 +59,15 @@ class CompanionPresentation(
 
     private val owner = PresentationComposeOwner()
     private var content: Content by mutableStateOf(Content.Message(""))
+
+    /** Called on the main thread with the new UI state (`ui` in the pack's Lua). */
+    var onUiChange: (Map<String, Any?>) -> Unit = {}
+
+    /** Called on the main thread when a tap calls `actions.<name>(args...)` in the pack's Lua. */
+    var onScriptCall: (name: String, args: List<Any?>) -> Unit = { _, _ -> }
+
+    /** The current UI state, or empty when no pack is shown. */
+    val uiState: Map<String, Any?> get() = (content as? Content.Pack)?.tree?.ui ?: emptyMap()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +133,8 @@ class CompanionPresentation(
             val builtIn = PackStyles.builtIn(context)
             val platform = AndroidCompanionPlatform(packDir, (builtIn + styles).flatMap { it.fontFaces })
             val tree = CompanionTree(layout.root, builtIn, styles, platform::loadImage)
+            tree.onUiChange = { onUiChange(it) }
+            tree.onCall = { name, args -> onScriptCall(name, args) }
             logWarnings("styles", tree.warnings)
             Content.Pack(tree, platform)
         }.getOrElse { error ->
@@ -134,6 +148,20 @@ class CompanionPresentation(
     /** Call from the main thread with each new snapshot (hop off the emu thread first). */
     fun update(values: Map<String, Any?>) {
         (content as? Content.Pack)?.tree?.update(values)
+    }
+
+    /**
+     * Call from the main thread with what a script action returned: the same
+     * shape as an `onClick` (e.g. `{ navigate = "detail" }`), minus `call`.
+     */
+    fun applyScriptResult(result: Any?) {
+        val tree = (content as? Content.Pack)?.tree ?: return
+        val warnings = mutableListOf<String>()
+        val actions = Actions.parse(result, warnings).filter { action ->
+            (action !is Action.Call).also { if (!it) warnings += "a script action can't 'call' another; call it directly in Lua" }
+        }
+        logWarnings("script action result", warnings)
+        tree.perform(actions)
     }
 
     companion object {

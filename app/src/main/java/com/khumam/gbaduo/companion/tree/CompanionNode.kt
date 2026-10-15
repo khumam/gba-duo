@@ -41,14 +41,15 @@ class CompanionNode internal constructor(
     var hiddenByBinding: Boolean by mutableStateOf(false)
         internal set
 
-    var hiddenByTabs: Boolean by mutableStateOf(false)
+    /** An unselected tab or page. */
+    var hiddenBySwitch: Boolean by mutableStateOf(false)
         internal set
 
-    /** Set for nodes that react to taps (tabs). */
+    /** Set for nodes that react to taps (tabs, and widgets with an `onClick`). */
     var onClick: (() -> Unit)? = null
         internal set
 
-    val hidden: Boolean get() = hiddenByBinding || hiddenByTabs
+    val hidden: Boolean get() = hiddenByBinding || hiddenBySwitch
     val isImage: Boolean get() = widget is Widget.Image
 
     internal val bindings = mutableListOf<(Any?) -> Unit>()

@@ -8,6 +8,29 @@
     { "name": "Pikachu", "level": 18, "hp": 0, "maxHp": 44, "fainted": true, "low": false, "typeColor": "#f8d030", "icon": "asset:mon-volt.png" },
     { "name": "Geodude", "level": 15, "hp": 39, "maxHp": 39, "fainted": false, "low": false, "typeColor": "#b8a038", "icon": "asset:mon-rock.png" }
   ],
+  "detail": {
+    "name": "Charmeleon", "level": 22, "hp": 61, "maxHp": 68, "icon": "asset:mon-fire.png", "typeColor": "#f08030",
+    "types": [ { "name": "Fire", "color": "#f08030" } ],
+    "stats": [
+      { "name": "Attack", "value": 36 },
+      { "name": "Defense", "value": 33 },
+      { "name": "Sp. Atk", "value": 43 },
+      { "name": "Sp. Def", "value": 36 },
+      { "name": "Speed", "value": 43 }
+    ],
+    "weak": [
+      { "name": "Water", "label": "2×", "color": "#6890f0" },
+      { "name": "Ground", "label": "2×", "color": "#e0c068" },
+      { "name": "Rock", "label": "2×", "color": "#b8a038" }
+    ],
+    "resist": [
+      { "name": "Fire", "label": "½×", "color": "#f08030" },
+      { "name": "Grass", "label": "½×", "color": "#78c850" },
+      { "name": "Ice", "label": "½×", "color": "#98d8d8" },
+      { "name": "Bug", "label": "½×", "color": "#a8b820" },
+      { "name": "Steel", "label": "½×", "color": "#b8b8d0" }
+    ]
+  },
   "bag": [
     { "name": "Potion", "qty": 4 },
     { "name": "Poké Ball", "qty": 11 },

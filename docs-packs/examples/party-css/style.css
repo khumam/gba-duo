@@ -52,3 +52,30 @@ bar > label { font-size: 8px; }
 .bag { gap: 4px; }
 .item { justify-content: space-between; padding: 6px 10px; border-radius: 6px; background: var(--panel); }
 .qty { color: var(--accent); }
+
+/* Tapping a party member opens its detail page. */
+.mon:pressed { transform: scale(.97); }
+
+.detail { gap: 8px; }
+.back { align-self: flex-start; padding: 6px 12px; border-radius: 999px; background: var(--panel); color: var(--muted); }
+.detail-head {
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border-radius: 10px;
+    background: var(--panel);
+    border-left: 4px solid var(--type, #888);
+}
+.detail-sprite { width: 64px; height: 64px; border-radius: 50%; background: rgba(255, 255, 255, .06); }
+.detail-info { gap: 4px; }
+.detail-name { font-size: 18px; font-weight: bold; }
+.chips { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+.chips > empty { color: var(--muted); font-size: 11px; }
+.chip { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: bold; color: #10131f; }
+.section { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+.stats { gap: 4px; }
+.stat { align-items: center; gap: 8px; }
+.stat-name { width: 64px; color: var(--muted); font-size: 11px; }
+.stat-value { width: 28px; text-align: right; font-weight: bold; }
+.stat > bar { flex: 1 1 auto; height: 6px; border-radius: 3px; }
+.stat > bar > fill { border-radius: 3px; background: var(--type, var(--accent)); }

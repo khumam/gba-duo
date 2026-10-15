@@ -122,8 +122,15 @@ class PackScreenshotTest {
     @Test
     fun cssPackBagTab() = verify(
         "party-css-bag",
-        // .screen > tabs > tab-bar > second tab ("Bag")
-        renderPack("party-css") { tree -> tree.root.children[1].children[0].children[1].onClick!!.invoke() },
+        // .screen > pages > tabs > tab-bar > second tab ("Bag")
+        renderPack("party-css") { tree -> tree.root.children[1].children[0].children[0].children[1].onClick!!.invoke() },
+    )
+
+    @Test
+    fun cssPackDetailPage() = verify(
+        "party-css-detail",
+        // .screen > pages > tabs > tab-content > party list > first member (after the list's `empty` part)
+        renderPack("party-css") { tree -> tree.root.children[1].children[0].children[1].children[0].children[1].onClick!!.invoke() },
     )
 
     private companion object {

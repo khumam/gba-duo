@@ -25,7 +25,8 @@ object JsonTree {
     private fun convertArray(arr: JSONArray): List<Any?> =
         (0 until arr.length()).map { convertValue(arr.get(it)) }
 
-    private fun convertValue(value: Any?): Any? = when (value) {
+    /** Converts any `org.json` value (object, array, scalar or `JSONObject.NULL`). */
+    fun convertValue(value: Any?): Any? = when (value) {
         is JSONObject -> convertObject(value)
         is JSONArray -> convertArray(value)
         JSONObject.NULL -> null

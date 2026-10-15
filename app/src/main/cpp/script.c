@@ -813,8 +813,9 @@ Java_com_khumam_gbaduo_emu_NativeCore_tickScript(JNIEnv* env, jobject thiz) {
         return NULL;
     }
 
+    lua_getglobal(L, "ui"); /* update(ui): the companion screen's UI state */
     g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
-    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+    if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
         const char* err = lua_tostring(L, -1);
         strncpy(g_script.lastError, err ? err : "update() failed", sizeof(g_script.lastError) - 1);
         lua_pop(L, 1);
@@ -836,6 +837,161 @@ Java_com_khumam_gbaduo_emu_NativeCore_tickScript(JNIEnv* env, jobject thiz) {
         return NULL;
     }
 
+    jstring result = (*env)->NewStringUTF(env, buf.data ? buf.data : "{}");
+    free(buf.data);
+    return result;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Companion screen UI state and actions                                    */
+/* ------------------------------------------------------------------------ */
+
+#define ACTION_MAX_ARGS 16
+
+/** Pushes a java.lang String/Boolean/Number as a Lua value; null and anything else become nil. */
+static void push_java_value(JNIEnv* env, lua_State* L, jobject value) {
+    if (value == NULL) {
+        lua_pushnil(L);
+        return;
+    }
+    jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    jclass booleanClass = (*env)->FindClass(env, "java/lang/Boolean");
+    jclass longClass = (*env)->FindClass(env, "java/lang/Long");
+    jclass numberClass = (*env)->FindClass(env, "java/lang/Number");
+    if ((*env)->IsInstanceOf(env, value, stringClass)) {
+        const char* chars = (*env)->GetStringUTFChars(env, (jstring) value, NULL);
+        lua_pushstring(L, chars ? chars : "");
+        if (chars) (*env)->ReleaseStringUTFChars(env, (jstring) value, chars);
+    } else if ((*env)->IsInstanceOf(env, value, booleanClass)) {
+        jmethodID booleanValue = (*env)->GetMethodID(env, booleanClass, "booleanValue", "()Z");
+        lua_pushboolean(L, (*env)->CallBooleanMethod(env, value, booleanValue));
+    } else if ((*env)->IsInstanceOf(env, value, longClass)) {
+        jmethodID longValue = (*env)->GetMethodID(env, numberClass, "longValue", "()J");
+        lua_pushinteger(L, (lua_Integer) (*env)->CallLongMethod(env, value, longValue));
+    } else if ((*env)->IsInstanceOf(env, value, numberClass)) {
+        jmethodID doubleValue = (*env)->GetMethodID(env, numberClass, "doubleValue", "()D");
+        lua_pushnumber(L, (lua_Number) (*env)->CallDoubleMethod(env, value, doubleValue));
+    } else {
+        lua_pushnil(L);
+    }
+    (*env)->DeleteLocalRef(env, stringClass);
+    (*env)->DeleteLocalRef(env, booleanClass);
+    (*env)->DeleteLocalRef(env, longClass);
+    (*env)->DeleteLocalRef(env, numberClass);
+}
+
+/* What the protected helpers below read; Lua errors in them (e.g. out of memory)
+ * are caught by lua_pcall instead of aborting the app. */
+struct JavaCall {
+    JNIEnv* env;
+    jobjectArray keys;   /* setScriptUi */
+    jobjectArray values; /* setScriptUi: values; callScriptAction: arguments */
+    jsize count;
+    const char* name;    /* callScriptAction */
+};
+
+/* ui = { [keys[i]] = values[i], ... } */
+static int build_ui(lua_State* L) {
+    struct JavaCall* c = (struct JavaCall*) lua_touserdata(L, 1);
+    JNIEnv* env = c->env;
+    lua_createtable(L, 0, c->count);
+    for (jsize i = 0; i < c->count; i++) {
+        jstring key = (jstring) (*env)->GetObjectArrayElement(env, c->keys, i);
+        if (!key) continue;
+        const char* keyChars = (*env)->GetStringUTFChars(env, key, NULL);
+        if (keyChars) {
+            lua_pushstring(L, keyChars);
+            (*env)->ReleaseStringUTFChars(env, key, keyChars);
+            jobject value = (*env)->GetObjectArrayElement(env, c->values, i);
+            push_java_value(env, L, value);
+            if (value) (*env)->DeleteLocalRef(env, value);
+            lua_rawset(L, -3);
+        }
+        (*env)->DeleteLocalRef(env, key);
+    }
+    lua_setglobal(L, "ui");
+    return 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_setScriptUi(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray values) {
+    if (!g_script.L) {
+        return;
+    }
+    lua_State* L = g_script.L;
+    jsize n = (*env)->GetArrayLength(env, keys);
+    jsize nValues = (*env)->GetArrayLength(env, values);
+    struct JavaCall c = {env, keys, values, n < nValues ? n : nValues, NULL};
+    lua_pushcfunction(L, build_ui);
+    lua_pushlightuserdata(L, &c);
+    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+        const char* err = lua_tostring(L, -1);
+        LOGE("could not set ui: %s", err ? err : "?");
+        lua_pop(L, 1);
+    }
+}
+
+/* actions[name](args...), returning its first result. */
+static int call_action(lua_State* L) {
+    struct JavaCall* c = (struct JavaCall*) lua_touserdata(L, 1);
+    lua_settop(L, 0);
+    if (lua_getglobal(L, "actions") != LUA_TTABLE) {
+        return luaL_error(L, "pack has no 'actions' table (for '%s')", c->name);
+    }
+    lua_getfield(L, -1, c->name);
+    if (!lua_isfunction(L, -1)) {
+        return luaL_error(L, "pack has no actions.%s() function", c->name);
+    }
+    lua_remove(L, 1); /* actions */
+    luaL_checkstack(L, c->count, "too many action arguments");
+    for (jsize i = 0; i < c->count; i++) {
+        jobject arg = (*c->env)->GetObjectArrayElement(c->env, c->values, i);
+        push_java_value(c->env, L, arg);
+        if (arg) (*c->env)->DeleteLocalRef(c->env, arg);
+    }
+    lua_call(L, c->count, 1);
+    return 1;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_callScriptAction(JNIEnv* env, jobject thiz, jstring name, jobjectArray args) {
+    if (!g_script.L) {
+        return NULL;
+    }
+    lua_State* L = g_script.L;
+    g_script.lastError[0] = '\0';
+
+    const char* nameChars = (*env)->GetStringUTFChars(env, name, NULL);
+    if (!nameChars) {
+        return NULL;
+    }
+    jsize nargs = args ? (*env)->GetArrayLength(env, args) : 0;
+    struct JavaCall c = {env, NULL, args, nargs < ACTION_MAX_ARGS ? nargs : ACTION_MAX_ARGS, nameChars};
+    lua_pushcfunction(L, call_action);
+    lua_pushlightuserdata(L, &c);
+    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+    int status = lua_pcall(L, 1, 1, 0);
+    (*env)->ReleaseStringUTFChars(env, name, nameChars);
+    if (status != LUA_OK) {
+        const char* err = lua_tostring(L, -1);
+        strncpy(g_script.lastError, err ? err : "action failed", sizeof(g_script.lastError) - 1);
+        lua_pop(L, 1);
+        return NULL;
+    }
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1); /* no UI changes requested */
+        return NULL;
+    }
+
+    struct JsonBuf buf = {0};
+    json_serialize(L, -1, &buf, 0);
+    lua_pop(L, 1);
+    if (buf.failed) {
+        free(buf.data);
+        strncpy(g_script.lastError, "action result too large (out of memory)", sizeof(g_script.lastError) - 1);
+        return NULL;
+    }
     jstring result = (*env)->NewStringUTF(env, buf.data ? buf.data : "{}");
     free(buf.data);
     return result;

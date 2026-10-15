@@ -8,10 +8,13 @@ import org.json.JSONObject
 
 data class TabEntry(val title: String, val child: Widget)
 
+data class PageEntry(val name: String, val child: Widget)
+
 /**
- * Styling hooks every widget accepts: `id`, `class` (space-separated), `style`
+ * Hooks every widget accepts: `id`, `class` (space-separated), `style`
  * (inline CSS; also holds the legacy widget keys converted to CSS), `classIf`
- * (class -> binding path) and `bindStyle` (property -> `{binding}` template).
+ * (class -> binding path), `bindStyle` (property -> `{binding}` template) and
+ * `onClick` (what tapping it does).
  */
 data class WidgetMeta(
     val id: String? = null,
@@ -19,6 +22,7 @@ data class WidgetMeta(
     val inline: List<Declaration> = emptyList(),
     val classIf: Map<String, String> = emptyMap(),
     val bindStyle: Map<String, String> = emptyMap(),
+    val onClick: List<Action> = emptyList(),
 ) {
     companion object {
         val NONE = WidgetMeta()
@@ -32,6 +36,21 @@ sealed class Widget {
     data class Column(val children: List<Widget>, val gap: Int, override val visibleIf: String?, override val meta: WidgetMeta = WidgetMeta.NONE) : Widget()
     data class Row(val children: List<Widget>, val gap: Int, override val visibleIf: String?, override val meta: WidgetMeta = WidgetMeta.NONE) : Widget()
     data class Tabs(val tabs: List<TabEntry>, override val visibleIf: String?, override val meta: WidgetMeta = WidgetMeta.NONE) : Widget()
+
+    /**
+     * Shows one of its [pages] at a time: the one named by UI key [state]
+     * (`$ui.page` by default), or [initial] until something navigates.
+     */
+    data class Pages(
+        val pages: List<PageEntry>,
+        val state: String,
+        val initial: String,
+        override val visibleIf: String?,
+        override val meta: WidgetMeta = WidgetMeta.NONE,
+    ) : Widget()
+
+    /** A tappable container (a flex row by default); `text` becomes a `text.label` child. */
+    data class Button(val children: List<Widget>, override val visibleIf: String?, override val meta: WidgetMeta = WidgetMeta.NONE) : Widget()
     data class Text(
         val text: String,
         val size: Int,
@@ -132,6 +151,30 @@ object LayoutParser {
                 }
                 Widget.Tabs(tabs, visibleIf)
             }
+            "pages" -> {
+                val pagesArray = obj.optJSONArray("pages") ?: throw InvalidLayoutException("pages needs a 'pages' array")
+                if (pagesArray.length() == 0) throw InvalidLayoutException("pages needs at least one page")
+                val pages = (0 until pagesArray.length()).map { i ->
+                    val pageObj = pagesArray.getJSONObject(i)
+                    PageEntry(pageObj.getString("name"), parseWidget(pageObj.getJSONObject("child"), warnings))
+                }
+                val names = pages.map { it.name }
+                if (names.toSet().size != names.size) throw InvalidLayoutException("pages has two pages with the same name")
+                val state = obj.optString("state", Actions.DEFAULT_STATE)
+                if (!Actions.isValidKey(state)) throw InvalidLayoutException("pages: invalid state name '$state'")
+                val initial = obj.optString("initial", names.first())
+                if (initial !in names) throw InvalidLayoutException("pages: initial page '$initial' doesn't exist")
+                Widget.Pages(pages, state, initial, visibleIf)
+            }
+            "button" -> {
+                val label = if (obj.has("text")) {
+                    val text = obj.getString("text")
+                    Widget.Text(text, 14, "#FFFFFF", false, null, null, WidgetMeta(classes = setOf("label")))
+                } else {
+                    null
+                }
+                Widget.Button(listOfNotNull(label) + parseChildren(obj, warnings), visibleIf)
+            }
             "text" -> {
                 legacyPx("size", "font-size")
                 if (obj.has("color")) legacy += "color" to CssValues.androidColorToCss(obj.getString("color"))
@@ -227,9 +270,12 @@ object LayoutParser {
         for (property in bindStyle.keys) {
             if (!com.khumam.gbaduo.companion.style.Properties.isKnown(property)) warnings += CssWarning("$source: unsupported property '$property' in bindStyle")
         }
+        val actionWarnings = mutableListOf<String>()
+        val onClick = Actions.parse(JsonTree.convertValue(obj.opt("onClick")), actionWarnings)
+        actionWarnings.forEach { warnings += CssWarning("$source: onClick: $it") }
         val id = if (obj.has("id")) obj.getString("id") else null
-        if (id == null && classes.isEmpty() && inline.isEmpty() && classIf.isEmpty() && bindStyle.isEmpty()) return WidgetMeta.NONE
-        return WidgetMeta(id, classes, inline, classIf, bindStyle)
+        if (id == null && classes.isEmpty() && inline.isEmpty() && classIf.isEmpty() && bindStyle.isEmpty() && onClick.isEmpty()) return WidgetMeta.NONE
+        return WidgetMeta(id, classes, inline, classIf, bindStyle, onClick)
     }
 
     private fun stringMap(obj: JSONObject?): Map<String, String> {
@@ -241,6 +287,8 @@ object LayoutParser {
         is Widget.Column -> copy(meta = meta)
         is Widget.Row -> copy(meta = meta)
         is Widget.Tabs -> copy(meta = meta)
+        is Widget.Pages -> copy(meta = meta)
+        is Widget.Button -> copy(meta = meta)
         is Widget.Text -> copy(meta = meta)
         is Widget.Bar -> copy(meta = meta)
         is Widget.Image -> copy(meta = meta)
