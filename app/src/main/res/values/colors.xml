@@ -1,6 +1,4 @@
 <resources>
-    <color name="launcher_background">#FF2A2A2A</color>
-
     <color name="background">#FF121212</color>
     <color name="surface">#FF1E1E1E</color>
     <color name="accent">#FF6C4AB6</color>
