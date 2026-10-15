@@ -4,7 +4,7 @@
  * packs could use CSS, so older packs render the same.
  *
  * Element names are the widget types (column, row, box, text, bar, image,
- * spacer, list, tabs) plus the parts the renderer generates:
+ * spacer, list, tabs, pages, button) plus the parts the renderer generates:
  *   bar > fill, bar > label      the bar's fill and its label
  *   tabs > tab-bar > tab         the tab strip and each tab (`tab:active` = selected)
  *   tabs > tab-content           the area showing the selected tab
@@ -96,4 +96,25 @@ tab-content {
 
 empty {
     color: #888888;
+}
+
+pages {
+    display: stack;
+    place-items: stretch;
+    flex: 1 1 auto;
+}
+
+button {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+button:pressed {
+    opacity: 0.7;
 }

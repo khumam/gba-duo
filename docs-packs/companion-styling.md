@@ -31,7 +31,8 @@ pack (`../` outside it, absolute paths and `http://` are ignored).
 
 - [`classic`](examples/classic/): the original format, no CSS.
 - [`party-css`](examples/party-css/): a styled party/bag screen (grid, tabs,
-  gradients, borders, shadows, pixel sprites, bar labels).
+  gradients, borders, shadows, pixel sprites, bar labels). Tapping a party
+  member opens a detail page ([Taps, pages and detail screens](companion-pages.md)).
 
 Zip a folder's contents to install it as a pack. The app's tests render both
 and compare them with reference images (`app/src/test/screenshots`), so their
@@ -49,16 +50,18 @@ Every widget in `layout.json` accepts:
 | `style` | Inline CSS (object or string); beats stylesheet rules | `"style": { "padding": "8px" }` or `"style": "padding: 8px"` |
 | `classIf` | Adds a class while a binding is truthy | `"classIf": { "low": "$hpLow" }` |
 | `bindStyle` | CSS values from bindings, re-applied each tick; beats `style` | `"bindStyle": { "--type": "{typeColor}" }` |
+| `onClick` | What tapping it does: set UI state, change page, call Lua ([details](companion-pages.md)) | `"onClick": { "navigate": "detail" }` |
 
 Element names for selectors are the widget types, plus parts the renderer generates:
 
 | Element | What it is |
 |---|---|
-| `column`, `row`, `box`, `list`, `tabs`, `text`, `bar`, `image`, `spacer` | Widgets |
+| `column`, `row`, `box`, `list`, `tabs`, `pages`, `button`, `text`, `bar`, `image`, `spacer` | Widgets |
 | `bar > fill`, `bar > label` | A bar's fill (width = value/max) and its `label` text |
 | `tabs > tab-bar > tab` | The tab strip and each tab; the selected one matches `tab:active` |
 | `tabs > tab-content` | The area showing the selected tab |
 | `list > empty` | A list's `empty` text |
+| `button > text.label` | A button's `text` |
 
 Each part also has a class of the same name, so `.fill`, `.tab`, etc. work too.
 
@@ -106,7 +109,7 @@ bar > label  { font-size: 9px; }
 | `type`, `*`, `.class`, `#id`, compounds (`.mon.fainted`) | |
 | Descendant `A B` and child `A > B` | |
 | `:root`, `:empty`, `:first-child`, `:last-child`, `:nth-child()`, `:nth-last-child()` | `odd`, `even`, `3`, `2n+1`, `-n+3` |
-| `:pressed`, `:active`, `:disabled` | `:active` = selected tab |
+| `:pressed`, `:active`, `:disabled` | `:pressed` = held down (tabs and widgets with `onClick`); `:active` = selected tab |
 
 Cascade: built-in styles < pack stylesheets (by specificity, then source order)
 < inline `style` < `bindStyle`. `!important` is ignored. Not supported: sibling

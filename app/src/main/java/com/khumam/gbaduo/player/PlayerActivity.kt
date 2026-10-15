@@ -120,6 +120,11 @@ class PlayerActivity : Activity() {
         emu.activePackDir = packDir
         emu.activePack = manifest
         emu.onSnapshot = { snapshot -> runOnUiThread { companionScreen?.update(snapshot) } }
+        // Taps on the companion screen reach the pack's Lua through the emu thread.
+        emu.onActionResult = { result -> runOnUiThread { companionScreen?.applyScriptResult(result) } }
+        presentation.onUiChange = emu::setUiState
+        presentation.onScriptCall = emu::callAction
+        emu.setUiState(presentation.uiState)
     }
 
     /** Shared by this activity and the companion screen, so the game gets the controller whichever window has focus. */

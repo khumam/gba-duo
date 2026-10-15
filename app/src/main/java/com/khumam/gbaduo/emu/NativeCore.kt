@@ -50,10 +50,16 @@ object NativeCore {
      */
     external fun loadScript(source: String, packDir: String): Boolean
 
-    /** Calls the loaded script's `update()`; returns its JSON-serialized table, or null on error. */
+    /** Calls the loaded script's `update(ui)`; returns its JSON-serialized table, or null on error. */
     external fun tickScript(): String?
 
-    /** Reason the last [loadScript]/[tickScript] call failed, if any. */
+    /** Sets the script's global `ui` table (also passed to `update(ui)`); values are String/Long/Double/Boolean/null. */
+    external fun setScriptUi(keys: Array<String>, values: Array<Any?>)
+
+    /** Calls `actions.<name>(args...)`; its result as JSON if it returned a table, else null. */
+    external fun callScriptAction(name: String, args: Array<Any?>): String?
+
+    /** Reason the last [loadScript]/[tickScript]/[callScriptAction] call failed, if any. */
     external fun lastScriptError(): String?
 
     external fun unloadScript()

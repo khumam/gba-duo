@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.companion.tree
 
 import androidx.compose.ui.graphics.ImageBitmap
+import com.khumam.gbaduo.companion.Action
 import com.khumam.gbaduo.companion.LayoutParser
 import com.khumam.gbaduo.companion.style.CssParser
 import com.khumam.gbaduo.companion.style.PseudoState
@@ -191,5 +192,113 @@ class CompanionTreeTest {
         val textStyle = t.root.child(0).computed
         t.update(mapOf("a" to "x", "v" to 0.5))
         assertTrue(textStyle === t.root.child(0).computed)
+    }
+
+    // ---- onClick, pages and UI state -----------------------------------------------
+
+    private val partyWithDetail = """{"type":"pages","pages":[
+        {"name":"party","child":{"type":"list","items":"${'$'}party","template":
+          {"type":"row","class":"mon","onClick":[{"set":{"selected":"{@index}","name":"{name}"}},{"navigate":"detail"}],
+           "children":[{"type":"text","text":"{name}"}]}}},
+        {"name":"detail","child":{"type":"column","children":[
+          {"type":"button","text":"Back","onClick":"back"},
+          {"type":"text","text":"{detail.name} #{ui.selected}"},
+          {"type":"button","text":"Heal","onClick":{"call":"heal","args":["{ui.selected}","{detail.name}"]}}
+        ]}}
+      ]}"""
+
+    @Test
+    fun tappingAListItemNavigatesToItsDetailPage() {
+        val t = tree(partyWithDetail)
+        val uiChanges = mutableListOf<Map<String, Any?>>()
+        t.onUiChange = { uiChanges += it }
+        t.update(mapOf("party" to listOf(mapOf("name" to "Bulba"), mapOf("name" to "Pika")), "detail" to mapOf("name" to "?")))
+        val partyPage = t.root.child(0)
+        val detailPage = t.root.child(1)
+        assertEquals(mapOf<String, Any?>("page" to "party"), t.ui)
+        assertFalse(partyPage.hidden)
+        assertTrue(detailPage.hidden)
+
+        partyPage.children[2].onClick!!.invoke() // "Pika" (children[0] is the list's empty part)
+        assertEquals(mapOf<String, Any?>("page" to "detail", "selected" to 1L, "name" to "Pika"), t.ui)
+        assertEquals(listOf(t.ui), uiChanges)
+        assertTrue(partyPage.hidden)
+        assertFalse(detailPage.hidden)
+        assertEquals("? #1", detailPage.child(1).text) // bindings re-ran with the new ui at once
+
+        t.update(mapOf("party" to emptyList<Any>(), "detail" to mapOf("name" to "Pika")))
+        assertEquals("Pika #1", detailPage.child(1).text)
+
+        detailPage.child(0).onClick!!.invoke() // Back
+        assertEquals("party", t.ui["page"])
+        assertFalse(partyPage.hidden)
+        assertEquals(1L, t.ui["selected"]) // other ui state stays
+    }
+
+    @Test
+    fun aCallRunsAfterTheUiChangeFromTheSameTap() {
+        val t = tree(
+            """{"type":"list","items":"${'$'}party","template":{"type":"box",
+                 "onClick":[{"call":"open","args":["{@index}","{name}","Lv {level}",true]},{"set":{"selected":"{@index}"}}]}}""",
+        )
+        val events = mutableListOf<String>()
+        t.onUiChange = { events += "ui ${it["selected"]}" }
+        t.onCall = { name, args -> events += "call $name $args" }
+        t.update(mapOf("party" to listOf(mapOf("name" to "A", "level" to 5L), mapOf("name" to "B", "level" to 7L))))
+        t.root.children[2].onClick!!.invoke()
+        assertEquals(listOf("ui 1", "call open [1, B, Lv 7, true]"), events)
+    }
+
+    @Test
+    fun backWithoutHistoryReturnsToTheInitialPageAndHistoryNests() {
+        val t = tree(
+            """{"type":"pages","initial":"a","pages":[
+                 {"name":"a","child":{"type":"spacer"}},{"name":"b","child":{"type":"spacer"}},{"name":"c","child":{"type":"spacer"}}]}""",
+        )
+        t.update(emptyMap<String, Any?>())
+        t.perform(listOf(Action.Navigate("b", "page"), Action.Navigate("c", "page")))
+        assertEquals("c", t.ui["page"])
+        t.perform(listOf(Action.Back("page")))
+        assertEquals("b", t.ui["page"])
+        t.perform(listOf(Action.Back("page")))
+        assertEquals("a", t.ui["page"])
+        t.perform(listOf(Action.Set(mapOf("page" to "b"))))
+        t.perform(listOf(Action.Back("page"))) // a plain `set` leaves no history: back to the initial page
+        assertEquals("a", t.ui["page"])
+    }
+
+    @Test
+    fun anUnknownPageShowsTheInitialOneAndNoChangeReportsNothing() {
+        val t = tree("""{"type":"pages","pages":[{"name":"a","child":{"type":"spacer"}},{"name":"b","child":{"type":"spacer"}}]}""")
+        var changes = 0
+        t.onUiChange = { changes++ }
+        t.update(emptyMap<String, Any?>())
+        t.perform(listOf(Action.Set(mapOf("page" to "typo"))))
+        assertFalse(t.root.child(0).hidden)
+        assertTrue(t.root.child(1).hidden)
+        t.perform(listOf(Action.Set(mapOf("page" to "typo"))))
+        assertEquals(1, changes)
+    }
+
+    @Test
+    fun scriptResultsDriveNavigationWithoutAContext() {
+        val t = tree(partyWithDetail)
+        t.update(mapOf("party" to emptyList<Any>()))
+        // What `return { set = { selected = 0 }, navigate = "detail" }` from actions.* becomes.
+        t.perform(listOf(Action.Set(mapOf("selected" to 0L)), Action.Navigate("detail", "page")))
+        assertEquals("detail", t.ui["page"])
+        assertFalse(t.root.child(1).hidden)
+        assertEquals(" #0", t.root.child(1, 1).text)
+    }
+
+    @Test
+    fun buttonsGetDefaultStylesALabelAndPressedState() {
+        val t = tree("""{"type":"button","text":"Go","onClick":{"navigate":"x"}}""")
+        val button = t.root
+        assertEquals("row", button.computed!!.keyword("flex-direction"))
+        assertEquals("Go", button.child(0).text)
+        assertTrue("label" in button.child(0).style.staticClasses)
+        t.setPressed(button, true)
+        assertEquals(0.7f, button.computed!!.opacity, 0.001f)
     }
 }

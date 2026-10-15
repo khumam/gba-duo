@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.companion.tree
 
 import androidx.compose.ui.graphics.ImageBitmap
+import com.khumam.gbaduo.companion.Action
 import com.khumam.gbaduo.companion.Binding
 import com.khumam.gbaduo.companion.ScopedValues
 import com.khumam.gbaduo.companion.Widget
@@ -21,6 +22,11 @@ import java.util.Locale
  * snapshots. Each [update] re-runs bindings and re-resolves only the nodes whose
  * classes, states or bound styles changed; the Compose UI just reads the result.
  *
+ * It also holds the UI state (`$ui.*`): which page each `pages` widget shows and
+ * whatever taps `set`. Taps run their widget's `onClick` actions here; a `call`
+ * goes to [onCall], and every UI state change is reported to [onUiChange] (so the
+ * pack script sees it as `ui`).
+ *
  * Platform-neutral: images come from [loadImage] (an `asset:` path or a `gfx:`
  * sprite key; null if not available yet). Main thread only.
  */
@@ -33,7 +39,21 @@ class CompanionTree(
     private val resolver = StyleResolver(builtIn, pack)
     private val dirty = LinkedHashSet<CompanionNode>()
 
+    private val uiState = LinkedHashMap<String, Any?>()
+    private val history = HashMap<String, ArrayDeque<String>>()
+    private val initialPages = HashMap<String, String>()
+    private var snapshot: Any? = null
+
+    /** Called with a script action to run (`call`), after any UI state change from the same tap. */
+    var onCall: (name: String, args: List<Any?>) -> Unit = { _, _ -> }
+
+    /** Called with the new UI state whenever it changes. */
+    var onUiChange: (Map<String, Any?>) -> Unit = {}
+
     val root: CompanionNode = inflate(rootWidget, parent = null)
+
+    /** The current UI state (`$ui.*`): page names and values set by taps. */
+    val ui: Map<String, Any?> get() = LinkedHashMap(uiState)
 
     /** Problems found while resolving styles (e.g. a `var()` with no value). */
     val warnings: Collection<String> get() = resolver.warnings
@@ -45,13 +65,72 @@ class CompanionTree(
         flush()
     }
 
-    /**
-     * Applies a snapshot: a `Map<String, Any?>` at the top level, or a
-     * [ScopedValues] for a list item's template.
-     */
+    /** Applies a snapshot (the pack's values as a `Map<String, Any?>`); bindings also see `ui`. */
     fun update(context: Any?) {
-        updateNode(root, context)
+        snapshot = context
+        rebind()
+    }
+
+    private fun rebind() {
+        updateNode(root, withUi(snapshot))
         flush()
+    }
+
+    private fun withUi(context: Any?): Any? {
+        val ui = LinkedHashMap(uiState)
+        return when (context) {
+            is Map<*, *> -> LinkedHashMap<Any?, Any?>(context).apply { put(UI_KEY, ui) }
+            null -> mapOf(UI_KEY to ui)
+            else -> context
+        }
+    }
+
+    /**
+     * Runs [actions]: from a tap (with the tapped widget's binding [context]) or
+     * returned by a script action (no context). UI changes apply at once.
+     */
+    fun perform(actions: List<Action>, context: Any? = null) {
+        var changed = false
+        val calls = mutableListOf<Action.Call>()
+        fun setUi(key: String, value: Any?) {
+            if (key in uiState && uiState[key] == value) return
+            uiState[key] = value
+            changed = true
+        }
+        for (action in actions) {
+            when (action) {
+                is Action.Set -> for ((key, value) in action.values) setUi(key, actionValue(value, context))
+                is Action.Navigate -> {
+                    val page = Binding.interpolate(action.page, context)
+                    val current = uiState[action.state]?.toString()
+                    if (page != current) {
+                        if (current != null) {
+                            val stack = history.getOrPut(action.state) { ArrayDeque() }
+                            stack.addLast(current)
+                            if (stack.size > MAX_HISTORY) stack.removeFirst()
+                        }
+                        setUi(action.state, page)
+                    }
+                }
+                is Action.Back -> {
+                    val previous = history[action.state]?.removeLastOrNull() ?: initialPages[action.state]
+                    if (previous != null) setUi(action.state, previous)
+                }
+                is Action.Call -> calls += Action.Call(action.name, action.args.map { actionValue(it, context) })
+            }
+        }
+        if (changed) {
+            rebind()
+            onUiChange(ui)
+        }
+        for (call in calls) onCall(call.name, call.args)
+    }
+
+    /** A whole-string `{path}` keeps the bound value's type (e.g. `{@index}` stays a number). */
+    private fun actionValue(value: Any?, context: Any?): Any? {
+        if (value !is String) return value
+        val whole = WHOLE_BINDING.matchEntire(value) ?: return Binding.interpolate(value, context)
+        return Binding.resolve(whole.groupValues[1], context)
     }
 
     /** The screen's size in CSS px, for `vw`/`vh`. */
@@ -78,6 +157,8 @@ class CompanionTree(
         is Widget.Column -> "column"
         is Widget.Row -> "row"
         is Widget.Tabs -> "tabs"
+        is Widget.Pages -> "pages"
+        is Widget.Button -> "button"
         is Widget.Text -> "text"
         is Widget.Bar -> "bar"
         is Widget.Image -> "image"
@@ -107,11 +188,13 @@ class CompanionTree(
         val node = CompanionNode(StyleNode(typeName(widget), meta.id, meta.classes, defaults, meta.inline), CompanionNode.Kind.WIDGET, widget)
         attach(node, parent)
         bindCommon(node, widget)
+        if (meta.onClick.isNotEmpty()) bindClick(node, meta.onClick)
 
         when (widget) {
             is Widget.Column -> widget.children.forEach { inflate(it, node) }
             is Widget.Row -> widget.children.forEach { inflate(it, node) }
             is Widget.Box -> widget.children.forEach { inflate(it, node) }
+            is Widget.Button -> widget.children.forEach { inflate(it, node) }
             is Widget.Text -> {
                 // Placeholders render empty until the first snapshot instead of showing "{hp}".
                 node.text = Binding.interpolate(widget.text, null)
@@ -122,6 +205,7 @@ class CompanionTree(
             is Widget.Bar -> buildBar(node, widget)
             is Widget.ItemList -> buildList(node, widget)
             is Widget.Tabs -> buildTabs(node, widget)
+            is Widget.Pages -> buildPages(node, widget)
         }
         return node
     }
@@ -149,6 +233,12 @@ class CompanionTree(
                 setBound(node, declarations)
             }
         }
+    }
+
+    private fun bindClick(node: CompanionNode, actions: List<Action>) {
+        var context: Any? = null
+        node.bindings += { ctx -> context = ctx }
+        node.onClick = { perform(actions, context) }
     }
 
     private fun setBound(node: CompanionNode, declarations: List<Declaration>) {
@@ -246,7 +336,7 @@ class CompanionTree(
             labels.forEachIndexed { i, label ->
                 label.style.states = if (i == index) label.style.states + PseudoState.ACTIVE else label.style.states - PseudoState.ACTIVE
             }
-            panels.forEachIndexed { i, panel -> panel.hiddenByTabs = i != index }
+            panels.forEachIndexed { i, panel -> panel.hiddenBySwitch = i != index }
             markDirty(node)
         }
         labels.forEachIndexed { i, label ->
@@ -256,6 +346,22 @@ class CompanionTree(
             }
         }
         select(0)
+    }
+
+    // ---- pages ----------------------------------------------------------------------
+
+    private fun buildPages(node: CompanionNode, widget: Widget.Pages) {
+        initialPages.putIfAbsent(widget.state, widget.initial)
+        if (widget.state !in uiState) uiState[widget.state] = widget.initial
+        val panels = widget.pages.map { inflate(it.child, node) }
+        fun show(name: String?) {
+            // An unknown page name (e.g. a typo in a `set`) shows the initial page.
+            val index = widget.pages.indexOfFirst { it.name == name }.takeIf { it >= 0 }
+                ?: widget.pages.indexOfFirst { it.name == widget.initial }
+            panels.forEachIndexed { i, panel -> panel.hiddenBySwitch = i != index }
+        }
+        show(widget.initial)
+        node.bindings += { _ -> show(uiState[widget.state]?.toString()) }
     }
 
     // ---- updating and styling -------------------------------------------------
@@ -288,6 +394,11 @@ class CompanionTree(
     }
 
     companion object {
+        /** The snapshot key bindings read UI state from (`$ui.page`). */
+        const val UI_KEY = "ui"
+        private const val MAX_HISTORY = 32
+        private val WHOLE_BINDING = Regex("^\\{([^{}]+)\\}$")
+
         /** The original single-`child` box: a frame around its child that doesn't stretch in its parent. */
         private val LEGACY_BOX_DEFAULTS = listOf(
             Declaration("display", "stack"),

@@ -5,32 +5,68 @@
       { "type": "text", "class": "title", "text": "{trainer}'s party" },
       { "type": "text", "class": "money", "text": "₽{money}" }
     ]},
-    { "type": "tabs", "tabs": [
-      { "title": "Party", "child":
-        { "type": "list", "class": "party", "items": "$party", "template":
-          { "type": "box", "class": "mon",
-            "classIf": { "fainted": "$fainted", "low": "$low" },
-            "bindStyle": { "--type": "{typeColor}" },
-            "children": [
-              { "type": "row", "class": "mon-head", "children": [
-                { "type": "image", "class": "sprite", "src": "$icon" },
-                { "type": "box", "class": "mon-info", "children": [
-                  { "type": "text", "class": "name", "text": "{name}" },
-                  { "type": "text", "class": "level", "text": "Lv{level}" }
-                ]}
-              ]},
-              { "type": "bar", "value": "$hp", "maxKey": "$maxHp", "label": "{hp}/{maxHp}" }
-            ]
+    { "type": "pages", "pages": [
+      { "name": "main", "child":
+        { "type": "tabs", "tabs": [
+          { "title": "Party", "child":
+            { "type": "list", "class": "party", "items": "$party", "template":
+              { "type": "box", "class": "mon",
+                "classIf": { "fainted": "$fainted", "low": "$low" },
+                "bindStyle": { "--type": "{typeColor}" },
+                "onClick": [ { "set": { "selected": "{@index}" } }, { "navigate": "detail" } ],
+                "children": [
+                  { "type": "row", "class": "mon-head", "children": [
+                    { "type": "image", "class": "sprite", "src": "$icon" },
+                    { "type": "box", "class": "mon-info", "children": [
+                      { "type": "text", "class": "name", "text": "{name}" },
+                      { "type": "text", "class": "level", "text": "Lv{level}" }
+                    ]}
+                  ]},
+                  { "type": "bar", "value": "$hp", "maxKey": "$maxHp", "label": "{hp}/{maxHp}" }
+                ]
+              }
+            }
+          },
+          { "title": "Bag", "child":
+            { "type": "list", "class": "bag", "items": "$bag", "empty": "Bag is empty", "template":
+              { "type": "row", "class": "item", "children": [
+                { "type": "text", "class": "item-name", "text": "{name}" },
+                { "type": "text", "class": "qty", "text": "×{qty}" }
+              ]}
+            }
           }
-        }
+        ]}
       },
-      { "title": "Bag", "child":
-        { "type": "list", "class": "bag", "items": "$bag", "empty": "Bag is empty", "template":
-          { "type": "row", "class": "item", "children": [
-            { "type": "text", "class": "item-name", "text": "{name}" },
-            { "type": "text", "class": "qty", "text": "×{qty}" }
-          ]}
-        }
+      { "name": "detail", "child":
+        { "type": "column", "class": "detail", "bindStyle": { "--type": "{detail.typeColor}" }, "children": [
+          { "type": "button", "class": "back", "text": "‹ Party", "onClick": "back" },
+          { "type": "row", "class": "detail-head", "children": [
+            { "type": "image", "class": "detail-sprite", "src": "$detail.icon" },
+            { "type": "box", "class": "detail-info", "children": [
+              { "type": "text", "class": "detail-name", "text": "{detail.name}" },
+              { "type": "text", "class": "level", "text": "Lv{detail.level} · HP {detail.hp}/{detail.maxHp}" },
+              { "type": "list", "class": "chips", "items": "$detail.types", "template":
+                { "type": "text", "class": "chip", "text": "{name}", "bindStyle": { "background-color": "{color}" } }
+              }
+            ]}
+          ]},
+          { "type": "text", "class": "section", "text": "Stats" },
+          { "type": "list", "class": "stats", "items": "$detail.stats", "template":
+            { "type": "row", "class": "stat", "children": [
+              { "type": "text", "class": "stat-name", "text": "{name}" },
+              { "type": "text", "class": "stat-value", "text": "{value}" },
+              { "type": "bar", "value": "$value", "max": 100 }
+            ]}
+          },
+          { "type": "text", "class": "section", "text": "Weak to" },
+          { "type": "list", "class": "chips", "items": "$detail.weak", "empty": "Nothing", "template":
+            { "type": "text", "class": "chip", "text": "{name} {label}", "bindStyle": { "background-color": "{color}" } }
+          },
+          { "type": "text", "class": "section", "text": "Resists" },
+          { "type": "list", "class": "chips", "items": "$detail.resist", "empty": "Nothing", "template":
+            { "type": "text", "class": "chip", "text": "{name} {label}", "bindStyle": { "background-color": "{color}" } }
+          }
+        ]}
       }
     ]}
   ]

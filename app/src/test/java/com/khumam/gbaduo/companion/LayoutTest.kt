@@ -189,4 +189,64 @@ class LayoutTest {
         val widget = LayoutParser.parse("""{"type":"text","text":"hi"}""") as Widget.Text
         assertNull(widget.font)
     }
+
+    @Test
+    fun parsesPagesAndButtons() {
+        val widget = LayoutParser.parse(
+            """{"type":"pages","state":"screen","initial":"b","pages":[
+                 {"name":"a","child":{"type":"text","text":"A"}},
+                 {"name":"b","child":{"type":"button","text":"Go {x}","onClick":{"navigate":"a","state":"screen"},
+                   "children":[{"type":"spacer"}]}}
+               ]}""",
+        )
+        val pages = widget as Widget.Pages
+        assertEquals("screen", pages.state)
+        assertEquals("b", pages.initial)
+        assertEquals(listOf("a", "b"), pages.pages.map { it.name })
+        val button = pages.pages[1].child as Widget.Button
+        assertEquals(listOf(Action.Navigate("a", "screen")), button.meta.onClick)
+        val label = button.children[0] as Widget.Text
+        assertEquals("Go {x}", label.text)
+        assertEquals(setOf("label"), label.meta.classes)
+        assertTrue(button.children[1] is Widget.Spacer)
+    }
+
+    @Test
+    fun pagesDefaultToTheFirstPageAndThePageKey() {
+        val pages = LayoutParser.parse("""{"type":"pages","pages":[{"name":"main","child":{"type":"spacer"}}]}""") as Widget.Pages
+        assertEquals("page", pages.state)
+        assertEquals("main", pages.initial)
+    }
+
+    @Test
+    fun invalidPagesAreRejected() {
+        val bad = listOf(
+            """{"type":"pages","pages":[]}""",
+            """{"type":"pages"}""",
+            """{"type":"pages","initial":"nope","pages":[{"name":"a","child":{"type":"spacer"}}]}""",
+            """{"type":"pages","pages":[{"name":"a","child":{"type":"spacer"}},{"name":"a","child":{"type":"spacer"}}]}""",
+            """{"type":"pages","state":"a.b","pages":[{"name":"a","child":{"type":"spacer"}}]}""",
+        )
+        for (json in bad) {
+            try {
+                LayoutParser.parse(json)
+                throw AssertionError("expected rejection: $json")
+            } catch (_: LayoutParser.InvalidLayoutException) {
+            }
+        }
+    }
+
+    @Test
+    fun onClickWorksOnAnyWidgetAndBadActionsWarn() {
+        val parsed = LayoutParser.parseWithWarnings(
+            """{"type":"row","onClick":[{"set":{"selected":"{@index}"}},{"navigate":"detail"}],"children":[
+                 {"type":"text","text":"x","onClick":"sideways"}
+               ]}""",
+        )
+        val row = parsed.root as Widget.Row
+        assertEquals(listOf(Action.Set(mapOf("selected" to "{@index}")), Action.Navigate("detail", "page")), row.meta.onClick)
+        assertTrue(row.children[0].meta.onClick.isEmpty())
+        assertEquals(1, parsed.warnings.size)
+        assertTrue(parsed.warnings[0].message.contains("onClick"))
+    }
 }
