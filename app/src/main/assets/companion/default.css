@@ -69,14 +69,29 @@ bar > label {
     white-space: nowrap;
 }
 
+/* `flex: 1 1 auto` lets tabs (and tab-content below) actually fill whatever space their
+ * own flex-column parent gives them instead of sizing to content only — the default
+ * flex-grow is 0, so without this a tabs/tab-content box stays exactly as tall as its
+ * content even when its parent has more room to give. `min-height: 0` is the necessary
+ * companion: a flex item's default min-height is auto (never shrink below content), which
+ * would otherwise stop this from ever bounding *below* its content's natural height — the
+ * exact case that matters for a scrollable list inside a tab: without it, a `list` with
+ * `overflow: auto` never gets an actual bounded height to clip against, so there's nothing
+ * to scroll. */
 tabs {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
+/* Never squeezed by a tall tab-content: with tabs filling its parent and min-height
+ * auto treated as 0, a shrinking flex column would otherwise take height from the strip
+ * too, in proportion to its size. */
 tab-bar {
     display: flex;
     flex-direction: row;
+    flex-shrink: 0;
 }
 
 tab {
@@ -92,6 +107,7 @@ tab-content {
     display: stack;
     place-items: stretch;
     flex: 1 1 auto;
+    min-height: 0;
 }
 
 empty {
@@ -102,6 +118,7 @@ pages {
     display: stack;
     place-items: stretch;
     flex: 1 1 auto;
+    min-height: 0;
 }
 
 button {
