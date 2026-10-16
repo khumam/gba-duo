@@ -22,6 +22,10 @@ class QuickMenu(
     private var swapAb = false
     private var ffSpeed = 2
     private var shader = initialShader
+    private var dialog: AlertDialog? = null
+
+    /** True while the menu (or its slot picker) is open; it has input focus then. */
+    val isShowing: Boolean get() = dialog?.isShowing == true
 
     fun show() {
         emu.paused = true
@@ -35,7 +39,7 @@ class QuickMenu(
             context.getString(R.string.quit),
         ).toTypedArray()
 
-        AlertDialog.Builder(context)
+        dialog = AlertDialog.Builder(context)
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> emu.paused = false
@@ -73,7 +77,7 @@ class QuickMenu(
             }
         }.toTypedArray()
 
-        AlertDialog.Builder(context)
+        dialog = AlertDialog.Builder(context)
             .setItems(labels) { _, which ->
                 val slot = which + 1
                 emu.requestState(states.slotPath(slot), save)

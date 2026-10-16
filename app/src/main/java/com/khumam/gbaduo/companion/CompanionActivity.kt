@@ -26,10 +26,9 @@ class CompanionActivity : Activity() {
     class Session internal constructor(
         internal val controller: CompanionController,
         internal val onKey: (KeyEvent) -> Boolean,
-        internal val onShown: () -> Unit,
+        internal val onBecameTop: () -> Unit,
     ) {
         internal var activity: CompanionActivity? = null
-        internal var shown = false
     }
 
     private val owner = ComposeHostOwner()
@@ -54,13 +53,14 @@ class CompanionActivity : Activity() {
         if (current !== session) recreate()
     }
 
-    override fun onResume() {
-        super.onResume()
-        val s = session ?: return
-        if (!s.shown) {
-            s.shown = true
-            s.onShown()
-        }
+    /**
+     * Android makes the most recently started or raised activity the "top" one, and
+     * focus can follow it to this screen. This window can't take focus itself, but the
+     * game is told every time so it can take the controller back.
+     */
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        if (isTopResumedActivity) session?.onBecameTop?.invoke()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean =
@@ -78,18 +78,19 @@ class CompanionActivity : Activity() {
         private var current: Session? = null
 
         /**
-         * Shows [controller] on display [displayId] (the main display). [onShown] runs once
-         * it's on screen. Null if Android refused to start it there.
+         * Shows [controller] on display [displayId] (the main display). [onBecameTop] runs
+         * whenever it becomes Android's top activity (when it opens, for one). Null if
+         * Android refused to start it there.
          */
         fun show(
             from: Activity,
             displayId: Int,
             controller: CompanionController,
             onKey: (KeyEvent) -> Boolean,
-            onShown: () -> Unit,
+            onBecameTop: () -> Unit,
         ): Session? {
             current?.let(::close)
-            val session = Session(controller, onKey, onShown)
+            val session = Session(controller, onKey, onBecameTop)
             current = session
             val intent = Intent(from, CompanionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId)

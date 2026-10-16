@@ -34,6 +34,7 @@ class PlayerActivity : Activity() {
     private var companionScreen: CompanionController? = null
     private var companionPresentation: CompanionPresentation? = null
     private var companionActivity: CompanionActivity.Session? = null
+    private var resumed = false
 
     private val prefs by lazy { getSharedPreferences("player", MODE_PRIVATE) }
     private var savedShader: ShaderPreset
@@ -126,7 +127,7 @@ class PlayerActivity : Activity() {
                 companionPresentation = CompanionPresentation(this, display, controller, onKey = ::handleKeyEvent).also { it.show() }
             }
             is CompanionPlacement.Target.Activity -> {
-                companionActivity = CompanionActivity.show(this, target.displayId, controller, onKey = ::handleKeyEvent, onShown = ::keepFocusOnGame)
+                companionActivity = CompanionActivity.show(this, target.displayId, controller, onKey = ::handleKeyEvent, onBecameTop = ::keepFocusOnGame)
                     ?: return
             }
             CompanionPlacement.Target.None -> return
@@ -149,16 +150,24 @@ class PlayerActivity : Activity() {
     }
 
     /**
-     * Starting [CompanionActivity] on the main screen can briefly hand that screen the
-     * input focus (its own window can't take focus, but what's behind it might). If the
-     * game lost focus that way, bring it back so the controller keeps driving the game.
+     * Keeps the controller on the game. Android sends controller input to the focused
+     * window, and focus can follow the "top" activity to the other screen: that happens
+     * when [CompanionActivity] opens on the main screen, or is raised there again. The
+     * companion's windows can't take focus themselves (and a [CompanionPresentation] is no
+     * activity at all), so this is the one case to handle: each time, if the game has lost
+     * focus a moment later, it moves itself back to the front and takes it back.
+     * Not while the quick menu is open (it has focus then) or the game is in the background.
      */
     private fun keepFocusOnGame() {
-        window.decorView.postDelayed({
-            if (!isFinishing && !hasWindowFocus()) {
-                getSystemService(ActivityManager::class.java).moveTaskToFront(taskId, 0)
-            }
-        }, FOCUS_CHECK_DELAY_MS)
+        val decor = window.decorView
+        decor.removeCallbacks(reclaimFocus)
+        decor.postDelayed(reclaimFocus, FOCUS_CHECK_DELAY_MS)
+    }
+
+    private val reclaimFocus = Runnable {
+        if (resumed && !isFinishing && !hasWindowFocus() && quickMenu?.isShowing != true) {
+            getSystemService(ActivityManager::class.java).moveTaskToFront(taskId, 0)
+        }
     }
 
     /** Shared by this activity and the companion screen, so the game gets the controller whichever window has focus. */
@@ -189,12 +198,14 @@ class PlayerActivity : Activity() {
     }
 
     override fun onPause() {
+        resumed = false
         super.onPause()
         if (::emu.isInitialized) emu.paused = true
     }
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         if (::emu.isInitialized) emu.paused = false
     }
 
@@ -204,6 +215,7 @@ class PlayerActivity : Activity() {
             emu.join(1000)
         }
         if (::audioOut.isInitialized) audioOut.release()
+        window.decorView.removeCallbacks(reclaimFocus)
         companionPresentation?.dismiss()
         companionActivity?.let(CompanionActivity::close)
         super.onDestroy()
@@ -212,6 +224,6 @@ class PlayerActivity : Activity() {
     companion object {
         const val EXTRA_ROM_URI = "rom_uri"
         const val EXTRA_ROM_FILE_NAME = "rom_file_name"
-        private const val FOCUS_CHECK_DELAY_MS = 300L
+        private const val FOCUS_CHECK_DELAY_MS = 400L
     }
 }
