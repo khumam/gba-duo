@@ -157,5 +157,5 @@ stretch them.
 Every skipped rule, unknown property or invalid value is logged:
 
 ```
-adb logcat -s CompanionPresentation PackStyles
+adb logcat -s Companion PackStyles
 ```

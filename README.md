@@ -20,8 +20,8 @@
 </div>
 
 GBADuo is a Game Boy Advance, Game Boy Color and Game Boy player for dual-screen
-Android handhelds. The game runs on the top screen. The bottom screen is a
-**companion**: a screen built from a pack that reads your game's memory as you
+Android handhelds. The game runs on the screen you open it on (usually the top
+one), and the other screen is a **companion**: a screen built from a pack that reads your game's memory as you
 play and shows what matters, like your party and bag in Pokémon FireRed or your
 rucksack and friendships in Harvest Moon. Packs are plain files (a layout, CSS and
 a Lua script), so anyone can build one for their favorite game.
@@ -33,7 +33,8 @@ a Lua script), so anyone can build one for their favorite game.
 | AYN Thor  | Tested, made for it                                                        |
 | Others    | Should run on any dual-screen Android 11+ device (arm64), not yet tested   |
 
-The companion needs a second screen.
+The companion needs a second screen. Open GBADuo on either screen: the game
+plays there and the companion takes the other one.
 
 ## Install
 

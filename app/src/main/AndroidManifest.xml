@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Lets the game take input focus back after opening its companion on the other screen. -->
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -21,5 +24,14 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:exported="false"
             android:screenOrientation="landscape" />
+
+        <!-- The companion screen on the main display, when the game was opened on the second one. -->
+        <activity
+            android:name=".companion.CompanionActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity="${applicationId}.companion" />
     </application>
 </manifest>
