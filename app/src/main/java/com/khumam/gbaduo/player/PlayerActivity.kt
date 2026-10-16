@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.player
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
@@ -8,6 +9,9 @@ import android.view.KeyEvent
 import android.view.View
 import android.widget.Toast
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.companion.CompanionActivity
+import com.khumam.gbaduo.companion.CompanionController
+import com.khumam.gbaduo.companion.CompanionPlacement
 import com.khumam.gbaduo.companion.CompanionPresentation
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.emu.AudioOut
@@ -27,7 +31,10 @@ class PlayerActivity : Activity() {
     private lateinit var emu: EmuThread
     private lateinit var audioOut: AudioOut
     private var quickMenu: QuickMenu? = null
-    private var companionScreen: CompanionPresentation? = null
+    private var companionScreen: CompanionController? = null
+    private var companionPresentation: CompanionPresentation? = null
+    private var companionActivity: CompanionActivity.Session? = null
+    private var resumed = false
 
     private val prefs by lazy { getSharedPreferences("player", MODE_PRIVATE) }
     private var savedShader: ShaderPreset
@@ -104,27 +111,63 @@ class PlayerActivity : Activity() {
         })
     }
 
+    /**
+     * Shows the companion on the screen the game isn't on: a Presentation on the
+     * second screen when the game is on the main one, or [CompanionActivity] on the
+     * main screen when the game was opened on the second one.
+     */
     private fun setUpCompanion(header: RomHeader, crc32: Long, storage: GameStorage) {
-        val displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
-        val display = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).firstOrNull() ?: return
-
-        val presentation = CompanionPresentation(this, display, header.title, header.gameCode, crc32, onKey = ::handleKeyEvent)
-        presentation.show()
-        companionScreen = presentation
+        val displayManager = getSystemService(DisplayManager::class.java)
+        val gameDisplay = display?.displayId ?: CompanionPlacement.MAIN_DISPLAY
+        val presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).map { it.displayId }
+        val controller = CompanionController(this, header.title, header.gameCode, crc32)
+        when (val target = CompanionPlacement.choose(gameDisplay, presentationDisplays)) {
+            is CompanionPlacement.Target.Presentation -> {
+                val display = displayManager.getDisplay(target.displayId) ?: return
+                companionPresentation = CompanionPresentation(this, display, controller, onKey = ::handleKeyEvent).also { it.show() }
+            }
+            is CompanionPlacement.Target.Activity -> {
+                companionActivity = CompanionActivity.show(this, target.displayId, controller, onKey = ::handleKeyEvent, onBecameTop = ::keepFocusOnGame)
+                    ?: return
+            }
+            CompanionPlacement.Target.None -> return
+        }
+        companionScreen = controller
 
         val packsDir = File(filesDir, "packs")
         val manifest = storage.packId?.let { PackStore(packsDir).byId(it) } ?: return
         val packDir = File(packsDir, manifest.id)
-        if (!presentation.showPack(manifest, packDir)) return
+        if (!controller.showPack(manifest, packDir)) return
 
         emu.activePackDir = packDir
         emu.activePack = manifest
         emu.onSnapshot = { snapshot -> runOnUiThread { companionScreen?.update(snapshot) } }
         // Taps on the companion screen reach the pack's Lua through the emu thread.
         emu.onActionResult = { result -> runOnUiThread { companionScreen?.applyScriptResult(result) } }
-        presentation.onUiChange = emu::setUiState
-        presentation.onScriptCall = emu::callAction
-        emu.setUiState(presentation.uiState)
+        controller.onUiChange = emu::setUiState
+        controller.onScriptCall = emu::callAction
+        emu.setUiState(controller.uiState)
+    }
+
+    /**
+     * Keeps the controller on the game. Android sends controller input to the focused
+     * window, and focus can follow the "top" activity to the other screen: that happens
+     * when [CompanionActivity] opens on the main screen, or is raised there again. The
+     * companion's windows can't take focus themselves (and a [CompanionPresentation] is no
+     * activity at all), so this is the one case to handle: each time, if the game has lost
+     * focus a moment later, it moves itself back to the front and takes it back.
+     * Not while the quick menu is open (it has focus then) or the game is in the background.
+     */
+    private fun keepFocusOnGame() {
+        val decor = window.decorView
+        decor.removeCallbacks(reclaimFocus)
+        decor.postDelayed(reclaimFocus, FOCUS_CHECK_DELAY_MS)
+    }
+
+    private val reclaimFocus = Runnable {
+        if (resumed && !isFinishing && !hasWindowFocus() && quickMenu?.isShowing != true) {
+            getSystemService(ActivityManager::class.java).moveTaskToFront(taskId, 0)
+        }
     }
 
     /** Shared by this activity and the companion screen, so the game gets the controller whichever window has focus. */
@@ -155,12 +198,14 @@ class PlayerActivity : Activity() {
     }
 
     override fun onPause() {
+        resumed = false
         super.onPause()
         if (::emu.isInitialized) emu.paused = true
     }
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         if (::emu.isInitialized) emu.paused = false
     }
 
@@ -170,12 +215,15 @@ class PlayerActivity : Activity() {
             emu.join(1000)
         }
         if (::audioOut.isInitialized) audioOut.release()
-        companionScreen?.dismiss()
+        window.decorView.removeCallbacks(reclaimFocus)
+        companionPresentation?.dismiss()
+        companionActivity?.let(CompanionActivity::close)
         super.onDestroy()
     }
 
     companion object {
         const val EXTRA_ROM_URI = "rom_uri"
         const val EXTRA_ROM_FILE_NAME = "rom_file_name"
+        private const val FOCUS_CHECK_DELAY_MS = 400L
     }
 }
