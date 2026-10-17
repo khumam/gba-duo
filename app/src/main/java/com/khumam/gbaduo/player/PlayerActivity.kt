@@ -19,6 +19,7 @@ import com.khumam.gbaduo.emu.EmuThread
 import com.khumam.gbaduo.emu.GameView
 import com.khumam.gbaduo.emu.InputMapper
 import com.khumam.gbaduo.emu.ShaderPreset
+import com.khumam.gbaduo.library.RomArchive
 import com.khumam.gbaduo.library.RomHeader
 import com.khumam.gbaduo.library.RomIndex
 import com.khumam.gbaduo.storage.GameStorage
@@ -60,18 +61,20 @@ class PlayerActivity : Activity() {
             return
         }
 
-        val romBytes = runCatching {
-            contentResolver.openInputStream(Uri.parse(romUriString))?.use { it.readBytes() }
+        // A zip is unpacked here: the core gets the ROM's own bytes either way.
+        val rom = runCatching {
+            contentResolver.openInputStream(Uri.parse(romUriString))?.use { RomArchive.readRom(romFileName, it) }
         }.getOrNull()
-        if (romBytes == null) {
+        if (rom == null) {
             Toast.makeText(this, getString(R.string.load_failed, romFileName), Toast.LENGTH_SHORT).show()
             finish()
             return
         }
+        val romBytes = rom.bytes
 
         // Everything about this game lives in one folder keyed by platform + ROM CRC.
         // mGBA's own CRC32 is over the same bytes, so this matches NativeCore.crc32().
-        val header = RomHeader.parse(romFileName, romBytes.copyOf(minOf(romBytes.size, RomHeader.SIZE)))
+        val header = RomHeader.parse(rom.fileName, romBytes.copyOf(minOf(romBytes.size, RomHeader.SIZE)))
         val crc32 = RomIndex.crc32Of(romBytes)
         val storage = GameStorage.forGame(filesDir, header.platform, header.title, header.gameCode, crc32)
         LegacyMigration.migrate(filesDir, romFileName, crc32, storage)

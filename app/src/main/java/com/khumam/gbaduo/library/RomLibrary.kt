@@ -33,9 +33,9 @@ data class RomEntry(
 data class LibraryFolder(val uri: Uri, val name: String)
 
 /**
- * Lists `.gba`/`.gb`/`.gbc` files in every user-picked folder (each scanned one
- * level deep) via the Storage Access Framework. [list] does blocking I/O: call it
- * off the main thread.
+ * Lists `.gba`/`.gb`/`.gbc` files, and `.zip`s holding one, in every user-picked
+ * folder (each scanned one level deep) via the Storage Access Framework. [list]
+ * does blocking I/O: call it off the main thread.
  */
 class RomLibrary(private val context: Context) {
 
@@ -88,14 +88,14 @@ class RomLibrary(private val context: Context) {
         val uri = entry.uri ?: return null
         val key = uri.toString()
         index.crc32(key, entry.size, entry.lastModified)?.let { return it }
-        val crc = context.contentResolver.openInputStream(uri)?.use { RomIndex.crc32Of(it) } ?: return null
+        val crc = context.contentResolver.openInputStream(uri)?.use { RomArchive.crc32(entry.fileName, it) } ?: return null
         index.put(key, entry.size, entry.lastModified, crc)
         return crc
     }
 
     private fun collectRomFiles(dir: DocumentFile, depth: Int = 0): List<DocumentFile> {
         val children = dir.listFiles()
-        val files = children.filter { it.isFile && it.name?.let(RomHeader::isRomFileName) == true }
+        val files = children.filter { it.isFile && it.name?.let(RomArchive::isLibraryFileName) == true }
         if (depth >= 1) return files
         val subfolders = children.filter { it.isDirectory }
         return files + subfolders.flatMap { collectRomFiles(it, depth + 1) }
@@ -104,20 +104,13 @@ class RomLibrary(private val context: Context) {
     private fun readEntry(resolver: ContentResolver, file: DocumentFile): RomEntry? {
         val uri = file.uri
         val name = file.name ?: return null
-        val header = ByteArray(RomHeader.SIZE)
-        val read = runCatching {
-            resolver.openInputStream(uri)?.use { stream ->
-                var read = 0
-                while (read < header.size) {
-                    val n = stream.read(header, read, header.size - read)
-                    if (n < 0) break
-                    read += n
-                }
-                read
-            }
+        // For a zip, the header (and the platform fallback) come from the ROM inside;
+        // a zip without a ROM isn't listed.
+        val rom = runCatching {
+            resolver.openInputStream(uri)?.use { RomArchive.readHeader(name, it) }
         }.getOrNull() ?: return null
-        return RomEntry.fromHeader(name, header.copyOf(read), uri)
-            .copy(size = file.length(), lastModified = file.lastModified())
+        return RomEntry.fromHeader(rom.fileName, rom.bytes, uri)
+            .copy(fileName = name, size = file.length(), lastModified = file.lastModified())
     }
 
     companion object {
