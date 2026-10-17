@@ -67,7 +67,10 @@ internal fun Window.setUpForCompanion() {
         layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
     }
     setDecorFitsSystemWindows(false)
-    insetsController?.apply {
+    // Window.insetsController reads the decor without creating it, and a Presentation
+    // calls this before setContentView, when there's no decor yet (NPE on Android 13).
+    // Window.decorView creates it; its controller is the same one.
+    decorView.windowInsetsController?.apply {
         systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         hide(WindowInsets.Type.systemBars())
     }
