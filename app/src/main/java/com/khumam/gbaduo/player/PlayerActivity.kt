@@ -1,7 +1,8 @@
 package com.khumam.gbaduo.player
 
 import android.app.Activity
-import android.app.ActivityManager
+import android.app.ActivityOptions
+import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
@@ -36,6 +37,14 @@ class PlayerActivity : Activity() {
     private var companionPresentation: CompanionPresentation? = null
     private var companionActivity: CompanionActivity.Session? = null
     private var resumed = false
+
+    /**
+     * Whether this is Android's top resumed activity: the one on the top focused display,
+     * which is where controller key events go. Not the same as [hasWindowFocus], which is
+     * per display: the game keeps window focus on its own screen even while key events
+     * go to the other one.
+     */
+    private var topResumed = false
 
     private val prefs by lazy { getSharedPreferences("player", MODE_PRIVATE) }
     private var savedShader: ShaderPreset
@@ -157,8 +166,9 @@ class PlayerActivity : Activity() {
      * window, and focus can follow the "top" activity to the other screen: that happens
      * when [CompanionActivity] opens on the main screen, or is raised there again. The
      * companion's windows can't take focus themselves (and a [CompanionPresentation] is no
-     * activity at all), so this is the one case to handle: each time, if the game has lost
-     * focus a moment later, it moves itself back to the front and takes it back.
+     * activity at all), so this is the one case to handle: each time, if the game is no
+     * longer the top resumed activity a moment later, it moves itself back to the front
+     * and takes the controller back.
      * Not while the quick menu is open (it has focus then) or the game is in the background.
      */
     private fun keepFocusOnGame() {
@@ -168,8 +178,13 @@ class PlayerActivity : Activity() {
     }
 
     private val reclaimFocus = Runnable {
-        if (resumed && !isFinishing && !hasWindowFocus() && quickMenu?.isShowing != true) {
-            getSystemService(ActivityManager::class.java).moveTaskToFront(taskId, 0)
+        if (resumed && !isFinishing && !topResumed && quickMenu?.isShowing != true) {
+            // Restart this same instance on its own display: unlike moveTaskToFront (a no-op
+            // when the task is already in front on its display), an activity start makes that
+            // display the top focused one, and key events follow it there.
+            val intent = Intent(this, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            val options = ActivityOptions.makeBasic().setLaunchDisplayId(display?.displayId ?: CompanionPlacement.MAIN_DISPLAY)
+            startActivity(intent, options.toBundle())
         }
     }
 
@@ -193,6 +208,11 @@ class PlayerActivity : Activity() {
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
         handleKeyEvent(event) || super.onKeyUp(keyCode, event)
+
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        topResumed = isTopResumedActivity
+    }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)

@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Lets the game take input focus back after opening its companion on the other screen. -->
-    <uses-permission android:name="android.permission.REORDER_TASKS" />
 
     <application
         android:allowBackup="false"
