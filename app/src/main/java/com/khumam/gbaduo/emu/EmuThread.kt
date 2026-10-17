@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * native rate (or faster under fast-forward) on its own thread.
  */
 class EmuThread(
-    private val romBytes: ByteArray,
+    romBytes: ByteArray,
     private val savePath: String,
     private val gameView: GameView,
     private val audioOut: AudioOut,
@@ -25,6 +25,9 @@ class EmuThread(
     @Volatile var ffMultiplier = 2
 
     private val frameNanos = (1_000_000_000.0 / 59.7275).toLong()
+
+    /** Only until the core has its own copy: a whole ROM (up to 32 MB) shouldn't be held twice. */
+    @Volatile private var romBytes: ByteArray? = romBytes
 
     private val pendingSaveState = java.util.concurrent.atomic.AtomicReference<Pair<String, Boolean>?>(null)
     @Volatile var lastStateResult: Boolean? = null
@@ -54,7 +57,7 @@ class EmuThread(
     private val pendingCalls = ConcurrentLinkedQueue<Pair<String, List<Any?>>>()
 
     override fun run() {
-        loaded = NativeCore.load(romBytes, savePath)
+        loaded = loadCore()
         if (!loaded) return
 
         gameView.setVideoSize(NativeCore.videoWidth(), NativeCore.videoHeight())
@@ -96,6 +99,13 @@ class EmuThread(
         LuaScript.unload()
         audioOut.stop()
         NativeCore.unload()
+    }
+
+    /** In its own frame so nothing in [run] keeps the ROM reachable once the core has copied it. */
+    private fun loadCore(): Boolean {
+        val rom = romBytes ?: return false
+        romBytes = null
+        return NativeCore.load(rom, savePath)
     }
 
     /**
