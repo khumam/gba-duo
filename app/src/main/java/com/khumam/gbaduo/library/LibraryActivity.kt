@@ -18,6 +18,7 @@ import com.khumam.gbaduo.R
 import com.khumam.gbaduo.companion.PackInstaller
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.player.PlayerActivity
+import com.khumam.gbaduo.settings.SettingsActivity
 import com.khumam.gbaduo.storage.GameStorage
 import com.khumam.gbaduo.storage.LegacyMigration
 import java.io.File
@@ -50,8 +51,9 @@ class LibraryActivity : Activity() {
             layoutManager = LinearLayoutManager(this@LibraryActivity)
             adapter = this@LibraryActivity.adapter
         }
-        findViewById<FloatingActionButton>(R.id.choose_folder).setOnClickListener { pickFolder() }
-        findViewById<ImageView>(R.id.manage_folders).setOnClickListener { showFoldersMenu() }
+        findViewById<FloatingActionButton>(R.id.open_settings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
         empty = findViewById(R.id.empty)
         emptyText = findViewById(R.id.empty_text)
     }
@@ -68,33 +70,6 @@ class LibraryActivity : Activity() {
             val result = runCatching(work)
             runOnUiThread { if (!isDestroyed) onResult(result) }
         }
-    }
-
-    private fun pickFolder() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        startActivityForResult(intent, REQUEST_PICK_FOLDER)
-    }
-
-    private fun showFoldersMenu() {
-        val folders = library.describeFolders()
-        val labels = folders.map { it.name } + getString(R.string.add_folder)
-        AlertDialog.Builder(this)
-            .setTitle(R.string.manage_folders)
-            .setItems(labels.toTypedArray()) { _, which ->
-                if (which == folders.size) pickFolder() else confirmRemoveFolder(folders[which])
-            }
-            .show()
-    }
-
-    private fun confirmRemoveFolder(folder: LibraryFolder) {
-        AlertDialog.Builder(this)
-            .setMessage(getString(R.string.remove_folder_question, folder.name))
-            .setPositiveButton(R.string.remove) { _, _ ->
-                library.removeFolder(folder.uri)
-                refresh()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
     }
 
     private fun showCompanionMenu(entry: RomEntry) {
@@ -145,21 +120,7 @@ class LibraryActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        when (requestCode) {
-            REQUEST_PICK_FOLDER -> handleFolderPicked(resultCode, data)
-            REQUEST_PICK_PACK -> handlePackPicked(resultCode, data)
-        }
-    }
-
-    private fun handleFolderPicked(resultCode: Int, data: Intent?) {
-        if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        contentResolver.takePersistableUriPermission(
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-        )
-        library.addFolder(uri)
-        refresh()
+        if (requestCode == REQUEST_PICK_PACK) handlePackPicked(resultCode, data)
     }
 
     private fun handlePackPicked(resultCode: Int, data: Intent?) {
@@ -222,7 +183,6 @@ class LibraryActivity : Activity() {
     }
 
     companion object {
-        private const val REQUEST_PICK_FOLDER = 1
         private const val REQUEST_PICK_PACK = 2
     }
 }

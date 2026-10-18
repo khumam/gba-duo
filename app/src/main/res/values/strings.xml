@@ -1,7 +1,6 @@
 <resources>
     <string name="app_name">GBADuo</string>
-    <string name="choose_rom_folder">Add ROM folder</string>
-    <string name="no_folder_chosen">Tap + to add a ROM folder</string>
+    <string name="no_folder_chosen">Open Settings (⚙) to add a ROM folder</string>
     <plurals name="no_roms">
         <item quantity="one">No .gba, .gb or .gbc files found in your folder</item>
         <item quantity="other">No .gba, .gb or .gbc files found in your %d folders</item>
@@ -26,4 +25,11 @@
     <string name="import_pack">Import pack…</string>
     <string name="no_pack">None</string>
     <string name="pack_import_failed">Could not import pack: %s</string>
+    <string name="settings_title">Settings</string>
+    <string name="rom_folders_summary">Where GBADuo looks for games</string>
+    <string name="about_title">About</string>
+    <string name="folder_added">Folder added</string>
+    <string name="launch_needs_folder">Can\'t open %s: add the folder it\'s in under Settings › ROM folders</string>
+    <string name="no_folders_yet">No folders yet</string>
+    <string name="github_url">https://github.com/khumam/gba-duo</string>
 </resources>

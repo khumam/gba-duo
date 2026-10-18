@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Lets the game take input focus back after opening its companion on the other screen. -->
-
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -17,6 +15,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Frontends (Cocoon, iiSU, ES-DE, ...) and file managers open games
+             here: the ROM comes as the intent's data or a rom/ROM/path/file
+             extra, and this hands it to the player and finishes (see
+             LaunchActivity). The VIEW filter is for "Open with" and launchers
+             that pick a handler by file: mimeType + pathPattern matches both
+             content:// and file:// URIs, scheme-less on purpose since
+             android:scheme without android:host matches nothing. -->
+        <activity
+            android:name=".library.LaunchActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Launch">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.gba" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.gb" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.gbc" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.zip" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".settings.SettingsActivity" android:exported="false" />
+        <activity android:name=".settings.RomFoldersActivity" android:exported="false" />
+        <activity android:name=".settings.AboutActivity" android:exported="false" />
 
         <activity
             android:name=".player.PlayerActivity"
@@ -33,4 +61,5 @@
             android:launchMode="singleInstance"
             android:taskAffinity="${applicationId}.companion" />
     </application>
+
 </manifest>
