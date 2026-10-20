@@ -1,87 +1,212 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<!--
+  The library: a cartridge carousel on graph paper (gbaduo-web/DESIGN.md). Backgrounds,
+  fonts and the pixel boxes are set in LibraryActivity; this file is the structure.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/background">
+    android:layout_height="match_parent">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
 
+        <!-- Top bar: wordmark, library readout, settings. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingEnd="8dp">
+            android:paddingHorizontal="28dp"
+            android:paddingTop="14dp">
+
+            <com.khumam.gbaduo.library.ui.OutlineText
+                android:id="@+id/wordmark"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <TextView
-                android:layout_width="0dp"
+                android:id="@+id/hud"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:paddingHorizontal="20dp"
-                android:paddingVertical="20dp"
-                android:text="@string/app_name"
-                android:textColor="@color/text_primary"
-                android:textSize="22sp"
-                android:textStyle="bold" />
+                android:layout_marginEnd="16dp"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="7dp"
+                tools:text="GAMES 012" />
+
+            <com.khumam.gbaduo.library.ui.PixelButton
+                android:id="@+id/open_settings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_title" />
         </LinearLayout>
 
+        <!-- The carousel, with the selection pointer and the empty / scanning box. -->
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
 
             <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/list"
+                android:id="@+id/carousel"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:clipToPadding="false"
-                android:paddingHorizontal="12dp"
-                android:paddingBottom="88dp" />
+                android:overScrollMode="never"
+                android:paddingTop="22dp"
+                android:paddingBottom="4dp" />
+
+            <TextView
+                android:id="@+id/pointer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|center_horizontal"
+                android:importantForAccessibility="no"
+                android:text="▼" />
 
             <LinearLayout
                 android:id="@+id/empty"
-                android:layout_width="match_parent"
+                android:layout_width="560dp"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
-                android:gravity="center"
+                android:gravity="center_horizontal"
                 android:orientation="vertical"
-                android:padding="32dp"
+                android:paddingHorizontal="36dp"
+                android:paddingBottom="30dp"
                 android:visibility="gone">
 
-                <ImageView
-                    android:id="@+id/empty_icon"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:importantForAccessibility="no"
-                    android:src="@drawable/ic_folder_open" />
+                <TextView
+                    android:id="@+id/empty_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="12dp"
+                    android:paddingVertical="6dp" />
 
                 <TextView
                     android:id="@+id/empty_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:gravity="center" />
+
+                <com.khumam.gbaduo.library.ui.PixelButton
+                    android:id="@+id/empty_action"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:gravity="center"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="16sp" />
+                    android:layout_marginTop="20dp"
+                    android:text="@string/add_rom_folder" />
             </LinearLayout>
         </FrameLayout>
+
+        <!-- The selected game. -->
+        <LinearLayout
+            android:id="@+id/info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingHorizontal="40dp">
+
+            <com.khumam.gbaduo.library.ui.OutlineText
+                android:id="@+id/game_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tag_platform"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp" />
+
+                <TextView
+                    android:id="@+id/tag_code"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp" />
+
+                <TextView
+                    android:id="@+id/tag_pack"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp" />
+
+                <TextView
+                    android:id="@+id/file_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:ellipsize="middle"
+                    android:maxWidth="320dp"
+                    android:singleLine="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Actions: one yellow primary. -->
+        <LinearLayout
+            android:id="@+id/actions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="12dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <com.khumam.gbaduo.library.ui.PixelButton
+                android:id="@+id/play"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="200dp"
+                android:text="@string/play" />
+
+            <com.khumam.gbaduo.library.ui.PixelButton
+                android:id="@+id/pack_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="@string/companion_pack" />
+        </LinearLayout>
+
+        <!-- Control hints, HUD style. -->
+        <LinearLayout
+            android:id="@+id/hints_bar"
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="28dp">
+
+            <TextView
+                android:id="@+id/hints"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:singleLine="true" />
+
+            <TextView
+                android:id="@+id/position"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                tools:text="003 / 012" />
+        </LinearLayout>
     </LinearLayout>
-
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/open_settings"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
-        android:contentDescription="@string/settings_title"
-        android:src="@drawable/ic_settings"
-        app:backgroundTint="@color/accent"
-        app:fabSize="normal"
-        app:tint="@color/text_primary" />
-
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+</FrameLayout>

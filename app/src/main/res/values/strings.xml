@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">GBADuo</string>
-    <string name="no_folder_chosen">Open Settings (⚙) to add a ROM folder</string>
     <plurals name="no_roms">
         <item quantity="one">No .gba, .gb or .gbc files found in your folder</item>
         <item quantity="other">No .gba, .gb or .gbc files found in your %d folders</item>
@@ -32,4 +31,16 @@
     <string name="launch_needs_folder">Can\'t open %s: add the folder it\'s in under Settings › ROM folders</string>
     <string name="no_folders_yet">No folders yet</string>
     <string name="github_url">https://github.com/khumam/gba-duo</string>
+    <string name="play">Play</string>
+    <string name="add_rom_folder">Add ROM folder</string>
+    <string name="tag_pack">Pack</string>
+    <string name="position_of">%1$s / %2$s</string>
+    <string name="hud_games">Games</string>
+    <string name="hint_browse">Browse</string>
+    <string name="hint_pack">Pack</string>
+    <string name="hint_jump">Jump 5</string>
+    <string name="empty_scanning_title">Loading cartridges</string>
+    <string name="empty_no_folder_title">Insert cartridge</string>
+    <string name="empty_no_folder_text">Pick the folder on your device that holds your .gba, .gbc and .gb games (or .zip files with one inside). GBADuo only reads it.</string>
+    <string name="empty_no_games_title">No cartridges</string>
 </resources>
