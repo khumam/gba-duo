@@ -15,6 +15,8 @@ import com.khumam.gbaduo.companion.style.Length
 object LayoutEngine {
 
     private const val INF = Float.POSITIVE_INFINITY
+    /** Most repetitions an auto-fill/auto-fit track list expands to (like `repeat(n)`'s cap). */
+    private const val MAX_AUTO_REPEAT = 64
 
     fun layout(container: ContainerStyle, width: Constraint, height: Constraint, children: List<LayoutChild>): LayoutResult {
         val rects = arrayOfNulls<Rect>(children.size)
@@ -44,6 +46,7 @@ object LayoutEngine {
     private fun margin(length: Length, containerWidth: Float?): Float = when (length) {
         is Length.Px -> length.px
         is Length.Percent -> containerWidth?.let { it * length.percent / 100f } ?: 0f
+        is Length.Calc -> length.px + (containerWidth?.let { it * length.percent / 100f } ?: 0f)
         Length.Auto -> 0f
     }
 
@@ -175,6 +178,7 @@ object LayoutEngine {
                 val basis = when (val b = style.flexBasis) {
                     is Length.Px -> b.px + extraMain
                     is Length.Percent -> containerMainDef?.let { it * b.percent / 100f + extraMain }
+                    is Length.Calc -> containerMainDef?.let { b.px + it * b.percent / 100f + extraMain }
                     Length.Auto -> null
                 }
                 base = basis ?: mainDefinite ?: main(measure(this, Constraint.Unbounded, crossConstraintFor(this)))
@@ -320,6 +324,33 @@ object LayoutEngine {
 
     // ---- grid -----------------------------------------------------------------
 
+    /**
+     * Replaces a `repeat(auto-fill | auto-fit, ...)` with as many copies of its tracks as
+     * fit [available] (at least one; one when the size isn't known yet). `auto-fit` keeps
+     * no more repetitions than [itemCount] items fill, so the used tracks share the space.
+     */
+    private fun expandAutoRepeat(tracks: List<GridTracks.Track>, available: Float?, gap: Float, itemCount: Int): List<GridTracks.Track> {
+        val index = tracks.indexOfFirst { it is GridTracks.Track.AutoRepeat }
+        if (index < 0) return tracks
+        val auto = tracks[index] as GridTracks.Track.AutoRepeat
+        val others = tracks.filterIndexed { i, _ -> i != index }
+        var reps = 1
+        if (available != null) {
+            val otherSize = others.sumOf { (GridTracks.fixedMinimum(it)?.resolve(available) ?: 0f).toDouble() }.toFloat() + gap * others.size
+            val repSize = auto.tracks.sumOf { (GridTracks.fixedMinimum(it)?.resolve(available) ?: 0f).toDouble() }.toFloat() +
+                gap * (auto.tracks.size - 1)
+            if (repSize > 0f) {
+                // n repetitions take n * repSize + (n - 1) * gap.
+                reps = ((available - otherSize + gap) / (repSize + gap)).toInt().coerceIn(1, MAX_AUTO_REPEAT)
+            }
+        }
+        if (auto.fit && itemCount > 0) {
+            val needed = (itemCount + auto.tracks.size - 1) / auto.tracks.size
+            reps = reps.coerceAtMost(maxOf(1, needed))
+        }
+        return tracks.subList(0, index) + List(reps) { auto.tracks }.flatten() + tracks.subList(index + 1, tracks.size)
+    }
+
     private class GridItem(val index: Int, val child: LayoutChild, val row: Int, val col: Int, val rowSpan: Int, val colSpan: Int)
 
     private fun grid(
@@ -330,10 +361,11 @@ object LayoutEngine {
         inFlow: List<Int>,
         rects: Array<Rect?>,
     ): Pair<Float, Float> {
-        val columnTracks = container.columns.ifEmpty { listOf(GridTracks.Track.Auto) }
-        val nCols = columnTracks.size
         val containerW = width.definite
         val containerH = height.definite
+        val columnTracks = expandAutoRepeat(container.columns, containerW ?: width.limit, container.columnGap, inFlow.size)
+            .ifEmpty { listOf(GridTracks.Track.Auto) }
+        val nCols = columnTracks.size
 
         // Placement (row-major auto-placement, honoring line numbers and spans).
         val occupied = mutableListOf<BooleanArray>()
@@ -391,7 +423,8 @@ object LayoutEngine {
             occupy(row, col, rs, cs)
             GridItem(index, children[index], row, col, rs, cs)
         }
-        val nRows = maxOf(occupied.size, container.rows.size)
+        val rowTracks = expandAutoRepeat(container.rows, null, container.rowGap, 0)
+        val nRows = maxOf(occupied.size, rowTracks.size)
 
         fun marginsH(item: GridItem) = margin(item.child.style.marginLeft, containerW) + margin(item.child.style.marginRight, containerW)
         fun marginsV(item: GridItem) = margin(item.child.style.marginTop, containerW) + margin(item.child.style.marginBottom, containerW)
@@ -404,6 +437,20 @@ object LayoutEngine {
             (sz.width ?: clamp(item.child.measure(Constraint.Unbounded, sz.height?.let { exactly(it) } ?: Constraint.Unbounded).width, sz.minWidth, sz.maxWidth)) + marginsH(item)
         } ?: 0f
 
+        // A track's flexible part (`1fr`, or `minmax(x, 1fr)`) and its floor.
+        fun frOf(track: GridTracks.Track): Float? = when (track) {
+            is GridTracks.Track.Fr -> track.fr
+            is GridTracks.Track.MinMax -> (track.max as? GridTracks.Track.Fr)?.fr
+            else -> null
+        }
+        fun floorOf(i: Int, available: Float?): Float = when (val t = columnTracks[i]) {
+            is GridTracks.Track.MinMax -> when (val min = t.min) {
+                is GridTracks.Track.Fixed -> min.length.resolve(available) ?: 0f
+                else -> maxContentWidth(i)
+            }
+            else -> 0f
+        }
+
         fun sizeColumns(available: Float?) {
             var frSum = 0f
             for ((i, track) in columnTracks.withIndex()) {
@@ -413,18 +460,45 @@ object LayoutEngine {
                         frSum += track.fr
                         0f
                     }
-                    GridTracks.Track.Auto -> maxContentWidth(i)
+                    is GridTracks.Track.MinMax -> {
+                        val floor = floorOf(i, available)
+                        when (val max = track.max) {
+                            is GridTracks.Track.Fr -> {
+                                frSum += max.fr
+                                0f
+                            }
+                            is GridTracks.Track.Fixed -> maxOf(floor, max.length.resolve(available) ?: maxContentWidth(i))
+                            else -> maxOf(floor, maxContentWidth(i))
+                        }
+                    }
+                    else -> maxContentWidth(i)
                 }
             }
             if (frSum > 0f) {
-                val frTracks = columnTracks.withIndex().filter { it.value is GridTracks.Track.Fr }
+                val frTracks = columnTracks.indices.filter { frOf(columnTracks[it]) != null }
                 if (available != null) {
-                    val leftover = maxOf(0f, available - colGaps - colSizes.sum())
-                    val unit = leftover / maxOf(frSum, 1f)
-                    for ((i, t) in frTracks) colSizes[i] = unit * (t as GridTracks.Track.Fr).fr
+                    // Share the leftover by fr; a track whose share is below its minmax() floor
+                    // takes the floor instead and leaves the sharing, until the rest fit.
+                    val sharing = frTracks.toMutableList()
+                    while (true) {
+                        val fixed = colSizes.indices.filter { it !in sharing }.sumOf { colSizes[it].toDouble() }.toFloat()
+                        val shareFr = sharing.sumOf { frOf(columnTracks[it])!!.toDouble() }.toFloat()
+                        val leftover = maxOf(0f, available - colGaps - fixed)
+                        val unit = leftover / maxOf(shareFr, 1f)
+                        val tooSmall = sharing.filter { unit * frOf(columnTracks[it])!! < floorOf(it, available) }
+                        if (tooSmall.isEmpty()) {
+                            for (i in sharing) colSizes[i] = unit * frOf(columnTracks[i])!!
+                            break
+                        }
+                        for (i in tooSmall) {
+                            colSizes[i] = floorOf(i, available)
+                            sharing -= i
+                        }
+                        if (sharing.isEmpty()) break
+                    }
                 } else {
-                    val unit = frTracks.maxOfOrNull { (i, t) -> val fr = (t as GridTracks.Track.Fr).fr; if (fr > 0f) maxContentWidth(i) / fr else 0f } ?: 0f
-                    for ((i, t) in frTracks) colSizes[i] = unit * (t as GridTracks.Track.Fr).fr
+                    val unit = frTracks.maxOfOrNull { i -> val fr = frOf(columnTracks[i])!!; if (fr > 0f) maxContentWidth(i) / fr else 0f } ?: 0f
+                    for (i in frTracks) colSizes[i] = maxOf(unit * frOf(columnTracks[i])!!, floorOf(i, null))
                 }
             } else if (available != null && container.justifyContent == Distribute.START) {
                 // `normal` track alignment: auto tracks stretch into leftover space.
@@ -464,7 +538,11 @@ object LayoutEngine {
         }
         var rowFrSum = 0f
         for (r in 0 until nRows) {
-            val track = container.rows.getOrNull(r) ?: GridTracks.Track.Auto
+            val track = when (val t = rowTracks.getOrNull(r) ?: GridTracks.Track.Auto) {
+                // Rows: a minmax() sizes like its max (fixed, fr, or content); its fixed min is applied below.
+                is GridTracks.Track.MinMax -> if (t.max is GridTracks.Track.Fixed || t.max is GridTracks.Track.Fr) t.max else GridTracks.Track.Auto
+                else -> t
+            }
             rowSizes[r] = when {
                 track is GridTracks.Track.Fixed && track.length.resolve(containerH) != null -> track.length.resolve(containerH)!!
                 track is GridTracks.Track.Fr && containerH != null -> {
@@ -476,7 +554,12 @@ object LayoutEngine {
         }
         if (rowFrSum > 0f && containerH != null) {
             val leftover = maxOf(0f, containerH - rowGaps - rowSizes.sum())
-            for (r in 0 until nRows) (container.rows.getOrNull(r) as? GridTracks.Track.Fr)?.let { rowSizes[r] = leftover / maxOf(rowFrSum, 1f) * it.fr }
+            for (r in 0 until nRows) (rowTracks.getOrNull(r).let { (it as? GridTracks.Track.MinMax)?.max ?: it } as? GridTracks.Track.Fr)?.let { rowSizes[r] = leftover / maxOf(rowFrSum, 1f) * it.fr }
+        }
+        for (r in 0 until nRows) {
+            val t = rowTracks.getOrNull(r) as? GridTracks.Track.MinMax ?: continue
+            val floor = (t.min as? GridTracks.Track.Fixed)?.length?.resolve(containerH) ?: continue
+            if (rowSizes[r] < floor) rowSizes[r] = floor
         }
         // Items spanning rows: grow their last row if they don't fit.
         for (item in items.filter { it.rowSpan > 1 }) {

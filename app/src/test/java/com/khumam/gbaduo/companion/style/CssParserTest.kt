@@ -35,8 +35,10 @@ class CssParserTest {
             """.trimIndent(),
         )
         assertEquals(listOf("width"), sheet.rules[0].declarations.map { it.property })
-        assertEquals(2, sheet.rules.size) // `.a` and `.b`; the sibling rule and @media are skipped
-        assertEquals(4, sheet.warnings.size)
+        assertEquals(3, sheet.rules.size) // `.a`, the @media `.a` and `.b`; the sibling rule is skipped
+        assertEquals(1, sheet.rules[1].media.size)
+        assertTrue(sheet.rules[1].media.single().matches(200f, 100f))
+        assertEquals(3, sheet.warnings.size)
     }
 
     @Test

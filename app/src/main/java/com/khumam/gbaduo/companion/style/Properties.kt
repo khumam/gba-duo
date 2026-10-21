@@ -12,12 +12,18 @@ object Properties {
     private fun keywords(vararg words: String): (String) -> Boolean = { it.trim().lowercase() in words }
     private val anyLength: (String) -> Boolean = { CssValues.length(it) != null }
     private val lengthNoAuto: (String) -> Boolean = { CssValues.length(it, allowAuto = false) != null }
-    private val pxOnly: (String) -> Boolean = { CssValues.px(it) != null && CssValues.px(it)!! >= 0 }
+    // A calc()/min()/max()/clamp() result can only be checked for sign once the screen size is
+    // known (`calc(5vw - 4px)` is negative on an unmeasured screen), so it's accepted here and
+    // clamped to 0 where used, as CSS does.
+    private val pxOnly: (String) -> Boolean = { v -> CssValues.px(v)?.let { it >= 0 || MathFunctions.isMath(v) } ?: false }
     private val color: (String) -> Boolean = { CssValues.color(it) != null }
     private val nonNegativeNumber: (String) -> Boolean = { (CssValues.number(it) ?: -1f) >= 0f }
     private val integer: (String) -> Boolean = { it.trim().toIntOrNull() != null }
     private val maxSize: (String) -> Boolean = { it.trim().lowercase() == "none" || lengthNoAuto(it) }
-    private val radius: (String) -> Boolean = { (CssValues.length(it, allowAuto = false) as? Length.Px)?.px?.let { px -> px >= 0 } ?: (CssValues.length(it, allowAuto = false) is Length.Percent) }
+    private val radius: (String) -> Boolean = { v ->
+        (CssValues.length(v, allowAuto = false) as? Length.Px)?.px?.let { px -> px >= 0 || MathFunctions.isMath(v) }
+            ?: (CssValues.length(v, allowAuto = false) is Length.Percent)
+    }
     private val offset: (String) -> Boolean = anyLength
 
     val SIDES = listOf("top", "right", "bottom", "left")
@@ -183,8 +189,9 @@ object Properties {
         if (t == "smaller") return parentPx / 1.2f
         if (t == "larger") return parentPx * 1.2f
         return when (val len = CssValues.length(t, LengthContext(parentPx, rootPx, viewportWidth, viewportHeight), allowAuto = false)) {
-            is Length.Px -> len.px.takeIf { it >= 0 }
+            is Length.Px -> if (MathFunctions.isMath(t)) len.px.coerceAtLeast(0f) else len.px.takeIf { it >= 0 }
             is Length.Percent -> parentPx * len.percent / 100f
+            is Length.Calc -> (len.px + parentPx * len.percent / 100f).coerceAtLeast(0f)
             else -> null
         }
     }
@@ -415,15 +422,35 @@ object GridTracks {
         object Auto : Track() {
             override fun toString() = "Auto"
         }
+
+        /** `minmax(min, max)`: [min] is [Fixed] or [Auto]; [max] is [Fixed], [Fr] or [Auto]. */
+        data class MinMax(val min: Track, val max: Track) : Track()
+
+        /**
+         * `repeat(auto-fill | auto-fit, tracks)`: as many repetitions as fit the container,
+         * worked out in layout. `auto-fit` ([fit]) also drops the repetitions no item uses,
+         * so the used ones share the space.
+         */
+        data class AutoRepeat(val tracks: List<Track>, val fit: Boolean) : Track()
     }
 
     /** `span n`, `n`, `n / span m`, `n / m` → (start line or null for auto, span). */
     data class Placement(val start: Int?, val span: Int)
 
-    /** `none` gives an empty list. Supports px/%/fr/auto, `repeat(n, ...)` and `minmax()` (uses its max). */
+    /**
+     * `none` gives an empty list. Supports px/%/fr/auto (and calc()), `repeat(n, ...)`,
+     * `repeat(auto-fill | auto-fit, ...)` (once per list, with fixed-size tracks or
+     * `minmax(<fixed>, ...)`, so a repetition has a known size) and `minmax(min, max)`.
+     */
     fun parse(value: String): List<Track>? {
         val v = value.trim().lowercase()
         if (v == "none") return emptyList()
+        return parseList(v, allowAutoRepeat = true)?.takeIf { list ->
+            list.isNotEmpty() && list.count { it is Track.AutoRepeat } <= 1
+        }
+    }
+
+    private fun parseList(v: String, allowAutoRepeat: Boolean): List<Track>? {
         val tracks = mutableListOf<Track>()
         for (token in CssValues.splitSpaces(v)) {
             val fn = CssValues.function(token)
@@ -431,20 +458,40 @@ object GridTracks {
                 fn?.first == "repeat" -> {
                     val args = CssValues.splitCommas(fn.second)
                     if (args.size != 2) return null
-                    val count = args[0].trim().toIntOrNull()?.takeIf { it in 1..64 } ?: return null
-                    val inner = parse(args[1]) ?: return null
+                    val inner = parseList(args[1], allowAutoRepeat = false) ?: return null
                     if (inner.isEmpty()) return null
-                    repeat(count) { tracks += inner }
+                    when (val countText = args[0].trim()) {
+                        "auto-fill", "auto-fit" -> {
+                            if (!allowAutoRepeat || inner.any { fixedMinimum(it) == null }) return null
+                            tracks += Track.AutoRepeat(inner, fit = countText == "auto-fit")
+                        }
+                        else -> {
+                            val count = countText.toIntOrNull()?.takeIf { it in 1..64 } ?: return null
+                            repeat(count) { tracks += inner }
+                        }
+                    }
                 }
-                fn?.first == "minmax" -> {
-                    val args = CssValues.splitCommas(fn.second)
-                    if (args.size != 2) return null
-                    tracks += single(args[1]) ?: return null
-                }
+                fn?.first == "minmax" -> tracks += minmax(fn.second) ?: return null
                 else -> tracks += single(token) ?: return null
             }
         }
-        return tracks.takeIf { it.isNotEmpty() }
+        return tracks
+    }
+
+    private fun minmax(args: String): Track? {
+        val parts = CssValues.splitCommas(args)
+        if (parts.size != 2) return null
+        val min = single(parts[0]) ?: return null
+        val max = single(parts[1]) ?: return null
+        if (min is Track.Fr) return null // a flexible minimum isn't valid CSS
+        return Track.MinMax(min, max)
+    }
+
+    /** The definite size a track needs at least (for counting auto-fill repetitions); null if it has none. */
+    fun fixedMinimum(track: Track): Length? = when (track) {
+        is Track.Fixed -> track.length
+        is Track.MinMax -> (track.min as? Track.Fixed)?.length ?: (track.max as? Track.Fixed)?.length
+        else -> null
     }
 
     private fun single(token: String): Track? {

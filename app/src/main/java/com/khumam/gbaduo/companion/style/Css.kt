@@ -8,7 +8,8 @@ import java.io.File
  */
 data class Declaration(val property: String, val value: String, val baseDir: File? = null)
 
-data class Rule(val selectors: List<Selector>, val declarations: List<Declaration>)
+/** [media]: the `@media` condition(s) the rule sits in (all must match), empty when none. */
+data class Rule(val selectors: List<Selector>, val declarations: List<Declaration>, val media: List<MediaQuery> = emptyList())
 
 /** `@font-face { font-family; src: url(); font-weight; font-style }`, with [file] already resolved. */
 data class FontFace(val family: String, val file: File, val weight: Int, val italic: Boolean)

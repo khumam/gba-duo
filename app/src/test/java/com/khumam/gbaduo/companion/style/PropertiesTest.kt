@@ -67,9 +67,9 @@ class PropertiesTest {
     fun gridTracksAndPlacement() {
         assertEquals(3, GridTracks.parse("repeat(3, 1fr)")!!.size)
         assertEquals(listOf(GridTracks.Track.Fixed(Length.Px(100f)), GridTracks.Track.Fr(2f), GridTracks.Track.Auto), GridTracks.parse("100px 2fr auto"))
-        assertEquals(GridTracks.Track.Fr(1f), GridTracks.parse("minmax(0, 1fr)")!!.single())
+        assertEquals(GridTracks.Track.MinMax(GridTracks.Track.Fixed(Length.Px(0f)), GridTracks.Track.Fr(1f)), GridTracks.parse("minmax(0, 1fr)")!!.single())
         assertEquals(emptyList<GridTracks.Track>(), GridTracks.parse("none"))
-        assertNull(GridTracks.parse("repeat(auto-fill, 100px)"))
+        assertEquals(GridTracks.Track.AutoRepeat(listOf(GridTracks.Track.Fixed(Length.Px(100f))), fit = false), GridTracks.parse("repeat(auto-fill, 100px)")!!.single())
         assertEquals(GridTracks.Placement(null, 2), GridTracks.placement("span 2"))
         assertEquals(GridTracks.Placement(2, 1), GridTracks.placement("2"))
         assertEquals(GridTracks.Placement(1, 3), GridTracks.placement("1 / 4"))

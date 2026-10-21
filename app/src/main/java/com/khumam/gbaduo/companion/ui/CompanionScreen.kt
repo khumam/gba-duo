@@ -268,8 +268,9 @@ private fun boxPaint(node: CompanionNode, style: ComputedStyle, density: Float, 
         borderStyles = sides.map { style.keyword("border-$it-style") },
         radii = Properties.CORNERS.map { corner ->
             when (val r = style.length("border-$corner-radius")) {
-                is Length.Px -> r.px * density
+                is Length.Px -> r.px.coerceAtLeast(0f) * density
                 is Length.Percent -> -r.percent
+                is Length.Calc -> r.px * density // not reached: radii refuse calc() with %
                 Length.Auto -> 0f
             }
         },
@@ -289,6 +290,7 @@ private fun relativeOffset(style: ComputedStyle, density: Float): Pair<Float, Fl
 private fun resolveTranslate(length: Length, size: Float, density: Float): Float = when (length) {
     is Length.Px -> length.px * density
     is Length.Percent -> size * length.percent / 100f
+    is Length.Calc -> length.px * density + size * length.percent / 100f
     Length.Auto -> 0f
 }
 
@@ -309,5 +311,9 @@ private fun <T> spec(transitions: List<TransitionSpec>, property: String): Anima
 private fun animateLength(target: Length, spec: AnimationSpec<Float>): Length = when (target) {
     is Length.Px -> Length.Px(animateFloatAsState(target.px, spec, label = "px").value)
     is Length.Percent -> Length.Percent(animateFloatAsState(target.percent, spec, label = "percent").value)
+    is Length.Calc -> Length.Calc(
+        animateFloatAsState(target.px, spec, label = "calc-px").value,
+        animateFloatAsState(target.percent, spec, label = "calc-percent").value,
+    )
     Length.Auto -> Length.Auto
 }

@@ -19,7 +19,7 @@ class StyleResolver(
     var viewportWidth: Float = 0f,
     var viewportHeight: Float = 0f,
 ) {
-    private class IndexedRule(val origin: Int, val order: Int, val selector: Selector, val declarations: List<Declaration>)
+    private class IndexedRule(val origin: Int, val order: Int, val selector: Selector, val declarations: List<Declaration>, val media: List<MediaQuery>)
 
     private val rules: List<IndexedRule> = buildList {
         var order = 0
@@ -27,7 +27,7 @@ class StyleResolver(
             for (sheet in sheets) {
                 for (rule in sheet.rules) {
                     val ruleOrder = order++
-                    for (selector in rule.selectors) add(IndexedRule(origin, ruleOrder, selector, rule.declarations))
+                    for (selector in rule.selectors) add(IndexedRule(origin, ruleOrder, selector, rule.declarations, rule.media))
                 }
             }
         }
@@ -132,7 +132,10 @@ class StyleResolver(
 
     /** All declarations that apply to [node], in cascade order (later wins). */
     private fun cascade(node: StyleNode): List<Declaration> {
-        val matched = rules.filter { it.selector.matches(node) }
+        // `@media` rules apply only while the companion screen matches (re-checked when its size changes).
+        val matched = rules.filter { rule ->
+            rule.media.all { it.matches(viewportWidth, viewportHeight) } && rule.selector.matches(node)
+        }
         fun sorted(origin: Int) = matched.filter { it.origin == origin }
             .sortedWith(compareBy<IndexedRule> { it.selector.specificity }.thenBy { it.order })
             .flatMap { it.declarations }

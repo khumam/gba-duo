@@ -73,7 +73,11 @@ data class BoxStyle(
 ) {
     /** Converts every px length to device pixels (CSS px are Android dp). Percentages are unchanged. */
     fun scaled(factor: Float): BoxStyle {
-        fun Length.s(): Length = if (this is Length.Px) Length.Px(px * factor) else this
+        fun Length.s(): Length = when (this) {
+            is Length.Px -> Length.Px(px * factor)
+            is Length.Calc -> Length.Calc(px * factor, percent)
+            else -> this
+        }
         return copy(
             width = width.s(), height = height.s(), minWidth = minWidth.s(), minHeight = minHeight.s(),
             maxWidth = maxWidth?.s(), maxHeight = maxHeight?.s(),
@@ -159,8 +163,17 @@ data class ContainerStyle(
 ) {
     /** Converts gaps, insets and fixed track sizes to device pixels. */
     fun scaled(factor: Float): ContainerStyle {
-        fun GridTracks.Track.s(): GridTracks.Track =
-            if (this is GridTracks.Track.Fixed && length is Length.Px) GridTracks.Track.Fixed(Length.Px(length.px * factor)) else this
+        fun Length.s(): Length = when (this) {
+            is Length.Px -> Length.Px(px * factor)
+            is Length.Calc -> Length.Calc(px * factor, percent)
+            else -> this
+        }
+        fun GridTracks.Track.s(): GridTracks.Track = when (this) {
+            is GridTracks.Track.Fixed -> GridTracks.Track.Fixed(length.s())
+            is GridTracks.Track.MinMax -> GridTracks.Track.MinMax(min.s(), max.s())
+            is GridTracks.Track.AutoRepeat -> GridTracks.Track.AutoRepeat(tracks.map { it.s() }, fit)
+            else -> this
+        }
         return copy(
             rowGap = rowGap * factor, columnGap = columnGap * factor,
             columns = columns.map { it.s() }, rows = rows.map { it.s() },

@@ -113,13 +113,14 @@ bar > label  { font-size: 9px; }
 
 Cascade: built-in styles < pack stylesheets (by specificity, then source order)
 < inline `style` < `bindStyle`. `!important` is ignored. Not supported: sibling
-combinators (`+`, `~`), attribute selectors, pseudo-elements, `@media`,
-`@import` (the rule or block is skipped with a warning).
+combinators (`+`, `~`), attribute selectors, pseudo-elements, `@import`,
+`@supports`, `@container` (the rule or block is skipped with a warning).
 
 ## Properties
 
 Units: `px` (= Android dp; unitless numbers are px), `%`, `em`, `rem`, `vw`, `vh`,
-`vmin`, `vmax`. Colors: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`/`rgba()`
+`vmin`, `vmax`, and `calc()`, `min()`, `max()`, `clamp()` (see
+[Fitting any screen](#fitting-any-screen)). Colors: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`/`rgba()`
 (comma or space syntax), `hsl()`/`hsla()`, named colors, `transparent`,
 `currentcolor`. Custom properties (`--x`) and `var(--x, fallback)` work anywhere.
 
@@ -127,7 +128,7 @@ Units: `px` (= Android dp; unitless numbers are px), `%`, `em`, `rem`, `vw`, `vh
 |---|---|
 | Layout mode | `display: flex \| grid \| stack \| block \| none` |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `justify-content`, `align-items`, `align-self`, `align-content`, `flex`, `flex-grow`, `flex-shrink`, `flex-basis`, `order`, `gap`, `row-gap`, `column-gap` |
-| Grid | `grid-template-columns`, `grid-template-rows` (`px`, `%`, `fr`, `auto`, `repeat(n, …)`, `minmax(…, max)`), `grid-column`, `grid-row` (`span n`, `n`, `n / m`, `n / span m`), `justify-items`, `justify-self`, `place-items`, `place-self` |
+| Grid | `grid-template-columns`, `grid-template-rows` (`px`, `%`, `fr`, `auto`, `repeat(n, …)`, `repeat(auto-fill \| auto-fit, …)`, `minmax(min, max)`), `grid-column`, `grid-row` (`span n`, `n`, `n / m`, `n / span m`), `justify-items`, `justify-self`, `place-items`, `place-self` |
 | Positioning | `position: static \| relative \| absolute`, `top`, `right`, `bottom`, `left`, `inset`, `z-index` |
 | Box | `width`, `height`, `min-*`, `max-*`, `aspect-ratio`, `margin` (incl. `auto`), `padding`, `box-sizing` |
 | Background | `background`, `background-color`, `background-image` (`url()`, `linear-gradient()`), `background-size`, `background-position`, `background-repeat` |
@@ -141,6 +142,77 @@ Units: `px` (= Android dp; unitless numbers are px), `%`, `em`, `rem`, `vw`, `vh
 `display: stack` is GBADuo-specific: children are layered on top of each other
 at the top-left (like Android's FrameLayout); use `place-items` to center or
 stretch them.
+
+## Fitting any screen
+
+The companion screen isn't always the same size: the Thor's bottom screen is
+about 538 × 468, a phone's second display or the main screen (when the game is
+on the bottom one) can be much larger or portrait. Three tools adapt a pack to
+the screen it lands on. Everything here is measured on the **companion screen
+itself**, in CSS px, not the whole device.
+
+### `@media`
+
+```css
+.party { display: grid; grid-template-columns: 1fr 1fr; }
+
+@media (max-width: 400px) {
+  .party { grid-template-columns: 1fr; }
+}
+
+@media (orientation: portrait) and (min-height: 700px) {
+  .header { font-size: 22px; }
+}
+```
+
+- Features: `width`, `height`, `min-`/`max-width`, `min-`/`max-height`,
+  `orientation` (`portrait`, `landscape`), `aspect-ratio`,
+  `min-`/`max-aspect-ratio`, and range syntax: `(width >= 400px)`,
+  `(400px <= width < 600px)`.
+- `and`, comma lists (match any), `not`, `only`, the media types `all` and
+  `screen`. `@media` blocks can nest.
+- Lengths are px, or `em`/`rem` (14px each, like a browser's default).
+- Rules inside a block that matches take part in the cascade like any other
+  rule (specificity, then source order). They switch on and off by themselves
+  when the screen changes size.
+- A condition with anything else (`hover`, `resolution`, `or`, `%`) skips the
+  whole block with a warning.
+
+### `calc()`, `min()`, `max()`, `clamp()`
+
+```css
+.card    { width: calc(100% - 24px); }
+.title   { font-size: clamp(14px, 4vw, 22px); }
+.content { padding: max(8px, 2vw); }
+```
+
+- `+` and `-` need spaces around them (`calc(100% - 24px)`), like CSS.
+- `*` and `/` take a plain number on one side (`calc(2 * 10px)`, `calc(100% / 3)`).
+- `%` works in `calc()` for sizes, margins and offsets, resolved against the
+  containing box in layout. `min()`, `max()` and `clamp()` can't compare `%`
+  with px yet: `min(50%, 300px)` is refused (the declaration is dropped with a
+  warning). `min(50%, 80%)` and anything without `%` work.
+- A negative result for padding, border widths, gaps, radii or font sizes
+  becomes 0, as in CSS.
+
+### Grids that pick their column count
+
+```css
+.items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+```
+
+- `repeat(auto-fill, …)` makes as many columns as fit the container's width
+  (at least one). The tracks inside need a fixed size: `120px`, or
+  `minmax(120px, …)`.
+- `repeat(auto-fit, …)` does the same but drops the columns no item uses, so a
+  short list stretches across the row instead of leaving empty columns.
+- `minmax(min, max)` keeps a track at least `min` wide; with `1fr` as the max
+  it shares the leftover space like `1fr` does.
+- One `auto-fill`/`auto-fit` per track list.
 
 ## Differences from browsers
 

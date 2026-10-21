@@ -3,8 +3,8 @@ package com.khumam.gbaduo.companion.style
 import java.io.File
 
 /**
- * Parses a stylesheet: rules (`selectors { declarations }`), `@font-face`, and
- * comments. Fault-tolerant like a browser: an unsupported selector drops its rule,
+ * Parses a stylesheet: rules (`selectors { declarations }`), `@font-face`,
+ * `@media` blocks (see [MediaQuery]) and comments. Fault-tolerant like a browser: an unsupported selector drops its rule,
  * an unknown property or invalid value drops that declaration, and parsing
  * carries on; each is reported in [Stylesheet.warnings]. Pure, no Android deps.
  *
@@ -17,7 +17,21 @@ object CssParser {
         val warnings = mutableListOf<CssWarning>()
         val rules = mutableListOf<Rule>()
         val fontFaces = mutableListOf<FontFace>()
-        val text = stripComments(css)
+        parseBlock(stripComments(css), emptyList(), baseDir, packDir, sourceName, rules, fontFaces, warnings)
+        return Stylesheet(rules, fontFaces, warnings)
+    }
+
+    /** Rules (and `@font-face`, nested `@media`) in [text]; [media] are the enclosing `@media` conditions. */
+    private fun parseBlock(
+        text: String,
+        media: List<MediaQuery>,
+        baseDir: File?,
+        packDir: File?,
+        sourceName: String,
+        rules: MutableList<Rule>,
+        fontFaces: MutableList<FontFace>,
+        warnings: MutableList<CssWarning>,
+    ) {
         var i = 0
         while (i < text.length) {
             val open = text.indexOf('{', i)
@@ -37,6 +51,14 @@ object CssParser {
                 prelude.startsWith("@font-face", ignoreCase = true) -> {
                     parseFontFace(body, baseDir, packDir, sourceName, warnings)?.let { fontFaces += it }
                 }
+                prelude.startsWith("@media", ignoreCase = true) -> {
+                    val query = MediaQuery.parse(prelude.substring(6))
+                    if (query == null) {
+                        warnings += CssWarning("$sourceName: unsupported media query '${prelude.take(60)}', block skipped")
+                    } else {
+                        parseBlock(body, media + query, baseDir, packDir, sourceName, rules, fontFaces, warnings)
+                    }
+                }
                 prelude.startsWith("@") -> warnings += CssWarning("$sourceName: unsupported at-rule '${prelude.take(40)}' skipped")
                 else -> {
                     val selectors = Selector.parseList(prelude)
@@ -45,11 +67,10 @@ object CssParser {
                         continue
                     }
                     val declarations = parseDeclarations(body, baseDir, sourceName, warnings)
-                    if (declarations.isNotEmpty()) rules += Rule(selectors, declarations)
+                    if (declarations.isNotEmpty()) rules += Rule(selectors, declarations, media)
                 }
             }
         }
-        return Stylesheet(rules, fontFaces, warnings)
     }
 
     /** Declarations of a rule body or a `style` object string (`a: 1; b: 2`). */

@@ -3,18 +3,24 @@ package com.khumam.gbaduo.companion.style
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** A length as declared: px (incl. resolved em/rem/vw/vh), a percentage of the containing box, or `auto`. */
+/**
+ * A length as declared: px (incl. resolved em/rem/vw/vh), a percentage of the
+ * containing box, `px + percent%` (from `calc()`, e.g. `calc(100% - 20px)`), or `auto`.
+ */
 sealed class Length {
     data class Px(val px: Float) : Length()
     data class Percent(val percent: Float) : Length()
+    /** `calc()` mixing both: [px] plus [percent]% of the containing box. */
+    data class Calc(val px: Float, val percent: Float) : Length()
     object Auto : Length() {
         override fun toString() = "Auto"
     }
 
-    /** px for [Px], [percent]% of [base] for [Percent] (null base → null), null for [Auto]. */
+    /** px for [Px], [percent]% of [base] for [Percent] and [Calc] (null base → null), null for [Auto]. */
     fun resolve(base: Float?): Float? = when (this) {
         is Px -> px
         is Percent -> base?.let { it * percent / 100f }
+        is Calc -> base?.let { px + it * percent / 100f }
         Auto -> null
     }
 }
@@ -135,6 +141,7 @@ object CssValues {
     fun length(token: String, context: LengthContext = LengthContext(), allowPercent: Boolean = true, allowAuto: Boolean = true): Length? {
         val t = token.trim().lowercase()
         if (t == "auto") return if (allowAuto) Length.Auto else null
+        if (MathFunctions.isMath(t)) return MathFunctions.length(t, context, allowPercent)
         val (n, unit) = numberWithUnit(t) ?: return null
         return when (unit) {
             "", "px", "dp" -> Length.Px(n)

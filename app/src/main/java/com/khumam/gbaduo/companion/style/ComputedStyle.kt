@@ -57,7 +57,7 @@ class ComputedStyle(
             "thin" -> 1f
             "medium" -> 3f
             "thick" -> 5f
-            else -> CssValues.px(w, lengthContext) ?: 0f
+            else -> (CssValues.px(w, lengthContext) ?: 0f).coerceAtLeast(0f)
         }
     }
 
@@ -94,6 +94,7 @@ class ComputedStyle(
     fun radius(corner: String, width: Float, height: Float): Float = when (val r = length("border-$corner-radius")) {
         is Length.Px -> r.px
         is Length.Percent -> minOf(width, height) * r.percent / 100f
+        is Length.Calc -> r.px + minOf(width, height) * r.percent / 100f
         Length.Auto -> 0f
     }.coerceAtLeast(0f)
 
@@ -112,6 +113,7 @@ class ComputedStyle(
             return when (val len = CssValues.length(v, lengthContext, allowAuto = false)) {
                 is Length.Px -> len.px
                 is Length.Percent -> fontSizePx * len.percent / 100f
+                is Length.Calc -> len.px + fontSizePx * len.percent / 100f
                 else -> null
             }
         }
