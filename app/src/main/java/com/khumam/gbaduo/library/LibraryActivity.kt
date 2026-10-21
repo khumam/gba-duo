@@ -17,6 +17,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.PackInstaller
 import com.khumam.gbaduo.companion.PackManifest
 import com.khumam.gbaduo.companion.PackStore
@@ -74,6 +75,9 @@ class LibraryActivity : Activity() {
     private val io: ExecutorService = Executors.newSingleThreadExecutor()
     private var refreshGeneration = 0
 
+    /** The Thor's bottom screen (~538dp wide) and other narrow windows get a tighter layout. */
+    private val compact by lazy { resources.configuration.screenWidthDp < COMPACT_WIDTH_DP }
+
     private val blink = Handler(Looper.getMainLooper())
     private val motion by lazy { Pixel.motionEnabled(this) }
     private val blinkStep = object : Runnable {
@@ -88,6 +92,7 @@ class LibraryActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_library)
         library = RomLibrary(this)
+        RetroAchievements.init(this) // logs back in with a stored token, if you've logged in before
         bindViews()
         styleViews()
 
@@ -131,12 +136,25 @@ class LibraryActivity : Activity() {
 
         findViewById<OutlineText>(R.id.wordmark).apply {
             text = getString(R.string.app_name).uppercase()
-            setTextSizeSp(30f)
+            setTextSizeSp(if (compact) 22f else 30f)
         }
         gameTitle.apply {
             centered = true
-            setTextSizeSp(26f)
+            setTextSizeSp(if (compact) 20f else 26f)
             shadowPx = Pixel.dp(this@LibraryActivity, 3f)
+            // Long names shrink to fit before they're cut off.
+            minTextSizePx = 14f * resources.displayMetrics.scaledDensity
+        }
+        if (compact) {
+            val gutter = Pixel.dp(this, 16f).toInt()
+            (hud.parent as View).setPadding(gutter, (hud.parent as View).paddingTop, gutter, 0)
+            (hud.layoutParams as LinearLayout.LayoutParams).marginEnd = Pixel.dp(this, 10f).toInt()
+            info.setPadding(gutter, 0, gutter, 0)
+            findViewById<View>(R.id.hints_bar).setPadding(gutter, 0, gutter, 0)
+        }
+        // The empty / scanning box: 560dp, or the screen width minus a margin when narrower.
+        empty.layoutParams = empty.layoutParams.apply {
+            width = minOf(Pixel.dp(this@LibraryActivity, 560f), resources.displayMetrics.widthPixels - Pixel.dp(this@LibraryActivity, 48f)).toInt()
         }
 
         hud.apply { background = ColorDrawable(Pixel.INK); typeface = display; textSize = 12f; letterSpacing = 0.06f }
@@ -313,6 +331,7 @@ class LibraryActivity : Activity() {
             sb.color(label, Pixel.ON_INK_SOFT).append(' ').color(pad(value), Pixel.ON_INK)
         }
         cell(getString(R.string.hud_games), entries.size)
+        if (compact) { hud.text = sb; return }
         for (p in Platform.entries) {
             val n = entries.count { it.platform == p }
             if (n > 0) cell(p.label, n)
@@ -331,11 +350,11 @@ class LibraryActivity : Activity() {
             hint("◀ ▶", getString(R.string.hint_browse))
             hint("A", getString(R.string.play))
             hint("Y", getString(R.string.hint_pack))
-            hint("L R", getString(R.string.hint_jump))
+            if (!compact) hint("L R", getString(R.string.hint_jump))
         } else if (canAddFolder) {
             hint("A", getString(R.string.add_rom_folder))
         }
-        hint("START", getString(R.string.settings_title))
+        if (!compact || !hasGames) hint("START", getString(R.string.settings_title))
         hints.text = sb
     }
 
@@ -436,5 +455,6 @@ class LibraryActivity : Activity() {
         private const val KEY_LAST_SELECTED = "last_selected"
         private const val JUMP = 5
         private const val BLINK_MS = 530L
+        private const val COMPACT_WIDTH_DP = 700
     }
 }

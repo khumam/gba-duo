@@ -43,4 +43,37 @@
     <string name="empty_no_folder_title">Insert cartridge</string>
     <string name="empty_no_folder_text">Pick the folder on your device that holds your .gba, .gbc and .gb games (or .zip files with one inside). GBADuo only reads it.</string>
     <string name="empty_no_games_title">No cartridges</string>
+    <string name="ra_title">RetroAchievements</string>
+    <string name="ra_logged_out">Not logged in</string>
+    <string name="ra_logging_in">Logging in…</string>
+    <string name="ra_logged_in_as">Logged in as %1$s · %2$d points</string>
+    <string name="ra_username">Username</string>
+    <string name="ra_password">Password</string>
+    <string name="ra_login">Log in</string>
+    <string name="ra_logout">Log out</string>
+    <string name="ra_login_failed">Couldn\'t log in: %s</string>
+    <string name="ra_intro">Earn achievements while you play, with your retroachievements.org account.</string>
+    <string name="ra_privacy">GBADuo stores the login token RetroAchievements gives it, never your password. It only goes online while you\'re logged in: to identify each game you start and record your unlocks.</string>
+    <string name="ra_softcore">Achievements are earned in softcore for now. Hardcore needs RetroAchievements to approve GBADuo first.</string>
+    <string name="ra_unlocked">Achievement unlocked</string>
+    <string name="ra_mastered">Set completed</string>
+    <string name="ra_game_summary">%1$d of %2$d achievements unlocked</string>
+    <string name="ra_no_achievements">No achievements for this game</string>
+    <string name="ra_game_error">RetroAchievements: %s</string>
+    <string name="ra_disconnected">RetroAchievements: offline, unlocks will be sent later</string>
+    <string name="ra_reconnected">RetroAchievements: back online</string>
+    <plurals name="ra_points">
+        <item quantity="one">%d pt</item>
+        <item quantity="other">%d pts</item>
+    </plurals>
+    <string name="back">Back</string>
+    <string name="remove_short">Remove</string>
+    <string name="remove_confirm">Sure? Press again</string>
+    <string name="about_tagline">Play GBA, GBC and GB games with a companion screen on a dual-screen handheld.</string>
+    <string name="about_disclaimer">Fan-made, not affiliated with Nintendo. Use your own legally dumped ROMs.</string>
+    <string name="about_source">Source on GitHub</string>
+    <string name="about_credits_title">Built with</string>
+    <string name="about_credits">mGBA (MPL 2.0) emulates the games. Lua 5.4 (MIT) runs companion pack scripts. rcheevos (MIT) runs RetroAchievements. Fonts: Silkscreen and IBM Plex Mono (SIL Open Font License 1.1).</string>
+    <string name="ra_points_label">Points</string>
+    <string name="ra_player_label">Player</string>
 </resources>

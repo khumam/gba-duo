@@ -42,7 +42,7 @@ class PixelButton @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : TextView(context, attrs) {
 
-    private var box = PixelBoxDrawable(context, Pixel.YELLOW, shadowDp = 4f)
+    val box = PixelBoxDrawable(context, Pixel.YELLOW, shadowDp = 4f)
 
     init {
         background = box
@@ -92,6 +92,8 @@ class OutlineText @JvmOverloads constructor(
     var strokeWidthPx = Pixel.dp(context, 0.8f)
     var shadowPx = Pixel.dp(context, 3f)
     var centered = false
+    /** When set, a line too long for the width shrinks down to this size before it ellipsizes. */
+    var minTextSizePx = 0f
 
     val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Fonts.display(context, bold = true)
@@ -112,6 +114,12 @@ class OutlineText @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         val avail = width - shadowPx - strokeWidthPx * 2
+        val fullSize = paint.textSize
+        if (minTextSizePx > 0f) {
+            while (paint.textSize > minTextSizePx && paint.measureText(text.toString()) > avail) {
+                paint.textSize = (paint.textSize - 1f).coerceAtLeast(minTextSizePx)
+            }
+        }
         val shown = TextUtils.ellipsize(text, paint, avail, TextUtils.TruncateAt.END).toString()
         val fm = paint.fontMetrics
         val textW = paint.measureText(shown)
@@ -128,5 +136,6 @@ class OutlineText @JvmOverloads constructor(
         paint.style = Paint.Style.FILL
         paint.color = fillColor
         canvas.drawText(shown, x, y, paint)
+        paint.textSize = fullSize
     }
 }

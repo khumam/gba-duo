@@ -30,6 +30,8 @@ object Pixel {
     const val PINK = 0xFFF25C8A.toInt()
     const val SCREEN = 0xFFE4E1EA.toInt()
     const val MINT = 0xFFA8E6B0.toInt()
+    /** "White" for items inside cards (DESIGN.md), tinted so it isn't #fff. */
+    const val WHITE_SOFT = 0xFFFFFDF7.toInt()
 
     /** Text on ink surfaces. */
     const val ON_INK = 0xFFF1EEFB.toInt()
@@ -75,19 +77,26 @@ class PixelBoxDrawable(
     borderDp: Float = 3f,
     var border: Int = Pixel.INK,
     var shadowColor: Int = Pixel.INK,
+    /** Fill while the view has D-pad focus (null: no focus look). */
+    var focusedFill: Int? = null,
+    /** Outline colour while focused (DESIGN.md's focus ring is pink). */
+    var focusedBorder: Int? = null,
 ) : Drawable() {
     val shadow = Pixel.dp(context, shadowDp)
     private val borderW = Pixel.dp(context, borderDp)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
     private var pressed = false
+    private var focused = false
 
     override fun isStateful() = true
 
     override fun onStateChange(state: IntArray): Boolean {
-        val now = android.R.attr.state_pressed in state
-        if (now == pressed) return false
-        pressed = now
+        val nowPressed = android.R.attr.state_pressed in state
+        val nowFocused = android.R.attr.state_focused in state
+        if (nowPressed == pressed && nowFocused == focused) return false
+        pressed = nowPressed
+        focused = nowFocused
         invalidateSelf()
         return true
     }
@@ -103,12 +112,12 @@ class PixelBoxDrawable(
         }
         rect.set(b.left.toFloat(), b.top.toFloat(), faceRight, faceBottom)
         paint.style = Paint.Style.FILL
-        paint.color = fill
+        paint.color = if (focused) focusedFill ?: fill else fill
         canvas.drawRect(rect, paint)
         if (borderW > 0) {
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = borderW
-            paint.color = border
+            paint.color = if (focused) focusedBorder ?: border else border
             val h = borderW / 2
             canvas.drawRect(rect.left + h, rect.top + h, rect.right - h, rect.bottom - h, paint)
         }

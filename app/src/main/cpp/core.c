@@ -22,9 +22,18 @@ struct GbaDuoState {
     unsigned videoWidth;
     unsigned videoHeight;
     void* romBuffer;
+    size_t romSize;
 };
 
 static struct GbaDuoState g_state;
+
+/** The loaded ROM's bytes (for achievements.c's RetroAchievements hash); NULL when none. */
+const void* gbaduo_rom(size_t* size) {
+    if (size) {
+        *size = g_state.core ? g_state.romSize : 0;
+    }
+    return g_state.core ? g_state.romBuffer : NULL;
+}
 
 /** Used by script.c's mem.* Lua API; NULL when no ROM is loaded. */
 struct mCore* gbaduo_active_core(void) {
@@ -106,6 +115,7 @@ Java_com_khumam_gbaduo_emu_NativeCore_load(JNIEnv* env, jobject thiz, jbyteArray
     g_state.videoWidth = videoWidth;
     g_state.videoHeight = videoHeight;
     g_state.romBuffer = romBuffer;
+    g_state.romSize = (size_t) romSize;
     return JNI_TRUE;
 }
 

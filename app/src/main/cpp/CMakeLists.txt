@@ -59,7 +59,38 @@ list(FILTER LUA_SOURCES EXCLUDE REGEX "/lua\\.c$|/luac\\.c$")
 add_library(lua STATIC ${LUA_SOURCES})
 target_include_directories(lua PUBLIC "${LUA_DIR}/src")
 
-add_library(gbaduo SHARED core.c script.c)
+# ---------------------------------------------------------------------------
+# Vendored rcheevos 12.5.0 (RetroAchievements runtime, MIT — see engine/rcheevos).
+# rc_client + rapi + rhash for ROM files. Left out: disc / encrypted / zip hashing
+# (GBA and GB/GBC hash the ROM itself), RAIntegration (Windows) and the libretro
+# helpers. rcheevos makes no network calls itself: achievements.c hands them to Kotlin.
+# ---------------------------------------------------------------------------
+get_filename_component(RCHEEVOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine/rcheevos" ABSOLUTE)
+
+if(NOT EXISTS "${RCHEEVOS_DIR}/include/rc_client.h")
+    message(FATAL_ERROR "rcheevos source missing at ${RCHEEVOS_DIR}")
+endif()
+
+file(GLOB RCHEEVOS_SOURCES
+    "${RCHEEVOS_DIR}/src/rcheevos/*.c"
+    "${RCHEEVOS_DIR}/src/rapi/*.c"
+    "${RCHEEVOS_DIR}/src/rhash/hash.c"
+    "${RCHEEVOS_DIR}/src/rhash/hash_rom.c"
+    "${RCHEEVOS_DIR}/src/rhash/md5.c"
+    "${RCHEEVOS_DIR}/src/rc_client.c"
+    "${RCHEEVOS_DIR}/src/rc_compat.c"
+    "${RCHEEVOS_DIR}/src/rc_util.c"
+    "${RCHEEVOS_DIR}/src/rc_version.c")
+
+add_library(rcheevos STATIC ${RCHEEVOS_SOURCES})
+target_include_directories(rcheevos PUBLIC "${RCHEEVOS_DIR}/include")
+target_compile_definitions(rcheevos PUBLIC
+    RC_CLIENT_SUPPORTS_HASH
+    RC_HASH_NO_DISC
+    RC_HASH_NO_ENCRYPTED
+    RC_HASH_NO_ZIP)
+
+add_library(gbaduo SHARED core.c script.c achievements.c)
 
 target_compile_definitions(gbaduo PRIVATE USE_PTHREADS M_CORE_GBA M_CORE_GB)
 
@@ -69,4 +100,4 @@ target_include_directories(gbaduo PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/mgba/include"
     "${LUA_DIR}/src")
 
-target_link_libraries(gbaduo mgba lua android log)
+target_link_libraries(gbaduo mgba lua rcheevos android log)

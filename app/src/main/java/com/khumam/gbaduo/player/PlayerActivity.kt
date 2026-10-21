@@ -10,6 +10,8 @@ import android.view.KeyEvent
 import android.view.View
 import android.widget.Toast
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.achievements.AchievementPopups
+import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.CompanionActivity
 import com.khumam.gbaduo.companion.CompanionController
 import com.khumam.gbaduo.companion.CompanionPlacement
@@ -37,6 +39,7 @@ class PlayerActivity : Activity() {
     private var companionPresentation: CompanionPresentation? = null
     private var companionActivity: CompanionActivity.Session? = null
     private var resumed = false
+    private var achievementPopups: AchievementPopups? = null
 
     /**
      * Whether this is Android's top resumed activity: the one on the top focused display,
@@ -62,6 +65,9 @@ class PlayerActivity : Activity() {
                 View.SYSTEM_UI_FLAG_FULLSCREEN
             )
         setContentView(R.layout.activity_player)
+        // RetroAchievements: logs in with the stored token (if any) and shows popups over the game.
+        RetroAchievements.init(this)
+        achievementPopups = AchievementPopups(findViewById(android.R.id.content) as android.widget.FrameLayout).also { it.attach() }
 
         val romUriString = intent.getStringExtra(EXTRA_ROM_URI)
         val romFileName = intent.getStringExtra(EXTRA_ROM_FILE_NAME)
@@ -233,6 +239,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        achievementPopups?.detach()
         if (::emu.isInitialized) {
             emu.shutdown()
             emu.join(1000)

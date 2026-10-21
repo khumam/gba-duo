@@ -48,6 +48,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // RetroAchievements' User-Agent carries the version
     }
 
     kotlinOptions {

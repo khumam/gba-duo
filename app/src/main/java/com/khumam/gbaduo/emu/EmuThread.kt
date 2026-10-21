@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.emu
 
 import android.util.Log
+import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.CompanionSnapshot
 import com.khumam.gbaduo.companion.LuaScript
 import com.khumam.gbaduo.companion.NativeCoreMemoryReader
@@ -59,6 +60,7 @@ class EmuThread(
     override fun run() {
         loaded = loadCore()
         if (!loaded) return
+        RetroAchievements.gameStarted()
 
         gameView.setVideoSize(NativeCore.videoWidth(), NativeCore.videoHeight())
         gameView.frameBuffer = NativeCore.videoBuffer()
@@ -70,6 +72,7 @@ class EmuThread(
             if (paused) {
                 // Taps on the companion screen still get their data while the game is paused.
                 if (snapshotRequested) serviceCompanion(activePack)
+                RetroAchievements.paused()
                 Thread.sleep(16)
                 nextFrameAt = System.nanoTime()
                 continue
@@ -81,6 +84,7 @@ class EmuThread(
 
             repeat(speed) {
                 NativeCore.runFrame(input.keys())
+                RetroAchievements.frame()
             }
             gameView.postFrame()
             audioOut.pump(mute = speed != 1)
@@ -98,6 +102,7 @@ class EmuThread(
 
         LuaScript.unload()
         audioOut.stop()
+        RetroAchievements.gameStopped()
         NativeCore.unload()
     }
 

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Only for RetroAchievements, and only once you log in (RetroAchievements.kt). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -45,6 +48,8 @@
         <activity android:name=".settings.SettingsActivity" android:exported="false" />
         <activity android:name=".settings.RomFoldersActivity" android:exported="false" />
         <activity android:name=".settings.AboutActivity" android:exported="false" />
+        <activity android:name=".settings.RetroAchievementsActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize|stateHidden" />
 
         <activity
             android:name=".player.PlayerActivity"
