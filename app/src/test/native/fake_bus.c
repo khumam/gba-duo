@@ -1,0 +1,61 @@
+// A fake machine for the harness: the bus.h backend over plain arrays, so the real
+// script.c and memwrite.c run on the desktop. Every byte reachable through
+// gbaduo_bus_write8 is recorded, so a test can tell a refused write never got here.
+
+#include <string.h>
+
+#include "bus.h"
+#include "fake_bus.h"
+
+int fake_platform = GBADUO_BUS_GBA;
+unsigned fake_writes = 0;
+
+static uint8_t gba_ewram[0x40000];
+static uint8_t gba_iwram[0x8000];
+static uint8_t gb_space[0x10000];
+// Anything else written lands here (it shouldn't: memwrite.c refuses it first).
+static uint8_t elsewhere[16];
+
+static uint8_t* cell(uint32_t a) {
+    if (fake_platform == GBADUO_BUS_GBA) {
+        if (a >= 0x02000000u && a <= 0x0203FFFFu) return &gba_ewram[a - 0x02000000u];
+        if (a >= 0x03000000u && a <= 0x03007FFFu) return &gba_iwram[a - 0x03000000u];
+        return &elsewhere[a % sizeof(elsewhere)];
+    }
+    if (fake_platform == GBADUO_BUS_GB && a <= 0xFFFFu) return &gb_space[a];
+    return &elsewhere[a % sizeof(elsewhere)];
+}
+
+void fake_reset(int platform) {
+    fake_platform = platform;
+    fake_writes = 0;
+    memset(gba_ewram, 0, sizeof(gba_ewram));
+    memset(gba_iwram, 0, sizeof(gba_iwram));
+    memset(gb_space, 0, sizeof(gb_space));
+    memset(elsewhere, 0, sizeof(elsewhere));
+}
+
+uint8_t fake_peek(uint32_t address) {
+    return *cell(address);
+}
+
+int gbaduo_bus_platform(void) {
+    return fake_platform;
+}
+
+uint8_t gbaduo_bus_read8(uint32_t address) {
+    return fake_platform == GBADUO_BUS_NONE ? 0 : *cell(address);
+}
+
+uint16_t gbaduo_bus_read16(uint32_t address) {
+    return (uint16_t) (gbaduo_bus_read8(address) | gbaduo_bus_read8(address + 1) << 8);
+}
+
+uint32_t gbaduo_bus_read32(uint32_t address) {
+    return (uint32_t) gbaduo_bus_read16(address) | (uint32_t) gbaduo_bus_read16(address + 2) << 16;
+}
+
+void gbaduo_bus_write8(uint32_t address, uint8_t value) {
+    fake_writes++;
+    *cell(address) = value;
+}

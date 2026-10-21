@@ -25,7 +25,12 @@ data class PackManifest(
     val values: Map<String, ValueSpec>,
     /** CSS files (relative to the pack root), applied in order after the app's built-in styles. */
     val styleFiles: List<String> = emptyList(),
+    /** What the pack may do beyond reading the game: see [PERMISSIONS]. */
+    val permissions: Set<String> = emptySet(),
 ) {
+    /** The pack's actions may change the game's RAM (`mem.write*`), once the player allows it. */
+    val canWriteMemory: Boolean get() = MEMORY_WRITE in permissions
+
     /** [crc32] ignored (any match) when this pack declares no CRCs. */
     fun matches(gameCode: String, crc32: Long): Boolean =
         gameCode in gameCodes && (crc32s.isEmpty() || crc32 in crc32s)
@@ -33,9 +38,15 @@ data class PackManifest(
     class InvalidManifestException(message: String) : Exception(message)
 
     companion object {
-        /** 1: original format. 2: adds `styles` (CSS). */
-        const val SUPPORTED_FORMAT_VERSION = 2
+        /** 1: original format. 2: adds `styles` (CSS). 3: adds `permissions`. */
+        const val SUPPORTED_FORMAT_VERSION = 3
         private const val STYLES_FORMAT_VERSION = 2
+        private const val PERMISSIONS_FORMAT_VERSION = 3
+
+        const val MEMORY_WRITE = "memory-write"
+
+        /** Every permission a manifest may ask for. Anything else is refused, so a typo can't pass silently. */
+        val PERMISSIONS = setOf(MEMORY_WRITE)
         private val ID_REGEX = Regex("^[a-z0-9-]{1,64}$")
 
         fun isValidId(id: String): Boolean = ID_REGEX.matches(id)
@@ -81,6 +92,16 @@ data class PackManifest(
                 throw InvalidManifestException("'styles' needs formatVersion $STYLES_FORMAT_VERSION")
             }
 
+            val permissionsJson = root.optJSONArray("permissions")
+            val permissions = permissionsJson?.let { arr -> (0 until arr.length()).map { arr.getString(it) }.toSet() } ?: emptySet()
+            if (permissionsJson != null && formatVersion < PERMISSIONS_FORMAT_VERSION) {
+                throw InvalidManifestException("'permissions' needs formatVersion $PERMISSIONS_FORMAT_VERSION")
+            }
+            val unknown = permissions - PERMISSIONS
+            if (unknown.isNotEmpty()) {
+                throw InvalidManifestException("Unknown permission ${unknown.joinToString()}")
+            }
+
             return PackManifest(
                 id = id,
                 name = root.optString("name", id),
@@ -94,6 +115,7 @@ data class PackManifest(
                 scriptFile = root.optString("script", "").ifBlank { null },
                 values = values,
                 styleFiles = styleFiles,
+                permissions = permissions,
             )
         }
     }

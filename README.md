@@ -75,12 +75,42 @@ the old one; your saves stay.
 
 - **Save states** - 9 slots per game, each showing when it was saved.
 - **In-game saves** - kept per game, next to its save states.
+- **Save folder** - optionally mirror every game's saves to a folder you pick (SD
+  card, a synced folder), so backups and moving to another device are file copies.
 - **Fast-forward** - hold **R2**; 2x, 3x or 4x, picked in the menu.
 - **Shaders** - Off, GBA Color, LCD Grid, Scanlines and Scale2x.
 - **Swap A/B** - flips the A and B buttons if they feel the wrong way round.
 
 Press **L2** or **BACK** in a game for the menu: resume, save state, load state,
 fast-forward speed, shader, swap A/B and quit.
+
+### Your saves
+
+Each game has its own folder, named by platform and ROM checksum, so it follows the
+game wherever the ROM file is:
+
+```
+<platform>/<Title> [<code>-<CRC32>]/
+    game.sav          the game's own save
+    states/slotN.ss   save states
+    pack.json         the companion pack picked for it
+```
+
+They live in the app's private storage. **Settings > Save folder** keeps a copy of
+all of them in a folder you choose with the system folder picker:
+
+- Games still play from the private copy. It's copied to the folder after each in-game
+  save and save state, on pause and on quit, and newer saves already in the folder
+  (from another device) are taken in when a game starts.
+- The first time, every save is copied over and checked before the folder is used.
+- If a save changed in both places, the newer one is kept and the other is saved next
+  to it as `game.sav.conflict-<time>`. Nothing is overwritten silently.
+- If the folder can't be reached (SD card out), the game plays from the private copy
+  and the folder catches up once it's back.
+- Companion packs and the ROM list stay private.
+
+To back up, copy the folder. To move to another device, copy it there and pick it as
+the save folder: each game finds its saves by checksum, whatever the file is called.
 
 ### Controls
 
@@ -117,6 +147,8 @@ A pack is a folder with:
 - `layout.json` - the screen: boxes, text, images, bars, lists, tabs and pages;
 - `style.css` - real CSS: flex and grid layout, colors, borders, shadows, fonts and transitions;
 - `main.lua` - an `update()` that reads the game's memory and returns the values the layout shows.
+  Its `actions` run on taps; with the `memory-write` permission and the player's
+  consent they can also change the game (see [Changing the game](docs-packs/companion-pages.md#changing-the-game)).
 
 The guides are in [`docs-packs/`](docs-packs/):
 [styling the companion](docs-packs/companion-styling.md) and
@@ -136,7 +168,8 @@ pack's Lua, so you feed it sample data in `preview-data.json`.
 ## Privacy
 
 GBADuo has no accounts, ads or analytics, and asks for no permissions: it never goes
-online. Your games, saves and packs never leave your device.
+online. Your games, saves and packs never leave your device, unless you pick a save
+folder that syncs somewhere.
 
 <details>
 <summary><strong>AI tooling note</strong></summary>

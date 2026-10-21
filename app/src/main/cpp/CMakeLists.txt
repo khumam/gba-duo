@@ -90,7 +90,7 @@ target_compile_definitions(rcheevos PUBLIC
     RC_HASH_NO_ENCRYPTED
     RC_HASH_NO_ZIP)
 
-add_library(gbaduo SHARED core.c script.c achievements.c)
+add_library(gbaduo SHARED core.c script.c memwrite.c achievements.c)
 
 target_compile_definitions(gbaduo PRIVATE USE_PTHREADS M_CORE_GBA M_CORE_GB)
 

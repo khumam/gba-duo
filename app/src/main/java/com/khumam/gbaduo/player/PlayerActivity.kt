@@ -2,6 +2,7 @@ package com.khumam.gbaduo.player
 
 import android.app.Activity
 import android.app.ActivityOptions
+import android.app.AlertDialog
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
@@ -16,17 +17,21 @@ import com.khumam.gbaduo.companion.CompanionActivity
 import com.khumam.gbaduo.companion.CompanionController
 import com.khumam.gbaduo.companion.CompanionPlacement
 import com.khumam.gbaduo.companion.CompanionPresentation
+import com.khumam.gbaduo.companion.CompanionSettings
+import com.khumam.gbaduo.companion.PackManifest
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.emu.AudioOut
 import com.khumam.gbaduo.emu.EmuThread
 import com.khumam.gbaduo.emu.GameView
 import com.khumam.gbaduo.emu.InputMapper
 import com.khumam.gbaduo.emu.ShaderPreset
+import com.khumam.gbaduo.library.GameTitle
 import com.khumam.gbaduo.library.RomArchive
 import com.khumam.gbaduo.library.RomHeader
 import com.khumam.gbaduo.library.RomIndex
 import com.khumam.gbaduo.storage.GameStorage
 import com.khumam.gbaduo.storage.LegacyMigration
+import com.khumam.gbaduo.storage.SaveMirror
 import java.io.File
 
 class PlayerActivity : Activity() {
@@ -40,6 +45,7 @@ class PlayerActivity : Activity() {
     private var companionActivity: CompanionActivity.Session? = null
     private var resumed = false
     private var achievementPopups: AchievementPopups? = null
+    private var saveMirror: SaveMirror? = null
 
     /**
      * Whether this is Android's top resumed activity: the one on the top focused display,
@@ -95,11 +101,25 @@ class PlayerActivity : Activity() {
         LegacyMigration.migrate(filesDir, romFileName, crc32, storage)
         storage.ensureDirs()
 
+        // With a save folder set, take in newer saves from it (another device) before the
+        // core opens game.sav, then mirror changes out while playing.
+        saveMirror = SaveMirror.forGame(this, storage)?.also { mirror ->
+            mirror.onUnavailable = {
+                runOnUiThread { Toast.makeText(this, R.string.save_folder_unavailable, Toast.LENGTH_LONG).show() }
+            }
+            mirror.syncIn()
+        }
+
         input = InputMapper()
         audioOut = AudioOut()
         val gameView = findViewById<GameView>(R.id.game_view)
         gameView.setShader(savedShader)
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
+        saveMirror?.let { mirror ->
+            emu.onSaveDataChanged = mirror::requestOut
+            // After the core is unloaded, so the save it writes on the way out is included.
+            emu.onStopped = { mirror.finish() }
+        }
         emu.start()
 
         // The quick menu and companion screen talk to the core, so wait until the emu thread has loaded it.
@@ -158,6 +178,10 @@ class PlayerActivity : Activity() {
         if (!controller.showPack(manifest, packDir)) return
 
         emu.activePackDir = packDir
+        emu.writeAccess = writeAccessFor(manifest, storage)
+        // Named as the library shows it ("The Legend of Zelda: The Minish Cap"), not by its header code.
+        val gameName = GameTitle.display(intent.getStringExtra(EXTRA_ROM_FILE_NAME).orEmpty(), header.title)
+        emu.onWriteConsentNeeded = { runOnUiThread { askWriteConsent(manifest, gameName, storage) } }
         emu.activePack = manifest
         emu.onSnapshot = { snapshot -> runOnUiThread { companionScreen?.update(snapshot) } }
         // Taps on the companion screen reach the pack's Lua through the emu thread.
@@ -165,6 +189,43 @@ class PlayerActivity : Activity() {
         controller.onUiChange = emu::setUiState
         controller.onScriptCall = emu::callAction
         emu.setUiState(controller.uiState)
+    }
+
+    /**
+     * May [manifest]'s actions change this game? Only when the pack asks for it, the
+     * "Allow packs to write to the game" setting is on, and the player allowed this pack
+     * for this game; [EmuThread.WriteAccess.ASK] when they haven't been asked yet.
+     */
+    private fun writeAccessFor(manifest: PackManifest, storage: GameStorage): EmuThread.WriteAccess = when {
+        !manifest.canWriteMemory || !CompanionSettings.allowWrites(this) -> EmuThread.WriteAccess.NONE
+        else -> when (storage.writeConsent(manifest.id)) {
+            true -> EmuThread.WriteAccess.ALLOWED
+            false -> EmuThread.WriteAccess.NONE
+            null -> EmuThread.WriteAccess.ASK
+        }
+    }
+
+    /** The first time a pack is about to change a game: asks, pausing the game meanwhile. Saved per pack and game. */
+    private fun askWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage) {
+        if (isFinishing || isDestroyed) return
+        val wasPaused = emu.paused
+        emu.paused = true
+        fun answer(allowed: Boolean) {
+            storage.setWriteConsent(manifest.id, allowed)
+            emu.answerWriteConsent(
+                if (allowed) EmuThread.WriteAccess.ALLOWED else EmuThread.WriteAccess.NONE,
+                // A save state to go back to, made just before the pack's first change.
+                safetyState = if (allowed) storage.beforePackWriteState.absolutePath else null,
+            )
+            emu.paused = wasPaused || !resumed
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.pack_write_title)
+            .setMessage(getString(R.string.pack_write_message, manifest.name, gameTitle))
+            .setPositiveButton(R.string.pack_write_allow) { _, _ -> answer(true) }
+            .setNegativeButton(R.string.pack_write_deny) { _, _ -> answer(false) }
+            .setCancelable(false)
+            .show()
     }
 
     /**
@@ -230,6 +291,7 @@ class PlayerActivity : Activity() {
         resumed = false
         super.onPause()
         if (::emu.isInitialized) emu.paused = true
+        saveMirror?.requestOut()
     }
 
     override fun onResume() {

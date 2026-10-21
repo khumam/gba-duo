@@ -1,0 +1,11 @@
+/* Example: a pack that changes the game. See docs-packs/companion-pages.md, "Changing the game". */
+
+:root { background: #10131f; color: #eef1ff; font-size: 14px; }
+
+.screen { padding: 14px; gap: 10px; }
+.title { font-size: 18px; font-weight: bold; }
+.hint { color: #9aa3c7; }
+.items { gap: 8px; }
+.item { padding: 10px 14px; border-radius: 8px; background: #2a75bb; }
+.item:pressed { background: #3b4cca; }
+.message { color: #ffcb05; min-height: 18px; }

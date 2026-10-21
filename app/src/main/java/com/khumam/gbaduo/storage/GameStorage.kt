@@ -20,6 +20,44 @@ class GameStorage private constructor(val dir: File) {
 
     fun stateFile(slot: Int): File = File(statesDir, "slot$slot.ss")
 
+    private val consentFile: File get() = File(dir, "consent.json")
+
+    /**
+     * The save state made automatically just before a companion pack first changes this
+     * game's memory, so the player can always go back. Not a numbered slot (and not
+     * copied to the save folder).
+     */
+    val beforePackWriteState: File get() = File(statesDir, "before-pack-write.ss")
+
+    /**
+     * The player's answer to "let pack [packId] change this game?": true, false, or null
+     * when not asked yet. Kept in this game's folder, per pack.
+     */
+    fun writeConsent(packId: String): Boolean? {
+        val json = runCatching { JSONObject(consentFile.readText()) }.getOrNull() ?: return null
+        val packs = json.optJSONObject(MEMORY_WRITE) ?: return null
+        return if (packs.has(packId)) packs.optBoolean(packId) else null
+    }
+
+    fun setWriteConsent(packId: String, allowed: Boolean) {
+        ensureDirs()
+        val json = runCatching { JSONObject(consentFile.readText()) }.getOrNull() ?: JSONObject()
+        val packs = json.optJSONObject(MEMORY_WRITE) ?: JSONObject().also { json.put(MEMORY_WRITE, it) }
+        packs.put(packId, allowed)
+        val tmp = File(dir, "consent.json.tmp")
+        tmp.writeText(json.toString())
+        if (!tmp.renameTo(consentFile)) {
+            consentFile.delete()
+            tmp.renameTo(consentFile)
+        }
+    }
+
+    /** `gba`, `gbc` or `gb`: the folder above this one. */
+    val platformId: String get() = dir.parentFile?.name.orEmpty()
+
+    /** `<Title> [<code>-]<CRC32>`: also the folder's name in the save folder, if one is set. */
+    val folderName: String get() = dir.name
+
     /** Creates the game folder (and `states/`) if missing. Call before anything writes into it. */
     fun ensureDirs(): GameStorage {
         statesDir.mkdirs()
@@ -40,6 +78,7 @@ class GameStorage private constructor(val dir: File) {
 
     companion object {
         private const val MAX_TITLE_LENGTH = 48
+        private const val MEMORY_WRITE = "memory-write"
 
         /** Finds this game's existing folder by CRC (even if its title part differs), or names a new one. Doesn't create it. */
         fun forGame(filesDir: File, platform: Platform, title: String, gameCode: String, crc32: Long): GameStorage {
@@ -69,6 +108,18 @@ class GameStorage private constructor(val dir: File) {
         }
 
         private fun crcTag(crc32: Long): String = "%08X".format(crc32 and 0xFFFFFFFFL)
+
+        /** The CRC32 tag of a game folder name (`"...[BPEE-1F1C08FB]"` -> `"1F1C08FB"`), or null if it isn't one. */
+        fun crcTagOf(folderName: String): String? {
+            val m = Regex("[\\[-]([0-9A-F]{8})]$").find(folderName) ?: return null
+            return m.groupValues[1]
+        }
+
+        /** Whether two game folder names are the same game: same CRC, whatever the title part says. */
+        fun sameGame(a: String, b: String): Boolean {
+            val tag = crcTagOf(a) ?: return false
+            return hasCrcTag(b, tag)
+        }
 
         private fun hasCrcTag(name: String, tag: String): Boolean {
             val suffix = "$tag]"

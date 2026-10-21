@@ -199,3 +199,67 @@ end
   `update(ui)`, with the same instruction and memory limits.
 - **Errors:** an error or a missing function is logged
   (`adb logcat -s EmuThread`) and the screen stays as it was.
+
+## Changing the game
+
+A pack's actions can also write to the game's memory: equip an item from the
+companion screen, set a value without opening a menu. Reading needs nothing;
+writing needs a permission, and the player's say-so.
+
+```json
+{
+  "formatVersion": 3,
+  "permissions": ["memory-write"],
+  ...
+}
+```
+
+```lua
+function actions.equip(button, itemId)
+  if mem.u8(SAFE_FLAG) == 1 then
+    local ok, why = mem.write8(B_SLOT, itemId)
+    if not ok then return { set = { message = "Couldn't equip: " .. why } } end
+  end
+end
+```
+
+| Function | Writes |
+|---|---|
+| `mem.write8(addr, value)` | 1 byte (the low 8 bits of `value`) |
+| `mem.write16(addr, value)` | 2 bytes, little-endian |
+| `mem.write32(addr, value)` | 4 bytes, little-endian |
+| `mem.write(addr, bytes)` | a Lua string of raw bytes, 1 to 64 |
+
+Each returns `true` when the write happened, or `false` and a reason when it
+was refused, so the pack can say so on the companion screen. Nothing is written
+when it returns `false`.
+
+The checks live in the app, not in the pack's Lua, so a pack can't skip them:
+
+- **Permission.** Without `"permissions": ["memory-write"]` (formatVersion 3)
+  every write is refused. An unknown permission makes the manifest invalid.
+- **Only from a tap.** Writes work only while an `onClick` action is running.
+  `update()`, `init()` and the script's top level can't write, so a pack can't
+  change the game on its own. A function saved during one tap can't write later.
+- **Only RAM.** GBA EWRAM `0x02000000`-`0x0203FFFF` and IWRAM
+  `0x03000000`-`0x03007FFF`; GB/GBC work RAM `0xC000`-`0xDFFF` and high RAM
+  `0xFF80`-`0xFFFE`. ROM, I/O registers, video memory, the save, and mirrors of
+  RAM are refused. A write must fit entirely inside one region.
+- **Size.** At most 64 bytes per call and 256 bytes per tap.
+- **The player.** Writing is off until the player turns on **Settings > Packs
+  can change games**. Then the first time a pack is about to change a game, the
+  app asks, naming the pack and the game; the answer is kept for that pack and
+  game. If they allow it, a save state is made just before (**Load state >
+  Before pack changes**). The pack picker marks packs that "can modify the game".
+- **Timing.** Writes happen on the emulator thread between frames, so they never
+  race the emulator, and the game sees them on its next frame.
+- **Logged.** Every write is logged with its address and size:
+  `adb logcat -s Companion`.
+
+Writes don't roll back: if an action writes and then errors, what it wrote
+stays. Write last, after every check.
+
+Find real addresses before you write anything, and check a "safe to act"
+condition first: a wrong write can crash the game or spoil the save. See
+[`examples/zelda-items`](examples/zelda-items) and its notes on finding addresses.
+

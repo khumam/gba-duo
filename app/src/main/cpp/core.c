@@ -11,6 +11,8 @@
 #include <mgba/gba/core.h>
 #include <mgba-util/vfs.h>
 
+#include "bus.h"
+
 #define LOG_TAG "GBADuoCore"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
@@ -38,6 +40,35 @@ const void* gbaduo_rom(size_t* size) {
 /** Used by script.c's mem.* Lua API; NULL when no ROM is loaded. */
 struct mCore* gbaduo_active_core(void) {
     return g_state.core;
+}
+
+/* ---- bus.h backend: script.c's mem.* and gfx.* go through these ---------------- */
+
+int gbaduo_bus_platform(void) {
+    if (!g_state.core) {
+        return GBADUO_BUS_NONE;
+    }
+    return g_state.core->platform(g_state.core) == mPLATFORM_GBA ? GBADUO_BUS_GBA : GBADUO_BUS_GB;
+}
+
+uint8_t gbaduo_bus_read8(uint32_t address) {
+    return g_state.core ? (uint8_t) g_state.core->rawRead8(g_state.core, address, -1) : 0;
+}
+
+uint16_t gbaduo_bus_read16(uint32_t address) {
+    return g_state.core ? (uint16_t) g_state.core->rawRead16(g_state.core, address, -1) : 0;
+}
+
+uint32_t gbaduo_bus_read32(uint32_t address) {
+    return g_state.core ? (uint32_t) g_state.core->rawRead32(g_state.core, address, -1) : 0;
+}
+
+/* Unchecked: only memwrite.c calls this, after its region check. Runs on the emu
+ * thread between frames (script.c's actions), so it never races mGBA. */
+void gbaduo_bus_write8(uint32_t address, uint8_t value) {
+    if (g_state.core) {
+        g_state.core->rawWrite8(g_state.core, address, -1, value);
+    }
 }
 
 JNIEXPORT jboolean JNICALL

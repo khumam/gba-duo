@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.khumam.gbaduo.storage.LegacyMigration
+import com.khumam.gbaduo.storage.SaveFolder
 import java.io.File
 
 data class RomEntry(
@@ -60,6 +61,8 @@ class RomLibrary(private val context: Context) {
 
     fun removeFolder(uri: Uri) {
         folders = FolderList.remove(folders.map(Uri::toString), uri.toString()).map(Uri::parse)
+        // The same folder may also be the save folder, which needs the grant to stay.
+        if (uri == SaveFolder.uri(context)) return
         runCatching {
             context.contentResolver.releasePersistableUriPermission(
                 uri,

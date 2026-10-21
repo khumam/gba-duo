@@ -48,6 +48,46 @@ class EmuThread(
     /** Called on the emu thread with what a script action returned (UI actions for the companion screen). */
     @Volatile var onActionResult: ((Any?) -> Unit)? = null
 
+    /** Whether the active pack's actions may change the game's memory (`mem.write*`). */
+    enum class WriteAccess {
+        /** No: the pack doesn't ask, the setting is off, or the player said no. Writes are refused. */
+        NONE,
+
+        /** Yes: the player allowed this pack for this game. */
+        ALLOWED,
+
+        /** Not decided yet: the next action waits while [onWriteConsentNeeded] asks the player. */
+        ASK,
+    }
+
+    /** Set by PlayerActivity with the pack; see [answerWriteConsent]. */
+    @Volatile var writeAccess = WriteAccess.NONE
+
+    /**
+     * Called on this thread, once, when an action is waiting for the player to allow
+     * (or refuse) writes. Answer with [answerWriteConsent]; until then actions stay queued.
+     */
+    @Volatile var onWriteConsentNeeded: (() -> Unit)? = null
+
+    @Volatile private var consentAsked = false
+
+    /** A save state to write right before the first allowed action runs (see [answerWriteConsent]). */
+    @Volatile private var safetyStatePath: String? = null
+
+    /**
+     * Called on this thread when the game's save data may have changed on disk: the
+     * save file's size or time changed (checked every [SAVE_CHECK_FRAMES]), or a save
+     * state was written. Used to copy saves out to the save folder.
+     */
+    @Volatile var onSaveDataChanged: (() -> Unit)? = null
+
+    /** Called on this thread as it ends, after the core is unloaded (its save written): every time, even after a failure. */
+    @Volatile var onStopped: (() -> Unit)? = null
+
+    private val saveFile = File(savePath)
+    private var saveSeen = 0L to 0L
+    private var framesSinceSaveCheck = 0
+
     private var framesSinceSnapshot = 0
     private var scriptLoadedForPack: PackManifest? = null
     private var scriptActive = false
@@ -58,8 +98,17 @@ class EmuThread(
     private val pendingCalls = ConcurrentLinkedQueue<Pair<String, List<Any?>>>()
 
     override fun run() {
+        try {
+            play()
+        } finally {
+            onStopped?.invoke()
+        }
+    }
+
+    private fun play() {
         loaded = loadCore()
         if (!loaded) return
+        saveSeen = saveFile.length() to saveFile.lastModified()
         RetroAchievements.gameStarted()
 
         gameView.setVideoSize(NativeCore.videoWidth(), NativeCore.videoHeight())
@@ -90,6 +139,7 @@ class EmuThread(
             audioOut.pump(mute = speed != 1)
 
             serviceCompanion(activePack)
+            checkSaveFile()
 
             nextFrameAt += frameNanos / speed
             val sleepNanos = nextFrameAt - System.nanoTime()
@@ -104,6 +154,17 @@ class EmuThread(
         audioOut.stop()
         RetroAchievements.gameStopped()
         NativeCore.unload()
+    }
+
+    /** mGBA writes the save file itself shortly after the game saves; notice when it has. */
+    private fun checkSaveFile() {
+        if (++framesSinceSaveCheck < SAVE_CHECK_FRAMES) return
+        framesSinceSaveCheck = 0
+        val now = saveFile.length() to saveFile.lastModified()
+        if (now != saveSeen) {
+            saveSeen = now
+            onSaveDataChanged?.invoke()
+        }
     }
 
     /** In its own frame so nothing in [run] keeps the ROM reachable once the core has copied it. */
@@ -129,8 +190,18 @@ class EmuThread(
                     LuaScript.setUi(uiState)
                 }
                 while (true) {
+                    if (writeAccess == WriteAccess.ASK) {
+                        // The pack may write: nothing runs until the player has answered.
+                        if (pendingCalls.isNotEmpty() && !consentAsked) {
+                            consentAsked = true
+                            onWriteConsentNeeded?.invoke()
+                        }
+                        break
+                    }
                     val (name, args) = pendingCalls.poll() ?: break
-                    val result = LuaScript.call(name, args)
+                    val mayWrite = writeAccess == WriteAccess.ALLOWED
+                    if (mayWrite) saveSafetyState()
+                    val result = LuaScript.call(name, args, mayWrite)
                     if (result != null) {
                         onActionResult?.invoke(result)
                     } else {
@@ -158,6 +229,18 @@ class EmuThread(
         snapshotRequested = true
     }
 
+    /**
+     * Thread-safe: the player's answer to [onWriteConsentNeeded]; runs the actions that
+     * were waiting. With [safetyState], a save state is written there first, on this
+     * thread, before the pack's first write can happen (even while the game is paused).
+     */
+    fun answerWriteConsent(access: WriteAccess, safetyState: String? = null) {
+        safetyStatePath = safetyState
+        writeAccess = access
+        consentAsked = false
+        snapshotRequested = true
+    }
+
     /** Thread-safe: queues a call to the script's `actions.<name>(args...)`, run before the next snapshot. */
     fun callAction(name: String, args: List<Any?>) {
         pendingCalls += name to args
@@ -182,6 +265,14 @@ class EmuThread(
         }
     }
 
+    private fun saveSafetyState() {
+        val path = safetyStatePath ?: return
+        safetyStatePath = null
+        File(path).parentFile?.mkdirs()
+        if (NativeCore.saveState(path)) onSaveDataChanged?.invoke()
+        else Log.w(TAG, "could not save the state before the pack's first write")
+    }
+
     /** Thread-safe; services the request on the emu thread between frames. */
     fun requestState(path: String, save: Boolean) {
         pendingSaveState.set(path to save)
@@ -191,6 +282,7 @@ class EmuThread(
         val request = pendingSaveState.getAndSet(null) ?: return
         val (path, save) = request
         lastStateResult = if (save) NativeCore.saveState(path) else NativeCore.loadState(path)
+        if (save && lastStateResult == true) onSaveDataChanged?.invoke()
     }
 
     fun shutdown() {
@@ -199,5 +291,8 @@ class EmuThread(
 
     private companion object {
         const val TAG = "EmuThread"
+
+        /** About every 3 seconds. */
+        const val SAVE_CHECK_FRAMES = 180
     }
 }

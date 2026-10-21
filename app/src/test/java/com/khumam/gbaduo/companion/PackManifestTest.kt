@@ -103,4 +103,37 @@ class PackManifestTest {
     fun stylesNeedFormatVersion2() {
         PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 1, "styles": ["style.css"]"""))
     }
+
+    @Test
+    fun formatVersion3AcceptsMemoryWritePermission() {
+        val v3 = validJson.replace(""""formatVersion": 1""", """"formatVersion": 3, "permissions": ["memory-write"]""")
+        val manifest = PackManifest.parse(v3)
+        assertEquals(setOf("memory-write"), manifest.permissions)
+        assertTrue(manifest.canWriteMemory)
+    }
+
+    @Test
+    fun noPermissionsMeansReadOnly() {
+        val manifest = PackManifest.parse(validJson)
+        assertEquals(emptySet<String>(), manifest.permissions)
+        assertFalse(manifest.canWriteMemory)
+        // Older packs keep working unchanged under format 3 too.
+        assertFalse(PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 3""")).canWriteMemory)
+    }
+
+    @Test(expected = PackManifest.InvalidManifestException::class)
+    fun permissionsNeedFormatVersion3() {
+        PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 2, "permissions": ["memory-write"]"""))
+    }
+
+    @Test(expected = PackManifest.InvalidManifestException::class)
+    fun unknownPermissionIsRefused() {
+        PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 3, "permissions": ["memory-writes"]"""))
+    }
+
+    @Test
+    fun emptyPermissionsListIsFine() {
+        val manifest = PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 3, "permissions": []"""))
+        assertFalse(manifest.canWriteMemory)
+    }
 }

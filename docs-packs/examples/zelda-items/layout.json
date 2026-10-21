@@ -1,0 +1,12 @@
+{
+  "type": "column", "class": "screen",
+  "children": [
+    { "type": "text", "class": "title", "text": "Equip to B" },
+    { "type": "text", "class": "hint", "text": "Now on B: {equippedB}" },
+    { "type": "list", "class": "items", "items": "$items", "template":
+      { "type": "button", "class": "item", "text": "{name}",
+        "onClick": { "call": "equip", "args": ["B", "{id}"] } }
+    },
+    { "type": "text", "class": "message", "text": "{ui.message}" }
+  ]
+}

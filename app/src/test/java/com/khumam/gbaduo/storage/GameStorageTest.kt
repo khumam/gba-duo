@@ -88,4 +88,36 @@ class GameStorageTest {
         storage.packId = null
         assertNull(storage.packId)
     }
+
+    @Test
+    fun writeConsentIsKeptPerPackAndGame() {
+        val filesDir = tempFilesDir()
+        val emerald = GameStorage.forGame(filesDir, Platform.GBA, "POKEMON EMER", "BPEE", 0x1F1C08FBL)
+        val ruby = GameStorage.forGame(filesDir, Platform.GBA, "POKEMON RUBY", "AXVE", 0x61641576L)
+        assertNull(emerald.writeConsent("items"))
+
+        emerald.setWriteConsent("items", true)
+        emerald.setWriteConsent("cheats", false)
+
+        assertEquals(true, emerald.writeConsent("items"))
+        assertEquals(false, emerald.writeConsent("cheats"))
+        assertNull(emerald.writeConsent("other"))
+        assertNull(ruby.writeConsent("items")) // per game
+
+        // Survives a fresh lookup (it's on disk in the game's folder), and can change.
+        val again = GameStorage.forGame(filesDir, Platform.GBA, "POKEMON EMER", "BPEE", 0x1F1C08FBL)
+        assertEquals(true, again.writeConsent("items"))
+        again.setWriteConsent("items", false)
+        assertEquals(false, emerald.writeConsent("items"))
+        assertTrue(File(emerald.dir, "consent.json").exists())
+    }
+
+    @Test
+    fun brokenConsentFileMeansNotAsked() {
+        val storage = GameStorage.forGame(tempFilesDir(), Platform.GBA, "GAME", "AAAA", 0x1L).ensureDirs()
+        File(storage.dir, "consent.json").writeText("{not json")
+        assertNull(storage.writeConsent("items"))
+        storage.setWriteConsent("items", true)
+        assertEquals(true, storage.writeConsent("items"))
+    }
 }

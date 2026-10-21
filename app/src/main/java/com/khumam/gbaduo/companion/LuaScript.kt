@@ -27,10 +27,10 @@ object LuaScript {
     /**
      * Calls `actions.<name>(args...)`. Returns what it returned if that was a table
      * (UI actions to apply, e.g. `{ navigate = "detail" }` or a list of them), else null; on an error
-     * also null, with the reason in [lastError].
+     * also null, with the reason in [lastError]. [mayWrite]: see [NativeCore.callScriptAction].
      */
-    fun call(name: String, args: List<Any?>): Any? {
-        val json = NativeCore.callScriptAction(name, args.map(::scalar).toTypedArray()) ?: return null
+    fun call(name: String, args: List<Any?>, mayWrite: Boolean = false): Any? {
+        val json = NativeCore.callScriptAction(name, args.map(::scalar).toTypedArray(), mayWrite) ?: return null
         return runCatching { JsonTree.convertValue(JSONTokener(json).nextValue()) }.getOrNull()
     }
 

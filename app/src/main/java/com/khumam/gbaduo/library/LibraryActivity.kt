@@ -398,7 +398,10 @@ class LibraryActivity : Activity() {
     private fun showCompanionDialog(storage: GameStorage, matches: List<PackManifest>) {
         val assignedId = storage.packId
         val labels = mutableListOf(getString(R.string.no_pack))
-        labels += matches.map { pack -> if (pack.id == assignedId) "✓ ${pack.name}" else pack.name }
+        labels += matches.map { pack ->
+            val name = if (pack.id == assignedId) "✓ ${pack.name}" else pack.name
+            if (pack.canWriteMemory) "$name · ${getString(R.string.pack_modifies_game)}" else name
+        }
         labels += getString(R.string.import_pack)
 
         AlertDialog.Builder(this)

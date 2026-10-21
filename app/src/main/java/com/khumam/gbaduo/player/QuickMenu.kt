@@ -75,12 +75,20 @@ class QuickMenu(
             } else {
                 context.getString(R.string.slot_empty, slot)
             }
-        }.toTypedArray()
+        }.toMutableList()
+        // Loading only: the state made before a companion pack first changed the game.
+        val beforePack = if (save) null else states.beforePackWrite
+        if (beforePack != null) {
+            labels += context.getString(R.string.state_before_pack, DateFormat.getDateTimeInstance().format(Date(beforePack.lastModified())))
+        }
 
         dialog = AlertDialog.Builder(context)
-            .setItems(labels) { _, which ->
-                val slot = which + 1
-                emu.requestState(states.slotPath(slot), save)
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (which == 9 && beforePack != null) {
+                    emu.requestState(beforePack.absolutePath, save = false)
+                } else {
+                    emu.requestState(states.slotPath(which + 1), save)
+                }
                 emu.paused = false
             }
             .setOnCancelListener { emu.paused = false }

@@ -11,4 +11,7 @@ class SaveStates(private val storage: GameStorage) {
     fun slotExists(slot: Int): Boolean = storage.stateFile(slot).exists()
 
     fun slotModified(slot: Int): Long = storage.stateFile(slot).lastModified()
+
+    /** The state made just before a companion pack first changed the game, if there is one. */
+    val beforePackWrite: File? get() = storage.beforePackWriteState.takeIf { it.exists() }
 }

@@ -1,20 +1,33 @@
-#include <jni.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <android/log.h>
 
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 
-#include <mgba/core/core.h>
+#include "bus.h"
+#include "script.h"
+
+/* GBADUO_HOST_TEST builds this file on the desktop for the test harness
+ * (app/src/test/native): no JNI, logs to stderr. */
+#ifdef GBADUO_HOST_TEST
+#define LOG_PRINT(level, tag, ...) (fprintf(stderr, "%s %s: ", level, tag), fprintf(stderr, __VA_ARGS__), fputc('\n', stderr))
+#define LOG_INFO "I"
+#define LOG_ERROR "E"
+#else
+#include <jni.h>
+#include <android/log.h>
+#define LOG_PRINT(level, tag, ...) __android_log_print(level, tag, __VA_ARGS__)
+#define LOG_INFO ANDROID_LOG_INFO
+#define LOG_ERROR ANDROID_LOG_ERROR
+#endif
 
 #define LOG_TAG "GBADuoScript"
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) LOG_PRINT(LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 #define SCRIPT_MEMORY_LIMIT (16u * 1024u * 1024u)
 #define INSTRUCTION_BUDGET_PER_TICK 5000000L
@@ -26,8 +39,6 @@
 #define LZ77_MAX_OUTPUT (1024u * 1024u)
 #define IMAGE_MAX_DIMENSION 256
 
-/** Implemented in core.c; NULL when no ROM is loaded. */
-extern struct mCore* gbaduo_active_core(void);
 
 struct CachedImage {
     bool used;
@@ -45,6 +56,10 @@ struct GbaDuoScript {
     char lastError[512];
     struct CachedImage images[IMAGE_CACHE_SIZE];
     int nextImageSlot;
+    /* mem.write*: open only for the length of one action call made with may_write
+     * (see gbaduo_script_action); tapBytesLeft is that call's remaining allowance. */
+    bool writeWindow;
+    uint32_t tapBytesLeft;
 };
 
 static struct GbaDuoScript g_script;
@@ -92,52 +107,45 @@ static void instruction_hook(lua_State* L, lua_Debug* ar) {
 /* ------------------------------------------------------------------------ */
 
 static int l_mem_u8(lua_State* L) {
-    struct mCore* core = gbaduo_active_core();
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
-    lua_pushinteger(L, core ? core->rawRead8(core, addr, -1) : 0);
+    lua_pushinteger(L, gbaduo_bus_read8(addr));
     return 1;
 }
 
 static int l_mem_s8(lua_State* L) {
-    struct mCore* core = gbaduo_active_core();
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
-    int8_t v = core ? (int8_t) core->rawRead8(core, addr, -1) : 0;
+    int8_t v = (int8_t) gbaduo_bus_read8(addr);
     lua_pushinteger(L, v);
     return 1;
 }
 
 static int l_mem_u16(lua_State* L) {
-    struct mCore* core = gbaduo_active_core();
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
-    lua_pushinteger(L, core ? core->rawRead16(core, addr, -1) : 0);
+    lua_pushinteger(L, gbaduo_bus_read16(addr));
     return 1;
 }
 
 static int l_mem_s16(lua_State* L) {
-    struct mCore* core = gbaduo_active_core();
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
-    int16_t v = core ? (int16_t) core->rawRead16(core, addr, -1) : 0;
+    int16_t v = (int16_t) gbaduo_bus_read16(addr);
     lua_pushinteger(L, v);
     return 1;
 }
 
 static int l_mem_u32(lua_State* L) {
-    struct mCore* core = gbaduo_active_core();
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
-    lua_pushinteger(L, core ? (lua_Integer) (uint32_t) core->rawRead32(core, addr, -1) : 0);
+    lua_pushinteger(L, (lua_Integer) gbaduo_bus_read32(addr));
     return 1;
 }
 
 static int l_mem_s32(lua_State* L) {
-    struct mCore* core = gbaduo_active_core();
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
-    int32_t v = core ? (int32_t) core->rawRead32(core, addr, -1) : 0;
+    int32_t v = (int32_t) gbaduo_bus_read32(addr);
     lua_pushinteger(L, v);
     return 1;
 }
 
 static int l_mem_read(lua_State* L) {
-    struct mCore* core = gbaduo_active_core();
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
     lua_Integer n = luaL_checkinteger(L, 2);
     if (n < 0) n = 0;
@@ -151,11 +159,77 @@ static int l_mem_read(lua_State* L) {
         return luaL_error(L, "mem.read: out of memory");
     }
     for (lua_Integer i = 0; i < n; i++) {
-        buf[i] = core ? (char) core->rawRead8(core, addr + (uint32_t) i, -1) : 0;
+        buf[i] = (char) gbaduo_bus_read8(addr + (uint32_t) i);
     }
     lua_pushlstring(L, buf, (size_t) n);
     free(buf);
     return 1;
+}
+
+/* ------------------------------------------------------------------------ */
+/* mem.write* — only from a tap, only RAM, capped (bus.h, memwrite.c)       */
+/* ------------------------------------------------------------------------ */
+
+/* Every refusal returns false plus why, so a pack can show it on the companion screen. */
+static int write_refused(lua_State* L, const char* why) {
+    lua_pushboolean(L, 0);
+    lua_pushstring(L, why);
+    return 2;
+}
+
+static int write_checked(lua_State* L, lua_Integer address, const uint8_t* bytes, size_t size) {
+    if (!g_script.writeWindow) {
+        return write_refused(L, "writing is only allowed from a tap, with the player's permission");
+    }
+    if (address < 0 || address > (lua_Integer) UINT32_MAX) {
+        return write_refused(L, "address out of range");
+    }
+    if (size == 0 || size > SCRIPT_WRITE_MAX_PER_CALL) {
+        return write_refused(L, "a write must be 1 to 64 bytes");
+    }
+    if (size > g_script.tapBytesLeft) {
+        return write_refused(L, "at most 256 bytes per tap");
+    }
+    if (!gbaduo_write_bytes((uint32_t) address, bytes, size)) {
+        return write_refused(L, "not writable RAM");
+    }
+    g_script.tapBytesLeft -= (uint32_t) size;
+    LOG_PRINT(LOG_INFO, "Companion", "pack wrote %u byte(s) at 0x%08X", (unsigned) size, (unsigned) address);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int l_mem_write8(lua_State* L) {
+    lua_Integer address = luaL_checkinteger(L, 1);
+    lua_Integer value = luaL_checkinteger(L, 2);
+    uint8_t b[1] = {(uint8_t) value};
+    return write_checked(L, address, b, sizeof(b));
+}
+
+static int l_mem_write16(lua_State* L) {
+    lua_Integer address = luaL_checkinteger(L, 1);
+    lua_Integer value = luaL_checkinteger(L, 2);
+    uint8_t b[2] = {(uint8_t) value, (uint8_t) (value >> 8)};
+    return write_checked(L, address, b, sizeof(b));
+}
+
+static int l_mem_write32(lua_State* L) {
+    lua_Integer address = luaL_checkinteger(L, 1);
+    lua_Integer value = luaL_checkinteger(L, 2);
+    uint8_t b[4] = {(uint8_t) value, (uint8_t) (value >> 8), (uint8_t) (value >> 16), (uint8_t) (value >> 24)};
+    return write_checked(L, address, b, sizeof(b));
+}
+
+/* mem.write(addr, bytes): a short Lua string of raw bytes. */
+static int l_mem_write(lua_State* L) {
+    lua_Integer address = luaL_checkinteger(L, 1);
+    size_t size = 0;
+    const char* bytes = luaL_checklstring(L, 2, &size);
+    return write_checked(L, address, (const uint8_t*) bytes, size);
+}
+
+bool gbaduo_script_writes_open(void) {
+    return g_script.writeWindow;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -164,7 +238,7 @@ static int l_mem_read(lua_State* L) {
 
 static int l_log(lua_State* L) {
     const char* msg = luaL_tolstring(L, 1, NULL);
-    __android_log_print(ANDROID_LOG_INFO, "GBADuoPack", "%s", msg);
+    LOG_PRINT(LOG_INFO, "GBADuoPack", "%s", msg);
     lua_pop(L, 1); /* pop the string luaL_tolstring pushed */
     return 0;
 }
@@ -175,12 +249,12 @@ static int l_log(lua_State* L) {
 
 /** Decompresses GBA LZ77 data starting at [addr]; returns a malloc'd buffer and sets *outSize. */
 static uint8_t* lz77_decompress(uint32_t addr, size_t* outSize) {
-    struct mCore* core = gbaduo_active_core();
+    bool core = gbaduo_bus_platform() != GBADUO_BUS_NONE;
     if (!core) {
         *outSize = 0;
         return NULL;
     }
-    uint32_t header = core->rawRead32(core, addr, -1);
+    uint32_t header = gbaduo_bus_read32(addr);
     if ((header & 0xFF) != 0x10) {
         *outSize = 0;
         return NULL;
@@ -199,13 +273,13 @@ static uint8_t* lz77_decompress(uint32_t addr, size_t* outSize) {
     uint32_t src = addr + 4;
 
     while (outPos < size) {
-        uint8_t flags = (uint8_t) core->rawRead8(core, src++, -1);
+        uint8_t flags = (uint8_t) gbaduo_bus_read8(src++);
         for (int bit = 7; bit >= 0 && outPos < size; bit--) {
             if ((flags & (1 << bit)) == 0) {
-                out[outPos++] = (uint8_t) core->rawRead8(core, src++, -1);
+                out[outPos++] = (uint8_t) gbaduo_bus_read8(src++);
             } else {
-                uint8_t b0 = (uint8_t) core->rawRead8(core, src++, -1);
-                uint8_t b1 = (uint8_t) core->rawRead8(core, src++, -1);
+                uint8_t b0 = (uint8_t) gbaduo_bus_read8(src++);
+                uint8_t b1 = (uint8_t) gbaduo_bus_read8(src++);
                 int length = (b0 >> 4) + 3;
                 size_t disp = (size_t) ((b0 & 0x0F) << 8 | b1) + 1;
                 if (disp > outPos) {
@@ -320,7 +394,7 @@ static int l_gfx_decode(lua_State* L) {
         return 1;
     }
 
-    struct mCore* core = gbaduo_active_core();
+    bool core = gbaduo_bus_platform() != GBADUO_BUS_NONE;
     if (!core) {
         return luaL_error(L, "gfx.decode: no ROM loaded");
     }
@@ -343,13 +417,13 @@ static int l_gfx_decode(lua_State* L) {
             return luaL_error(L, "gfx.decode: out of memory");
         }
         for (size_t i = 0; i < tileBytes; i++) {
-            tileData[i] = (uint8_t) core->rawRead8(core, tilesAddr + (uint32_t) i, -1);
+            tileData[i] = (uint8_t) gbaduo_bus_read8(tilesAddr + (uint32_t) i);
         }
     }
 
     uint16_t palette[16];
     for (int i = 0; i < 16; i++) {
-        palette[i] = (uint16_t) core->rawRead16(core, paletteAddr + (uint32_t) i * 2, -1);
+        palette[i] = (uint16_t) gbaduo_bus_read16(paletteAddr + (uint32_t) i * 2);
     }
 
     uint32_t* pixels = malloc((size_t) width * height * sizeof(uint32_t));
@@ -671,6 +745,8 @@ static void register_api(lua_State* L) {
         {"u16", l_mem_u16}, {"s16", l_mem_s16},
         {"u32", l_mem_u32}, {"s32", l_mem_s32},
         {"read", l_mem_read},
+        {"write8", l_mem_write8}, {"write16", l_mem_write16},
+        {"write32", l_mem_write32}, {"write", l_mem_write},
         {NULL, NULL},
     };
     luaL_newlib(L, memFuncs);
@@ -747,8 +823,18 @@ static void free_images(void) {
     pthread_mutex_unlock(&g_imageLock);
 }
 
-JNIEXPORT jboolean JNICALL
-Java_com_khumam_gbaduo_emu_NativeCore_loadScript(JNIEnv* env, jobject thiz, jstring source, jstring packDir) {
+/* ---- the sandbox without JNI (script.h) ---------------------------------- */
+
+static void set_error(const char* message) {
+    strncpy(g_script.lastError, message ? message : "unknown error", sizeof(g_script.lastError) - 1);
+    g_script.lastError[sizeof(g_script.lastError) - 1] = '\0';
+}
+
+const char* gbaduo_script_last_error(void) {
+    return g_script.lastError;
+}
+
+bool gbaduo_script_load(const char* source, const char* packDir) {
     if (g_script.L) {
         lua_close(g_script.L);
         g_script.L = NULL;
@@ -756,27 +842,22 @@ Java_com_khumam_gbaduo_emu_NativeCore_loadScript(JNIEnv* env, jobject thiz, jstr
     free_images();
     g_script.memUsed = 0;
     g_script.lastError[0] = '\0';
+    g_script.writeWindow = false;
+    g_script.tapBytesLeft = 0;
 
-    const char* packDirChars = (*env)->GetStringUTFChars(env, packDir, NULL);
-    strncpy(g_script.packDir, packDirChars, sizeof(g_script.packDir) - 1);
-    (*env)->ReleaseStringUTFChars(env, packDir, packDirChars);
+    strncpy(g_script.packDir, packDir ? packDir : "", sizeof(g_script.packDir) - 1);
 
     lua_State* L;
     if (!script_setup(&L)) {
-        strncpy(g_script.lastError, "could not create Lua state (out of memory)", sizeof(g_script.lastError) - 1);
-        return JNI_FALSE;
+        set_error("could not create Lua state (out of memory)");
+        return false;
     }
 
-    const char* sourceChars = (*env)->GetStringUTFChars(env, source, NULL);
     g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
-    int loadResult = luaL_loadstring(L, sourceChars);
-    (*env)->ReleaseStringUTFChars(env, source, sourceChars);
-
-    if (loadResult != LUA_OK || lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        strncpy(g_script.lastError, err ? err : "unknown script error", sizeof(g_script.lastError) - 1);
+    if (luaL_loadstring(L, source) != LUA_OK || lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        set_error(lua_tostring(L, -1));
         lua_close(L);
-        return JNI_FALSE;
+        return false;
     }
 
     g_script.L = L;
@@ -787,29 +868,48 @@ Java_com_khumam_gbaduo_emu_NativeCore_loadScript(JNIEnv* env, jobject thiz, jstr
         g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
         if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
             const char* err = lua_tostring(L, -1);
-            strncpy(g_script.lastError, err ? err : "init() failed", sizeof(g_script.lastError) - 1);
+            set_error(err ? err : "init() failed");
             lua_close(L);
             g_script.L = NULL;
-            return JNI_FALSE;
+            return false;
         }
     } else {
         lua_pop(L, 1);
     }
-
-    return JNI_TRUE;
+    return true;
 }
 
-JNIEXPORT jstring JNICALL
-Java_com_khumam_gbaduo_emu_NativeCore_tickScript(JNIEnv* env, jobject thiz) {
+/* The table on top of the stack as malloc'd JSON, popped; NULL (with [what] in the error) if too large. */
+static char* pop_json(lua_State* L, const char* what) {
+    struct JsonBuf buf = {0};
+    json_serialize(L, -1, &buf, 0);
+    lua_pop(L, 1);
+    if (buf.failed) {
+        free(buf.data);
+        char message[128];
+        snprintf(message, sizeof(message), "%s result too large (out of memory)", what);
+        set_error(message);
+        return NULL;
+    }
+    if (!buf.data) {
+        char* empty = malloc(3);
+        if (empty) memcpy(empty, "{}", 3);
+        return empty;
+    }
+    return buf.data;
+}
+
+char* gbaduo_script_tick(void) {
     if (!g_script.L) {
         return NULL;
     }
     lua_State* L = g_script.L;
+    g_script.lastError[0] = '\0';
 
     lua_getglobal(L, "update");
     if (!lua_isfunction(L, -1)) {
         lua_pop(L, 1);
-        strncpy(g_script.lastError, "pack has no update() function", sizeof(g_script.lastError) - 1);
+        set_error("pack has no update() function");
         return NULL;
     }
 
@@ -817,28 +917,111 @@ Java_com_khumam_gbaduo_emu_NativeCore_tickScript(JNIEnv* env, jobject thiz) {
     g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
     if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
         const char* err = lua_tostring(L, -1);
-        strncpy(g_script.lastError, err ? err : "update() failed", sizeof(g_script.lastError) - 1);
+        set_error(err ? err : "update() failed");
         lua_pop(L, 1);
         return NULL;
     }
-
     if (!lua_istable(L, -1)) {
         lua_pop(L, 1);
-        strncpy(g_script.lastError, "update() must return a table", sizeof(g_script.lastError) - 1);
+        set_error("update() must return a table");
         return NULL;
     }
+    return pop_json(L, "update()");
+}
 
-    struct JsonBuf buf = {0};
-    json_serialize(L, -1, &buf, 0);
-    lua_pop(L, 1);
-    if (buf.failed) {
-        free(buf.data);
-        strncpy(g_script.lastError, "update() result too large (out of memory)", sizeof(g_script.lastError) - 1);
+struct ActionCall {
+    const char* name;
+    gbaduo_push_args push;
+    void* userdata;
+    int count;
+};
+
+/* actions[name](args...), returning its first result. */
+static int call_action(lua_State* L) {
+    struct ActionCall* c = (struct ActionCall*) lua_touserdata(L, 1);
+    lua_settop(L, 0);
+    if (lua_getglobal(L, "actions") != LUA_TTABLE) {
+        return luaL_error(L, "pack has no 'actions' table (for '%s')", c->name);
+    }
+    lua_getfield(L, -1, c->name);
+    if (!lua_isfunction(L, -1)) {
+        return luaL_error(L, "pack has no actions.%s() function", c->name);
+    }
+    lua_remove(L, 1); /* actions */
+    luaL_checkstack(L, c->count, "too many action arguments");
+    if (c->push && c->count > 0) {
+        c->push(L, c->userdata);
+    }
+    lua_call(L, c->count, 1);
+    return 1;
+}
+
+char* gbaduo_script_action(const char* name, gbaduo_push_args push, void* userdata, int nargs, bool may_write) {
+    if (!g_script.L) {
         return NULL;
     }
+    lua_State* L = g_script.L;
+    g_script.lastError[0] = '\0';
 
-    jstring result = (*env)->NewStringUTF(env, buf.data ? buf.data : "{}");
-    free(buf.data);
+    struct ActionCall c = {name, push, userdata, push ? nargs : 0};
+    lua_pushcfunction(L, call_action);
+    lua_pushlightuserdata(L, &c);
+    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+    /* The write window is open for exactly this protected call: lua_pcall returns on
+     * success and on every error (a Lua error, out of memory, the instruction budget),
+     * so it's always closed again below. */
+    g_script.writeWindow = may_write;
+    g_script.tapBytesLeft = SCRIPT_WRITE_MAX_PER_TAP;
+    int status = lua_pcall(L, 1, 1, 0);
+    g_script.writeWindow = false;
+    g_script.tapBytesLeft = 0;
+
+    if (status != LUA_OK) {
+        const char* err = lua_tostring(L, -1);
+        set_error(err ? err : "action failed");
+        lua_pop(L, 1);
+        return NULL;
+    }
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1); /* no UI changes requested */
+        return NULL;
+    }
+    return pop_json(L, "action");
+}
+
+void gbaduo_script_unload(void) {
+    if (g_script.L) {
+        lua_close(g_script.L);
+        g_script.L = NULL;
+    }
+    free_images();
+    g_script.memUsed = 0;
+    g_script.writeWindow = false;
+    g_script.tapBytesLeft = 0;
+}
+
+/* ---- JNI entry points (NativeCore) ------------------------------------------ */
+
+#ifndef GBADUO_HOST_TEST
+
+JNIEXPORT jboolean JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_loadScript(JNIEnv* env, jobject thiz, jstring source, jstring packDir) {
+    const char* packDirChars = (*env)->GetStringUTFChars(env, packDir, NULL);
+    const char* sourceChars = (*env)->GetStringUTFChars(env, source, NULL);
+    bool ok = packDirChars && sourceChars && gbaduo_script_load(sourceChars, packDirChars);
+    if (sourceChars) (*env)->ReleaseStringUTFChars(env, source, sourceChars);
+    if (packDirChars) (*env)->ReleaseStringUTFChars(env, packDir, packDirChars);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_tickScript(JNIEnv* env, jobject thiz) {
+    char* json = gbaduo_script_tick();
+    if (!json) {
+        return NULL;
+    }
+    jstring result = (*env)->NewStringUTF(env, json);
+    free(json);
     return result;
 }
 
@@ -932,68 +1115,37 @@ Java_com_khumam_gbaduo_emu_NativeCore_setScriptUi(JNIEnv* env, jobject thiz, job
     }
 }
 
-/* actions[name](args...), returning its first result. */
-static int call_action(lua_State* L) {
-    struct JavaCall* c = (struct JavaCall*) lua_touserdata(L, 1);
-    lua_settop(L, 0);
-    if (lua_getglobal(L, "actions") != LUA_TTABLE) {
-        return luaL_error(L, "pack has no 'actions' table (for '%s')", c->name);
+struct JniArgs {
+    JNIEnv* env;
+    jobjectArray values;
+    jsize count;
+};
+
+static void push_jni_args(lua_State* L, void* userdata) {
+    struct JniArgs* a = (struct JniArgs*) userdata;
+    for (jsize i = 0; i < a->count; i++) {
+        jobject arg = (*a->env)->GetObjectArrayElement(a->env, a->values, i);
+        push_java_value(a->env, L, arg);
+        if (arg) (*a->env)->DeleteLocalRef(a->env, arg);
     }
-    lua_getfield(L, -1, c->name);
-    if (!lua_isfunction(L, -1)) {
-        return luaL_error(L, "pack has no actions.%s() function", c->name);
-    }
-    lua_remove(L, 1); /* actions */
-    luaL_checkstack(L, c->count, "too many action arguments");
-    for (jsize i = 0; i < c->count; i++) {
-        jobject arg = (*c->env)->GetObjectArrayElement(c->env, c->values, i);
-        push_java_value(c->env, L, arg);
-        if (arg) (*c->env)->DeleteLocalRef(c->env, arg);
-    }
-    lua_call(L, c->count, 1);
-    return 1;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_khumam_gbaduo_emu_NativeCore_callScriptAction(JNIEnv* env, jobject thiz, jstring name, jobjectArray args) {
-    if (!g_script.L) {
-        return NULL;
-    }
-    lua_State* L = g_script.L;
-    g_script.lastError[0] = '\0';
-
+Java_com_khumam_gbaduo_emu_NativeCore_callScriptAction(JNIEnv* env, jobject thiz, jstring name, jobjectArray args,
+                                                      jboolean mayWrite) {
     const char* nameChars = (*env)->GetStringUTFChars(env, name, NULL);
     if (!nameChars) {
         return NULL;
     }
     jsize nargs = args ? (*env)->GetArrayLength(env, args) : 0;
-    struct JavaCall c = {env, NULL, args, nargs < ACTION_MAX_ARGS ? nargs : ACTION_MAX_ARGS, nameChars};
-    lua_pushcfunction(L, call_action);
-    lua_pushlightuserdata(L, &c);
-    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
-    int status = lua_pcall(L, 1, 1, 0);
+    struct JniArgs a = {env, args, nargs < ACTION_MAX_ARGS ? nargs : ACTION_MAX_ARGS};
+    char* json = gbaduo_script_action(nameChars, push_jni_args, &a, (int) a.count, mayWrite == JNI_TRUE);
     (*env)->ReleaseStringUTFChars(env, name, nameChars);
-    if (status != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        strncpy(g_script.lastError, err ? err : "action failed", sizeof(g_script.lastError) - 1);
-        lua_pop(L, 1);
+    if (!json) {
         return NULL;
     }
-    if (!lua_istable(L, -1)) {
-        lua_pop(L, 1); /* no UI changes requested */
-        return NULL;
-    }
-
-    struct JsonBuf buf = {0};
-    json_serialize(L, -1, &buf, 0);
-    lua_pop(L, 1);
-    if (buf.failed) {
-        free(buf.data);
-        strncpy(g_script.lastError, "action result too large (out of memory)", sizeof(g_script.lastError) - 1);
-        return NULL;
-    }
-    jstring result = (*env)->NewStringUTF(env, buf.data ? buf.data : "{}");
-    free(buf.data);
+    jstring result = (*env)->NewStringUTF(env, json);
+    free(json);
     return result;
 }
 
@@ -1022,12 +1174,7 @@ Java_com_khumam_gbaduo_emu_NativeCore_lastScriptError(JNIEnv* env, jobject thiz)
 
 JNIEXPORT void JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_unloadScript(JNIEnv* env, jobject thiz) {
-    if (g_script.L) {
-        lua_close(g_script.L);
-        g_script.L = NULL;
-    }
-    free_images();
-    g_script.memUsed = 0;
+    gbaduo_script_unload();
 }
 
 JNIEXPORT jintArray JNICALL
@@ -1067,3 +1214,5 @@ Java_com_khumam_gbaduo_emu_NativeCore_nativeImage(JNIEnv* env, jobject thiz, jst
     free(buffer);
     return result;
 }
+
+#endif /* GBADUO_HOST_TEST */

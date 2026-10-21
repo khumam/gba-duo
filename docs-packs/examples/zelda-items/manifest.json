@@ -1,0 +1,13 @@
+{
+  "id": "example-zelda-items",
+  "name": "Example: equip items",
+  "version": "1.0.0",
+  "author": "GBADuo",
+  "formatVersion": 3,
+  "permissions": ["memory-write"],
+  "match": { "gameCode": ["BZME", "BZMP", "BZMJ"] },
+  "tickHz": 4,
+  "layout": "layout.json",
+  "styles": ["style.css"],
+  "script": "main.lua"
+}

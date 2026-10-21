@@ -56,8 +56,13 @@ object NativeCore {
     /** Sets the script's global `ui` table (also passed to `update(ui)`); values are String/Long/Double/Boolean/null. */
     external fun setScriptUi(keys: Array<String>, values: Array<Any?>)
 
-    /** Calls `actions.<name>(args...)`; its result as JSON if it returned a table, else null. */
-    external fun callScriptAction(name: String, args: Array<Any?>): String?
+    /**
+     * Calls `actions.<name>(args...)`; its result as JSON if it returned a table, else null.
+     * [mayWrite]: whether the script's `mem.write*` may change the game during this call
+     * (the pack has the memory-write permission and the player allowed it). Outside an
+     * action call, writes are always refused, in native code.
+     */
+    external fun callScriptAction(name: String, args: Array<Any?>, mayWrite: Boolean): String?
 
     /** Reason the last [loadScript]/[tickScript]/[callScriptAction] call failed, if any. */
     external fun lastScriptError(): String?
