@@ -2,6 +2,8 @@
 // script.c and memwrite.c run on the desktop. Every byte reachable through
 // gbaduo_bus_write8 is recorded, so a test can tell a refused write never got here.
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "bus.h"
@@ -13,6 +15,9 @@ unsigned fake_writes = 0;
 static uint8_t gba_ewram[0x40000];
 static uint8_t gba_iwram[0x8000];
 static uint8_t gb_space[0x10000];
+// A cartridge ROM at 0x08000000, when a test loads one (fake_load_rom).
+static uint8_t* rom;
+static size_t romSize;
 // Anything else written lands here (it shouldn't: memwrite.c refuses it first).
 static uint8_t elsewhere[16];
 
@@ -20,6 +25,7 @@ static uint8_t* cell(uint32_t a) {
     if (fake_platform == GBADUO_BUS_GBA) {
         if (a >= 0x02000000u && a <= 0x0203FFFFu) return &gba_ewram[a - 0x02000000u];
         if (a >= 0x03000000u && a <= 0x03007FFFu) return &gba_iwram[a - 0x03000000u];
+        if (rom && a >= 0x08000000u && a - 0x08000000u < romSize) return &rom[a - 0x08000000u];
         return &elsewhere[a % sizeof(elsewhere)];
     }
     if (fake_platform == GBADUO_BUS_GB && a <= 0xFFFFu) return &gb_space[a];
@@ -58,4 +64,17 @@ uint32_t gbaduo_bus_read32(uint32_t address) {
 void gbaduo_bus_write8(uint32_t address, uint8_t value) {
     fake_writes++;
     *cell(address) = value;
+}
+
+int fake_load_rom(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    free(rom);
+    rom = malloc((size_t) n);
+    romSize = rom ? fread(rom, 1, (size_t) n, f) : 0;
+    fclose(f);
+    return romSize > 0;
 }

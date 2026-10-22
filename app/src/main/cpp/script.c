@@ -33,7 +33,11 @@
 #define INSTRUCTION_BUDGET_PER_TICK 5000000L
 #define HOOK_INSTRUCTION_INTERVAL 10000
 #define JSON_MAX_DEPTH 32
-#define IMAGE_CACHE_SIZE 16
+/* Decoded images kept at once, and their total size: a pack showing a full item
+ * grid (each icon its own image) plus a map stays cached instead of re-decoding
+ * every tick, and the pixels stay bounded (4M px = 16 MB). */
+#define IMAGE_CACHE_SIZE 96
+#define IMAGE_CACHE_MAX_PIXELS (4u * 1024u * 1024u)
 /* Caps on pack-controlled sizes: these buffers live outside the Lua memory limit
  * and are filled by C loops the instruction budget doesn't count. */
 #define LZ77_MAX_OUTPUT (1024u * 1024u)
@@ -338,6 +342,19 @@ static struct CachedImage* image_cache_find(uint32_t key) {
 }
 
 static struct CachedImage* image_cache_store(uint32_t key, int width, int height, uint32_t* pixels) {
+    /* Over the pixel budget: drop the oldest entries first (the slots after the next one). */
+    size_t total = (size_t) width * height;
+    for (int i = 0; i < IMAGE_CACHE_SIZE; i++) {
+        if (g_script.images[i].used) total += (size_t) g_script.images[i].width * g_script.images[i].height;
+    }
+    for (int k = 0; k < IMAGE_CACHE_SIZE && total > IMAGE_CACHE_MAX_PIXELS; k++) {
+        struct CachedImage* old = &g_script.images[(g_script.nextImageSlot + k) % IMAGE_CACHE_SIZE];
+        if (!old->used) continue;
+        total -= (size_t) old->width * old->height;
+        free(old->pixels);
+        old->used = false;
+        old->pixels = NULL;
+    }
     int slot = g_script.nextImageSlot;
     g_script.nextImageSlot = (slot + 1) % IMAGE_CACHE_SIZE;
     if (g_script.images[slot].used) {
@@ -349,6 +366,21 @@ static struct CachedImage* image_cache_store(uint32_t key, int width, int height
     g_script.images[slot].height = height;
     g_script.images[slot].pixels = pixels;
     return &g_script.images[slot];
+}
+
+/** A GBA BGR555 colour as ARGB8888; [transparent] gives alpha 0. */
+static uint32_t gba_argb(uint16_t entry, bool transparent) {
+    uint32_t r = (entry & 0x1F) << 3;
+    uint32_t g = ((entry >> 5) & 0x1F) << 3;
+    uint32_t b = ((entry >> 10) & 0x1F) << 3;
+    uint32_t a = transparent ? 0 : 0xFFu;
+    return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+static void push_image_key(lua_State* L, uint32_t key) {
+    char keyStr[32];
+    snprintf(keyStr, sizeof(keyStr), "gfx:%08x", key);
+    lua_pushstring(L, keyStr);
 }
 
 static int l_gfx_decode(lua_State* L) {
@@ -444,13 +476,7 @@ static int l_gfx_decode(lua_State* L) {
                     int py = ty * 8 + row;
                     for (int k = 0; k < 2; k++) {
                         int paletteIndex = k == 0 ? lo : hi;
-                        uint16_t entry = palette[paletteIndex];
-                        uint32_t r = (entry & 0x1F) << 3;
-                        uint32_t g = ((entry >> 5) & 0x1F) << 3;
-                        uint32_t b = ((entry >> 10) & 0x1F) << 3;
-                        uint32_t a = paletteIndex == 0 ? 0 : 0xFFu;
-                        uint32_t argb = (a << 24) | (r << 16) | (g << 8) | b;
-                        pixels[(size_t) py * width + (px + k)] = argb;
+                        pixels[(size_t) py * width + (px + k)] = gba_argb(palette[paletteIndex], paletteIndex == 0);
                     }
                 }
             }
@@ -466,6 +492,287 @@ static int l_gfx_decode(lua_State* L) {
     snprintf(keyStr, sizeof(keyStr), "gfx:%08x", key);
     lua_pushstring(L, keyStr);
     return 1;
+}
+
+/* Most tilemap entries per row (a GBA screen block is 32; wider maps exist in ROM data). */
+#define TILEMAP_MAX_STRIDE 256
+
+/*
+ * gfx.tilemap{ tiles, palette, map, stride, x, y, width, height, opaque, lz77 } -> "gfx:..." key.
+ *
+ * Composes a picture the way the GBA draws a 4bpp text background: [map] holds u16
+ * entries ([stride] per row; bits 0-9 tile number, 10 h-flip, 11 v-flip, 12-15 palette
+ * bank), [tiles] the 8x8 tiles (32 bytes each), and [palette] palette bank 0 (bank n is
+ * 32 bytes further each). The picture is [width] x [height] px starting at map cell
+ * ([x], [y]). Colour 0 of every bank is transparent unless [opaque].
+ * Everything is read from emulated memory (normally the ROM), raw, or with [lz77]
+ * both [tiles] and [map] GBA LZ77-compressed (BIOS type 0x10), as many games store them.
+ */
+static int l_gfx_tilemap(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getfield(L, 1, "tiles");
+    uint32_t tilesAddr = (uint32_t) luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "palette");
+    uint32_t paletteAddr = (uint32_t) luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "map");
+    uint32_t mapAddr = (uint32_t) luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "stride");
+    lua_Integer stride = lua_isnil(L, -1) ? 32 : luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "x");
+    lua_Integer x0 = lua_isnil(L, -1) ? 0 : luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "y");
+    lua_Integer y0 = lua_isnil(L, -1) ? 0 : luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "width");
+    lua_Integer width = luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "height");
+    lua_Integer height = luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "opaque");
+    bool opaque = lua_toboolean(L, -1);
+    lua_getfield(L, 1, "lz77");
+    bool useLz77 = lua_toboolean(L, -1);
+    lua_pop(L, 10);
+
+    if (width <= 0 || height <= 0 || width % 8 != 0 || height % 8 != 0) {
+        return luaL_error(L, "gfx.tilemap: width/height must be positive multiples of 8");
+    }
+    if (width > IMAGE_MAX_DIMENSION || height > IMAGE_MAX_DIMENSION) {
+        return luaL_error(L, "gfx.tilemap: width/height must be at most %d", IMAGE_MAX_DIMENSION);
+    }
+    if (stride < 1 || stride > TILEMAP_MAX_STRIDE) {
+        return luaL_error(L, "gfx.tilemap: stride must be 1 to %d", TILEMAP_MAX_STRIDE);
+    }
+    if (x0 < 0 || y0 < 0 || x0 + width / 8 > stride || y0 > 4096) {
+        return luaL_error(L, "gfx.tilemap: x/y outside the map");
+    }
+
+    struct {
+        uint32_t tilesAddr, paletteAddr, mapAddr;
+        int32_t stride, x, y, width, height;
+        int32_t opaque, lz77;
+    } descriptor = {tilesAddr, paletteAddr, mapAddr, (int32_t) stride, (int32_t) x0, (int32_t) y0,
+                    (int32_t) width, (int32_t) height, opaque ? 1 : 0, useLz77 ? 1 : 0};
+    /* Distinct from gfx.decode keys: different descriptor size and a salt. */
+    uint32_t key = fnv1a(&descriptor, sizeof(descriptor)) ^ 0x7417u;
+
+    pthread_mutex_lock(&g_imageLock);
+    bool cached = image_cache_find(key) != NULL;
+    pthread_mutex_unlock(&g_imageLock);
+    if (cached) {
+        push_image_key(L, key);
+        return 1;
+    }
+    if (gbaduo_bus_platform() == GBADUO_BUS_NONE) {
+        return luaL_error(L, "gfx.tilemap: no ROM loaded");
+    }
+
+    /* Compressed: unpack both once; a tile or cell past the end reads as 0. */
+    uint8_t* tileData = NULL;
+    uint8_t* mapData = NULL;
+    size_t tileSize = 0, mapSize = 0;
+    if (useLz77) {
+        tileData = lz77_decompress(tilesAddr, &tileSize);
+        mapData = lz77_decompress(mapAddr, &mapSize);
+        if (!tileData || !mapData) {
+            free(tileData);
+            free(mapData);
+            return luaL_error(L, "gfx.tilemap: no valid LZ77 data at tiles or map");
+        }
+        if ((size_t) ((y0 + height / 8) * stride) * 2 > mapSize) {
+            free(tileData);
+            free(mapData);
+            return luaL_error(L, "gfx.tilemap: x/y outside the map");
+        }
+    }
+
+    uint16_t palettes[16][16];
+    for (int bank = 0; bank < 16; bank++) {
+        for (int i = 0; i < 16; i++) {
+            palettes[bank][i] = gbaduo_bus_read16(paletteAddr + (uint32_t) (bank * 32 + i * 2));
+        }
+    }
+
+    int w = (int) width, h = (int) height;
+    uint32_t* pixels = malloc((size_t) w * h * sizeof(uint32_t));
+    if (!pixels) {
+        free(tileData);
+        free(mapData);
+        return luaL_error(L, "gfx.tilemap: out of memory");
+    }
+    for (int ty = 0; ty < h / 8; ty++) {
+        for (int tx = 0; tx < w / 8; tx++) {
+            uint32_t cell = (uint32_t) ((y0 + ty) * stride + x0 + tx);
+            uint16_t entry = mapData ? (uint16_t) (mapData[cell * 2] | mapData[cell * 2 + 1] << 8)
+                                     : (uint16_t) gbaduo_bus_read16(mapAddr + cell * 2);
+            uint32_t tile = entry & 0x3FF;
+            bool hflip = (entry >> 10) & 1;
+            bool vflip = (entry >> 11) & 1;
+            const uint16_t* palette = palettes[(entry >> 12) & 0xF];
+            for (int row = 0; row < 8; row++) {
+                int sy = vflip ? 7 - row : row;
+                uint32_t at = tile * 32 + (uint32_t) sy * 4;
+                uint32_t rowBits;
+                if (tileData) {
+                    rowBits = at + 4 <= tileSize ? (uint32_t) (tileData[at] | tileData[at + 1] << 8 | tileData[at + 2] << 16 |
+                                                               (uint32_t) tileData[at + 3] << 24)
+                                                 : 0;
+                } else {
+                    rowBits = gbaduo_bus_read32(tilesAddr + at);
+                }
+                for (int col = 0; col < 8; col++) {
+                    int sx = hflip ? 7 - col : col;
+                    int index = (int) ((rowBits >> (sx * 4)) & 0xF);
+                    pixels[(size_t) (ty * 8 + row) * w + tx * 8 + col] = gba_argb(palette[index], index == 0 && !opaque);
+                }
+            }
+        }
+    }
+
+    free(tileData);
+    free(mapData);
+    pthread_mutex_lock(&g_imageLock);
+    image_cache_store(key, w, h, pixels);
+    pthread_mutex_unlock(&g_imageLock);
+    push_image_key(L, key);
+    return 1;
+}
+
+#define SPRITE_MAX_PARTS 32
+
+/*
+ * gfx.sprite{ tiles, palette, width, height, parts = { {x, y, w, h, tile, bank, hflip, vflip}, ... } }
+ *
+ * Composes a picture the way the GBA draws a multi-part sprite (OAM objects, 1D tile
+ * mapping): each part is a [w] x [h] px object (8, 16, 32 or 64) placed at ([x], [y])
+ * in the picture, whose 8x8 tiles start at tile number [tile] counted from [tiles] and
+ * run row by row, coloured with palette bank [bank] (32 bytes each from [palette]).
+ * As on the GBA, an earlier part is drawn over a later one. Colour 0 is transparent.
+ */
+static int l_gfx_sprite(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getfield(L, 1, "tiles");
+    uint32_t tilesAddr = (uint32_t) luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "palette");
+    uint32_t paletteAddr = (uint32_t) luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "width");
+    lua_Integer width = luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "height");
+    lua_Integer height = luaL_checkinteger(L, -1);
+    lua_pop(L, 4);
+    if (width <= 0 || height <= 0 || width > IMAGE_MAX_DIMENSION || height > IMAGE_MAX_DIMENSION) {
+        return luaL_error(L, "gfx.sprite: width/height must be 1 to %d", IMAGE_MAX_DIMENSION);
+    }
+
+    struct Part {
+        int32_t x, y, w, h, tile, bank, hflip, vflip;
+    } parts[SPRITE_MAX_PARTS];
+    int count = 0;
+    if (lua_getfield(L, 1, "parts") != LUA_TTABLE) {
+        return luaL_error(L, "gfx.sprite: parts must be a list");
+    }
+    lua_Integer n = (lua_Integer) lua_rawlen(L, -1);
+    if (n < 1 || n > SPRITE_MAX_PARTS) {
+        return luaL_error(L, "gfx.sprite: 1 to %d parts", SPRITE_MAX_PARTS);
+    }
+    for (lua_Integer i = 1; i <= n; i++) {
+        if (lua_rawgeti(L, -1, i) != LUA_TTABLE) {
+            return luaL_error(L, "gfx.sprite: part %d must be a table", (int) i);
+        }
+        struct Part* p = &parts[count++];
+        const char* intFields[] = {"x", "y", "w", "h", "tile", "bank"};
+        int32_t* targets[] = {&p->x, &p->y, &p->w, &p->h, &p->tile, &p->bank};
+        for (int f = 0; f < 6; f++) {
+            lua_getfield(L, -1, intFields[f]);
+            *targets[f] = (f < 2 && lua_isnil(L, -1)) ? 0 : (int32_t) luaL_checkinteger(L, -1);
+            lua_pop(L, 1);
+        }
+        lua_getfield(L, -1, "hflip");
+        p->hflip = lua_toboolean(L, -1);
+        lua_getfield(L, -2, "vflip");
+        p->vflip = lua_toboolean(L, -1);
+        lua_pop(L, 3);
+        bool sizeOk = (p->w == 8 || p->w == 16 || p->w == 32 || p->w == 64) && (p->h == 8 || p->h == 16 || p->h == 32 || p->h == 64);
+        if (!sizeOk || p->tile < 0 || p->tile > 0xFFFF || p->bank < 0 || p->bank > 15 ||
+            p->x < -64 || p->x > IMAGE_MAX_DIMENSION || p->y < -64 || p->y > IMAGE_MAX_DIMENSION) {
+            return luaL_error(L, "gfx.sprite: part %d is invalid (w/h 8-64, tile 0-65535, bank 0-15)", (int) i);
+        }
+    }
+    lua_pop(L, 1);
+
+    struct {
+        uint32_t tilesAddr, paletteAddr;
+        int32_t width, height, count;
+        struct Part parts[SPRITE_MAX_PARTS];
+    } descriptor;
+    memset(&descriptor, 0, sizeof(descriptor));
+    descriptor.tilesAddr = tilesAddr;
+    descriptor.paletteAddr = paletteAddr;
+    descriptor.width = (int32_t) width;
+    descriptor.height = (int32_t) height;
+    descriptor.count = count;
+    memcpy(descriptor.parts, parts, sizeof(struct Part) * (size_t) count);
+    uint32_t key = fnv1a(&descriptor, sizeof(descriptor)) ^ 0x5b17u;
+
+    pthread_mutex_lock(&g_imageLock);
+    bool cached = image_cache_find(key) != NULL;
+    pthread_mutex_unlock(&g_imageLock);
+    if (cached) {
+        push_image_key(L, key);
+        return 1;
+    }
+    if (gbaduo_bus_platform() == GBADUO_BUS_NONE) {
+        return luaL_error(L, "gfx.sprite: no ROM loaded");
+    }
+
+    int w = (int) width, h = (int) height;
+    uint32_t* pixels = calloc((size_t) w * h, sizeof(uint32_t));
+    if (!pixels) {
+        return luaL_error(L, "gfx.sprite: out of memory");
+    }
+    for (int pi = 0; pi < count; pi++) {
+        const struct Part* p = &parts[pi];
+        uint16_t palette[16];
+        for (int i = 0; i < 16; i++) palette[i] = gbaduo_bus_read16(paletteAddr + (uint32_t) (p->bank * 32 + i * 2));
+        int tilesWide = p->w / 8;
+        for (int py = 0; py < p->h; py++) {
+            for (int px = 0; px < p->w; px++) {
+                int dx = p->x + (p->hflip ? p->w - 1 - px : px);
+                int dy = p->y + (p->vflip ? p->h - 1 - py : py);
+                if (dx < 0 || dy < 0 || dx >= w || dy >= h) continue;
+                uint32_t* out = &pixels[(size_t) dy * w + dx];
+                if (*out >> 24) continue; /* an earlier part is already here */
+                uint32_t tile = (uint32_t) p->tile + (uint32_t) ((py / 8) * tilesWide + px / 8);
+                uint8_t byte = gbaduo_bus_read8(tilesAddr + tile * 32 + (uint32_t) ((py % 8) * 4 + (px % 8) / 2));
+                int index = (px & 1) ? byte >> 4 : byte & 0xF;
+                if (index) *out = gba_argb(palette[index], false);
+            }
+        }
+    }
+
+    pthread_mutex_lock(&g_imageLock);
+    image_cache_store(key, w, h, pixels);
+    pthread_mutex_unlock(&g_imageLock);
+    push_image_key(L, key);
+    return 1;
+}
+
+/* For tests: a copy of the decoded image for [key] ("gfx:..."), or NULL. Caller frees. */
+uint32_t* gbaduo_script_image(const char* key, int* width, int* height) {
+    if (strncmp(key, "gfx:", 4) != 0) return NULL;
+    uint32_t wanted = (uint32_t) strtoul(key + 4, NULL, 16);
+    pthread_mutex_lock(&g_imageLock);
+    struct CachedImage* image = image_cache_find(wanted);
+    uint32_t* copy = NULL;
+    if (image) {
+        size_t n = (size_t) image->width * image->height;
+        copy = malloc(n * sizeof(uint32_t));
+        if (copy) {
+            memcpy(copy, image->pixels, n * sizeof(uint32_t));
+            *width = image->width;
+            *height = image->height;
+        }
+    }
+    pthread_mutex_unlock(&g_imageLock);
+    return copy;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -754,6 +1061,8 @@ static void register_api(lua_State* L) {
 
     static const luaL_Reg gfxFuncs[] = {
         {"decode", l_gfx_decode},
+        {"tilemap", l_gfx_tilemap},
+        {"sprite", l_gfx_sprite},
         {NULL, NULL},
     };
     luaL_newlib(L, gfxFuncs);

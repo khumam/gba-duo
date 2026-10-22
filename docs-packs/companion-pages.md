@@ -200,6 +200,54 @@ end
 - **Errors:** an error or a missing function is logged
   (`adb logcat -s EmuThread`) and the screen stays as it was.
 
+## Pictures from the game
+
+A pack can draw the game's own graphics on the companion screen, read from the
+player's ROM at runtime, so the pack doesn't ship them. Each function returns an
+image key (`"gfx:..."`): return it from `update()` and bind it as an `image`'s
+`src` (`"src": "$map.image"`). The image is decoded once and cached; call it
+every tick, the result is the same key.
+
+```lua
+-- One sprite sheet: 4bpp tiles laid out row by row.
+local icon = gfx.decode{ tiles = 0x08ABCDEF, palette = 0x08ABC000, width = 32, height = 32, lz77 = false }
+
+-- A background: tiles placed by a tilemap, like the GBA draws it.
+local map = gfx.tilemap{
+  tiles = 0x08931DB0,    -- 4bpp tiles, 32 bytes each
+  map = 0x08935DB0,      -- u16 entries: tile (bits 0-9), h-flip (10), v-flip (11), palette bank (12-15)
+  palette = 0x085B3910,  -- palette bank 0; bank n is 32 bytes further
+  stride = 32,           -- map entries per row (default 32)
+  x = 5, y = 1,          -- first map cell to draw (default 0, 0)
+  width = 160, height = 128, -- in px, multiples of 8, at most 256
+  opaque = true,         -- draw colour 0 too (default: transparent)
+  lz77 = false,          -- true: tiles and map are both LZ77-compressed (BIOS type 0x10)
+}
+
+-- A sprite: 4bpp tile blocks (OBJ-style, 1D mapping) placed on a canvas.
+local sword = gfx.sprite{
+  tiles = 0x082E5FE0,    -- tile 0; part.tile counts 32-byte tiles from here
+  palette = 0x085A23D0,  -- palette bank 0
+  width = 16, height = 16,
+  parts = {              -- at most 32; an earlier part is drawn over a later one
+    { x = 0, y = 0, w = 16, h = 16, tile = 0x1A0, bank = 3, hflip = false, vflip = false },
+  },
+}
+```
+
+- Everything is read raw from emulated memory, or LZ77-compressed with `lz77 = true`
+  (`gfx.decode`: the tiles; `gfx.tilemap`: tiles and map).
+- Images are at most 256 x 256 px. Up to 96 are kept (fewer when they're large);
+  one dropped from the cache is decoded again when asked for.
+- Colour 0 is transparent in sprites, as on the GBA.
+- Addresses differ between a game's releases: check the game code
+  (`mem.u8(0x080000AC)` onward) and keep a table per release, as
+  `zelda-the-minish-cap-revamp-companion`'s `rom_gfx.lua` does for its world map
+  and item icons (`pokemon-firered-revamp-companion`'s `town_map.lua` draws the
+  compressed Town Map).
+- Call these inside `pcall` and fall back to the pack's own art on failure, so a
+  release you don't know (or a ROM hack) still gets a page.
+
 ## Changing the game
 
 A pack's actions can also write to the game's memory: equip an item from the

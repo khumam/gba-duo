@@ -245,6 +245,213 @@ static void a_kept_function_cant_write_later(void) {
     CHECK(fake_writes == 1);
 }
 
+/* ---- gfx.tilemap ------------------------------------------------------------------ */
+
+static void poke16(uint32_t a, uint16_t v) { gbaduo_bus_write8(a, (uint8_t) v); gbaduo_bus_write8(a + 1, (uint8_t) (v >> 8)); }
+
+static uint32_t argb(uint16_t c) {
+    return 0xFF000000u | ((uint32_t) (c & 31) << 3 << 16) | ((uint32_t) (c >> 5 & 31) << 3 << 8) | ((uint32_t) (c >> 10 & 31) << 3);
+}
+
+static void tilemap_composes_tiles_flips_and_banks(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    const uint32_t TILES = 0x02010000, PAL = 0x02011000, MAP = 0x02012000;
+    /* Tile 1: column c has colour index c (0..7) on every row: a left-to-right ramp. */
+    for (int row = 0; row < 8; row++) {
+        for (int c = 0; c < 8; c += 2) gbaduo_bus_write8(TILES + 32 + row * 4 + c / 2, (uint8_t) (c | (c + 1) << 4));
+    }
+    /* Tile 2: row r has colour index r: a top-to-bottom ramp. */
+    for (int row = 0; row < 8; row++) {
+        for (int c = 0; c < 4; c++) gbaduo_bus_write8(TILES + 64 + row * 4 + c, (uint8_t) (row | row << 4));
+    }
+    /* Banks 0 and 3: colour i = i (bank 0) or 0x7C00 | i (bank 3, blue). */
+    for (int i = 0; i < 16; i++) { poke16(PAL + i * 2, (uint16_t) i); poke16(PAL + 3 * 32 + i * 2, (uint16_t) (0x7C00 | i)); }
+    /* A 4-wide map; we draw the 2x2 cells starting at (1, 0). */
+    poke16(MAP + 1 * 2, 1);                               /* (1,0): tile 1 */
+    poke16(MAP + 2 * 2, 1 | 1 << 10);                     /* (2,0): tile 1, h-flip */
+    poke16(MAP + (4 + 1) * 2, 2 | 1 << 11 | 3 << 12);     /* (1,1): tile 2, v-flip, bank 3 */
+    poke16(MAP + (4 + 2) * 2, 0);                         /* (2,1): tile 0, all colour 0 */
+
+    load("function update() return { key = gfx.tilemap{ tiles = 0x02010000, palette = 0x02011000, map = 0x02012000,"
+         " stride = 4, x = 1, y = 0, width = 16, height = 16 } } end");
+    char* r = gbaduo_script_tick();
+    CHECK(json_has(r, "gfx:"));
+    char key[32] = {0};
+    if (r) sscanf(strstr(r, "gfx:"), "%12[^\"]", key);
+    free(r);
+    int w = 0, h = 0;
+    uint32_t* px = gbaduo_script_image(key, &w, &h);
+    CHECK(px != NULL && w == 16 && h == 16);
+    if (px) {
+        CHECK((px[0] >> 24) == 0);                 /* colour 0 is transparent */
+        CHECK(px[5] == argb(5));                   /* tile 1 ramp */
+        CHECK(px[8 + 0] == argb(7));               /* h-flipped: column 0 shows index 7 */
+        CHECK((px[8 + 7] >> 24) == 0);             /* ... and column 7 index 0 */
+        CHECK(px[8 * 16 + 0] == argb(0x7C00 | 7)); /* v-flipped bank 3: row 0 shows index 7 */
+        CHECK((px[15 * 16 + 3] >> 24) == 0);       /* row 7 of it is index 0 */
+        CHECK((px[8 * 16 + 8] >> 24) == 0);        /* tile 0: blank */
+        free(px);
+    }
+
+    /* opaque: colour 0 is drawn too. */
+    load("function update() return { key = gfx.tilemap{ tiles = 0x02010000, palette = 0x02011000, map = 0x02012000,"
+         " stride = 4, x = 1, width = 8, height = 8, opaque = true } } end");
+    r = gbaduo_script_tick();
+    char key2[32] = {0};
+    if (r && strstr(r, "gfx:")) sscanf(strstr(r, "gfx:"), "%12[^\"]", key2);
+    free(r);
+    px = gbaduo_script_image(key2, &w, &h);
+    CHECK(px != NULL && px[0] == argb(0));
+    free(px);
+}
+
+static uint32_t* image_of(const char* json, int* w, int* h);
+
+/* Writes [n] bytes from [from] to [to] as GBA LZ77 made only of literal blocks. */
+static uint32_t put_lz77(uint32_t to, uint32_t from, uint32_t n) {
+    gbaduo_bus_write8(to, 0x10);
+    gbaduo_bus_write8(to + 1, (uint8_t) n);
+    gbaduo_bus_write8(to + 2, (uint8_t) (n >> 8));
+    gbaduo_bus_write8(to + 3, (uint8_t) (n >> 16));
+    uint32_t at = to + 4;
+    for (uint32_t i = 0; i < n; i++) {
+        if (i % 8 == 0) gbaduo_bus_write8(at++, 0); /* flags: 8 literals */
+        gbaduo_bus_write8(at++, fake_peek(from + i));
+    }
+    return at;
+}
+
+static void tilemap_reads_lz77_tiles_and_map(void) {
+    /* The same picture as above, from compressed copies of the tiles and map. */
+    tilemap_composes_tiles_flips_and_banks();
+    const char* raw = "gfx.tilemap{ tiles = 0x02010000, palette = 0x02011000, map = 0x02012000,"
+                      " stride = 4, x = 1, width = 16, height = 16 }";
+    char src[512];
+    snprintf(src, sizeof(src), "function update() return { key = %s } end", raw);
+    load(src);
+    char* r = gbaduo_script_tick();
+    int w = 0, h = 0, w2 = 0, h2 = 0;
+    uint32_t* want = image_of(r, &w, &h);
+    free(r);
+
+    put_lz77(0x02020000, 0x02010000, 3 * 32);
+    put_lz77(0x02021000, 0x02012000, 4 * 2 * 2);
+    load("function update() return { key = gfx.tilemap{ tiles = 0x02020000, palette = 0x02011000, map = 0x02021000,"
+         " stride = 4, x = 1, width = 16, height = 16, lz77 = true } } end");
+    r = gbaduo_script_tick();
+    uint32_t* got = image_of(r, &w2, &h2);
+    free(r);
+    CHECK(want != NULL && got != NULL && w2 == 16 && h2 == 16);
+    if (want && got) CHECK(memcmp(want, got, 16 * 16 * 4) == 0);
+    free(want);
+    free(got);
+
+    /* A map shorter than the picture needs, or data that isn't LZ77: errors. */
+    const char* bad[] = {
+        "gfx.tilemap{ tiles = 0x02020000, palette = 0, map = 0x02021000, stride = 4, x = 1, width = 16, height = 24, lz77 = true }",
+        "gfx.tilemap{ tiles = 0x02010000, palette = 0, map = 0x02021000, stride = 4, width = 8, height = 8, lz77 = true }",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        snprintf(src, sizeof(src), "actions = {} function actions.go() %s end", bad[i]);
+        load(src);
+        r = action("go", 0);
+        CHECK(r == NULL && strstr(gbaduo_script_last_error(), "gfx.tilemap") != NULL);
+        free(r);
+    }
+}
+
+static void tilemap_rejects_bad_sizes(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    const char* bad[] = {
+        "gfx.tilemap{ tiles = 0, palette = 0, map = 0, width = 12, height = 8 }",   /* not a multiple of 8 */
+        "gfx.tilemap{ tiles = 0, palette = 0, map = 0, width = 512, height = 8 }",  /* too big */
+        "gfx.tilemap{ tiles = 0, palette = 0, map = 0, stride = 0, width = 8, height = 8 }",
+        "gfx.tilemap{ tiles = 0, palette = 0, map = 0, stride = 4, x = 1, width = 32, height = 8 }", /* past the row */
+        "gfx.tilemap{ tiles = 0, palette = 0, map = 0, x = -1, width = 8, height = 8 }",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        char src[256];
+        snprintf(src, sizeof(src), "actions = {} function actions.go() %s end", bad[i]);
+        load(src);
+        char* r = action("go", 0);
+        CHECK(r == NULL && strstr(gbaduo_script_last_error(), "gfx.tilemap") != NULL);
+        free(r);
+    }
+}
+
+/* ---- gfx.sprite ------------------------------------------------------------------- */
+
+static uint32_t* image_of(const char* json, int* w, int* h) {
+    char key[32] = {0};
+    if (!json || !strstr(json, "gfx:")) return NULL;
+    sscanf(strstr(json, "gfx:"), "%12[^\"]", key);
+    return gbaduo_script_image(key, w, h);
+}
+
+static void sprite_composes_parts(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    const uint32_t TILES = 0x02010000, PAL = 0x02011000;
+    /* Tile 0: all index 1. Tiles 1-4 (a 16x16 object): tile k filled with index k+1. */
+    for (int t = 0; t < 5; t++)
+        for (int b = 0; b < 32; b++) gbaduo_bus_write8(TILES + t * 32 + b, (uint8_t) ((t + 1) | (t + 1) << 4));
+    for (int bank = 0; bank < 2; bank++)
+        for (int i = 0; i < 16; i++) poke16(PAL + bank * 32 + i * 2, (uint16_t) (bank * 0x400 + i));
+    load("function update() return { k = gfx.sprite{ tiles = 0x02010000, palette = 0x02011000, width = 24, height = 16,"
+         " parts = { { x = 0, y = 0, w = 8, h = 8, tile = 0, bank = 1 },"            /* on top */
+         "           { x = 0, y = 0, w = 16, h = 16, tile = 1, bank = 0, hflip = true } } } } end");
+    char* r = gbaduo_script_tick();
+    int w = 0, h = 0;
+    uint32_t* px = image_of(r, &w, &h);
+    free(r);
+    CHECK(px != NULL && w == 24 && h == 16);
+    if (px) {
+        CHECK(px[0] == argb(0x400 + 1));        /* the first part wins where they overlap */
+        CHECK(px[8] == argb(2));                /* h-flipped: right tile (index 3) now... */
+        CHECK(px[8 * 24 + 0] == argb(5));       /* bottom-left shows the bottom-right tile, index 5 */
+        CHECK(px[8 * 24 + 8] == argb(4));       /* bottom-right shows bottom-left, index 4 */
+        CHECK((px[20] >> 24) == 0);             /* outside every part: transparent */
+        free(px);
+    }
+}
+
+static void sprite_rejects_bad_parts(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    const char* bad[] = {
+        "gfx.sprite{ tiles = 0, palette = 0, width = 16, height = 16, parts = {} }",
+        "gfx.sprite{ tiles = 0, palette = 0, width = 16, height = 16, parts = { { w = 12, h = 8, tile = 0, bank = 0 } } }",
+        "gfx.sprite{ tiles = 0, palette = 0, width = 16, height = 16, parts = { { w = 8, h = 8, tile = 0, bank = 16 } } }",
+        "gfx.sprite{ tiles = 0, palette = 0, width = 300, height = 16, parts = { { w = 8, h = 8, tile = 0, bank = 0 } } }",
+        "gfx.sprite{ tiles = 0, palette = 0, width = 16, height = 16, parts = 5 }",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        char src[300];
+        snprintf(src, sizeof(src), "actions = {} function actions.go() %s end", bad[i]);
+        load(src);
+        char* r = action("go", 0);
+        CHECK(r == NULL && strstr(gbaduo_script_last_error(), "gfx.sprite") != NULL);
+        free(r);
+    }
+}
+
+static void cache_keeps_many_small_images(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    /* 40 different 16x16 sprites in one tick: all must still be there afterwards. */
+    load("function update() local keys = {} for i = 0, 39 do keys[#keys + 1] = gfx.sprite{ tiles = 0x02010000, palette = 0x02011000,"
+         " width = 16, height = 16, parts = { { w = 16, h = 16, tile = i, bank = 0 } } } end return { keys = keys } end");
+    char* r = gbaduo_script_tick();
+    int found = 0;
+    for (const char* p = r; p && (p = strstr(p, "gfx:")); p += 4) {
+        char key[32] = {0};
+        int w, h;
+        sscanf(p, "%12[^\"]", key);
+        uint32_t* px = gbaduo_script_image(key, &w, &h);
+        if (px) found++;
+        free(px);
+    }
+    free(r);
+    CHECK(found == 40);
+}
+
 int main(void) {
     refused_outside_an_action();
     refused_without_permission();
@@ -256,6 +463,12 @@ int main(void) {
     window_closes_after_an_error();
     window_closes_after_the_instruction_budget();
     a_kept_function_cant_write_later();
+    tilemap_composes_tiles_flips_and_banks();
+    tilemap_rejects_bad_sizes();
+    tilemap_reads_lz77_tiles_and_map();
+    sprite_composes_parts();
+    sprite_rejects_bad_parts();
+    cache_keeps_many_small_images();
     gbaduo_script_unload();
 
     printf("%d checks, %d failed\n", checks, failures);

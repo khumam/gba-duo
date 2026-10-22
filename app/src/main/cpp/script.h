@@ -6,6 +6,7 @@
 #define GBADUO_SCRIPT_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 struct lua_State;
 
@@ -37,6 +38,9 @@ char* gbaduo_script_action(const char* name, gbaduo_push_args push, void* userda
 const char* gbaduo_script_last_error(void);
 
 void gbaduo_script_unload(void);
+
+/** For tests: a malloc'd copy of the ARGB8888 image for a "gfx:..." key, or NULL. */
+uint32_t* gbaduo_script_image(const char* key, int* width, int* height);
 
 /** For tests: whether mem.write* is currently allowed. */
 bool gbaduo_script_writes_open(void);
