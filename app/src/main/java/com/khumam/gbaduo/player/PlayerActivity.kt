@@ -18,6 +18,7 @@ import com.khumam.gbaduo.companion.CompanionController
 import com.khumam.gbaduo.companion.CompanionPlacement
 import com.khumam.gbaduo.companion.CompanionPresentation
 import com.khumam.gbaduo.companion.CompanionSettings
+import com.khumam.gbaduo.companion.PackFingerprint
 import com.khumam.gbaduo.companion.PackManifest
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.emu.AudioOut
@@ -178,10 +179,12 @@ class PlayerActivity : Activity() {
         if (!controller.showPack(manifest, packDir)) return
 
         emu.activePackDir = packDir
-        emu.writeAccess = writeAccessFor(manifest, storage)
+        // What the pack's code is now: a write permission given to other code doesn't count.
+        val fingerprint = if (manifest.canWriteMemory) PackFingerprint.of(packDir) else ""
+        emu.writeAccess = writeAccessFor(manifest, storage, fingerprint)
         // Named as the library shows it ("The Legend of Zelda: The Minish Cap"), not by its header code.
         val gameName = GameTitle.display(intent.getStringExtra(EXTRA_ROM_FILE_NAME).orEmpty(), header.title)
-        emu.onWriteConsentNeeded = { runOnUiThread { askWriteConsent(manifest, gameName, storage) } }
+        emu.onWriteConsentNeeded = { runOnUiThread { askWriteConsent(manifest, gameName, storage, fingerprint) } }
         emu.activePack = manifest
         emu.onSnapshot = { snapshot -> runOnUiThread { companionScreen?.update(snapshot) } }
         // Taps on the companion screen reach the pack's Lua through the emu thread.
@@ -196,22 +199,22 @@ class PlayerActivity : Activity() {
      * "Allow packs to write to the game" setting is on, and the player allowed this pack
      * for this game; [EmuThread.WriteAccess.ASK] when they haven't been asked yet.
      */
-    private fun writeAccessFor(manifest: PackManifest, storage: GameStorage): EmuThread.WriteAccess = when {
+    private fun writeAccessFor(manifest: PackManifest, storage: GameStorage, fingerprint: String): EmuThread.WriteAccess = when {
         !manifest.canWriteMemory || !CompanionSettings.allowWrites(this) -> EmuThread.WriteAccess.NONE
-        else -> when (storage.writeConsent(manifest.id)) {
+        else -> when (storage.writeConsent(manifest.id, fingerprint)) {
             true -> EmuThread.WriteAccess.ALLOWED
             false -> EmuThread.WriteAccess.NONE
             null -> EmuThread.WriteAccess.ASK
         }
     }
 
-    /** The first time a pack is about to change a game: asks, pausing the game meanwhile. Saved per pack and game. */
-    private fun askWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage) {
+    /** The first time a pack is about to change a game: asks, pausing the game meanwhile. Saved per pack and game, for this version of the pack. */
+    private fun askWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage, fingerprint: String) {
         if (isFinishing || isDestroyed) return
         val wasPaused = emu.paused
         emu.paused = true
         fun answer(allowed: Boolean) {
-            storage.setWriteConsent(manifest.id, allowed)
+            storage.setWriteConsent(manifest.id, allowed, fingerprint)
             emu.answerWriteConsent(
                 if (allowed) EmuThread.WriteAccess.ALLOWED else EmuThread.WriteAccess.NONE,
                 // A save state to go back to, made just before the pack's first change.

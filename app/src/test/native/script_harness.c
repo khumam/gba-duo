@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "bus.h"
 #include "fake_bus.h"
@@ -360,6 +361,52 @@ static void tilemap_reads_lz77_tiles_and_map(void) {
     }
 }
 
+/* C work counts against the instruction budget: a short loop can't hold the emu thread. */
+static void c_work_is_charged_to_the_budget(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    load("function update() for i = 1, 1000000 do mem.read(0x02000000, 65536) end return {} end");
+    char* r = gbaduo_script_tick();
+    CHECK(r == NULL && strstr(gbaduo_script_last_error(), "instruction budget") != NULL);
+    free(r);
+    /* Normal use stays well inside it, and the budget is fresh each tick. */
+    load("function update() local s = mem.read(0x02000000, 65536) return { n = #s } end");
+    for (int i = 0; i < 3; i++) {
+        r = gbaduo_script_tick();
+        CHECK(json_has(r, "\"n\":65536"));
+        free(r);
+    }
+}
+
+/* Wall-clock cap: a few slow instructions (big string.rep) can't hold the thread either. */
+static void slow_ticks_hit_the_time_limit(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    load("function update() for i = 1, 100000 do local s = string.rep('x', 4000000) end return {} end");
+    struct timespec a, b;
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    char* r = gbaduo_script_tick();
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    double ms = (b.tv_sec - a.tv_sec) * 1e3 + (b.tv_nsec - a.tv_nsec) / 1e6;
+    CHECK(r == NULL && strstr(gbaduo_script_last_error(), "time limit") != NULL);
+    if (ms >= 500) printf("string.rep loop took %.0f ms\n", ms);
+    CHECK(ms < 500); /* 25 ms plus the instructions in flight; generous for sanitizer builds */
+    free(r);
+
+    /* One pathological pattern is a single C call: the matcher checks the clock too. */
+    load("function update() local s = string.rep('a', 3000) return { r = tostring(string.find(s, '.-.-.-.-b')) } end");
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    r = gbaduo_script_tick();
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    ms = (b.tv_sec - a.tv_sec) * 1e3 + (b.tv_nsec - a.tv_nsec) / 1e6;
+    CHECK(r == NULL && strstr(gbaduo_script_last_error(), "time limit") != NULL);
+    CHECK(ms < 500);
+    free(r);
+    /* Ordinary patterns are unaffected. */
+    load("function update() return { r = (string.gsub('Lv2-5', '%d', '#')) } end");
+    r = gbaduo_script_tick();
+    CHECK(json_has(r, "\"r\":\"Lv#-#\""));
+    free(r);
+}
+
 static void tilemap_rejects_bad_sizes(void) {
     fake_reset(GBADUO_BUS_GBA);
     const char* bad[] = {
@@ -466,6 +513,8 @@ int main(void) {
     tilemap_composes_tiles_flips_and_banks();
     tilemap_rejects_bad_sizes();
     tilemap_reads_lz77_tiles_and_map();
+    c_work_is_charged_to_the_budget();
+    slow_ticks_hit_the_time_limit();
     sprite_composes_parts();
     sprite_rejects_bad_parts();
     cache_keeps_many_small_images();

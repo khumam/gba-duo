@@ -28,7 +28,11 @@ class AndroidCompanionPlatform(private val packDir: File, private val fontFaces:
 
     private val families = HashMap<List<String>, FontFamily>()
     private val bitmaps = HashMap<File, ImageBitmap?>()
-    private val sprites = LruCache<String, ImageBitmap>(SPRITE_CACHE_SIZE)
+    // Sized like script.c's image cache (by pixels, not count), so every image a page
+    // shows stays here instead of crossing JNI and becoming a new Bitmap each frame.
+    private val sprites = object : LruCache<String, ImageBitmap>(SPRITE_CACHE_PIXELS) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height
+    }
 
     override fun fontFamily(families: List<String>): FontFamily = this.families.getOrPut(families) {
         families.firstNotNullOfOrNull { family -> resolveFamily(family) } ?: FontFamily.Default
@@ -87,6 +91,7 @@ class AndroidCompanionPlatform(private val packDir: File, private val fontFaces:
 
     private companion object {
         const val TAG = "CompanionPlatform"
-        const val SPRITE_CACHE_SIZE = 64
+        /** script.c's IMAGE_CACHE_MAX_PIXELS: 4M px, 16 MB of ARGB. */
+        const val SPRITE_CACHE_PIXELS = 4 * 1024 * 1024
     }
 }

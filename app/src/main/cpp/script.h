@@ -42,6 +42,9 @@ void gbaduo_script_unload(void);
 /** For tests: a malloc'd copy of the ARGB8888 image for a "gfx:..." key, or NULL. */
 uint32_t* gbaduo_script_image(const char* key, int* width, int* height);
 
+/** For tests: how much of its per-call budget the last load/tick/action used (instructions + charged C work; to the nearest hook interval). */
+long gbaduo_script_budget_used(void);
+
 /** For tests: whether mem.write* is currently allowed. */
 bool gbaduo_script_writes_open(void);
 

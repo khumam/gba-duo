@@ -196,7 +196,14 @@ end
   `navigate`, `back`). It's applied to the screen. Return nothing to leave the
   screen as it is. A returned `call` is ignored; call the Lua function directly.
 - **Timing:** actions run on the emulator thread just before the next
-  `update(ui)`, with the same instruction and memory limits.
+  `update(ui)`, with the same limits as `update`:
+  - **Per call** (`update`, an action): 1M Lua instructions and 25 ms. Reading memory
+    and drawing pictures count too: each byte `mem.read` returns and each pixel
+    `gfx.*` draws (not cached) costs one instruction. Over a limit, the call stops with
+    an error and the screen keeps its last state; the next call starts fresh.
+  - **Loading** (the top level and `init()`, once per game start): 5M instructions and
+    250 ms, for building data tables.
+  - **Memory:** 16 MB for the whole script.
 - **Errors:** an error or a missing function is logged
   (`adb logcat -s EmuThread`) and the screen stays as it was.
 

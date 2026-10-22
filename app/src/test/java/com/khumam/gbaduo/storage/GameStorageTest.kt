@@ -11,6 +11,11 @@ import java.nio.file.Files
 
 class GameStorageTest {
 
+    private companion object {
+        const val FP = "fingerprint-a"
+    }
+
+
     private fun tempFilesDir(): File = Files.createTempDirectory("files").toFile()
 
     @Test
@@ -94,30 +99,49 @@ class GameStorageTest {
         val filesDir = tempFilesDir()
         val emerald = GameStorage.forGame(filesDir, Platform.GBA, "POKEMON EMER", "BPEE", 0x1F1C08FBL)
         val ruby = GameStorage.forGame(filesDir, Platform.GBA, "POKEMON RUBY", "AXVE", 0x61641576L)
-        assertNull(emerald.writeConsent("items"))
+        assertNull(emerald.writeConsent("items", FP))
 
-        emerald.setWriteConsent("items", true)
-        emerald.setWriteConsent("cheats", false)
+        emerald.setWriteConsent("items", true, FP)
+        emerald.setWriteConsent("cheats", false, FP)
 
-        assertEquals(true, emerald.writeConsent("items"))
-        assertEquals(false, emerald.writeConsent("cheats"))
-        assertNull(emerald.writeConsent("other"))
-        assertNull(ruby.writeConsent("items")) // per game
+        assertEquals(true, emerald.writeConsent("items", FP))
+        assertEquals(false, emerald.writeConsent("cheats", FP))
+        assertNull(emerald.writeConsent("other", FP))
+        assertNull(ruby.writeConsent("items", FP)) // per game
 
         // Survives a fresh lookup (it's on disk in the game's folder), and can change.
         val again = GameStorage.forGame(filesDir, Platform.GBA, "POKEMON EMER", "BPEE", 0x1F1C08FBL)
-        assertEquals(true, again.writeConsent("items"))
-        again.setWriteConsent("items", false)
-        assertEquals(false, emerald.writeConsent("items"))
+        assertEquals(true, again.writeConsent("items", FP))
+        again.setWriteConsent("items", false, FP)
+        assertEquals(false, emerald.writeConsent("items", FP))
         assertTrue(File(emerald.dir, "consent.json").exists())
+    }
+
+    @Test
+    fun aChangedPackIsAskedAgain() {
+        val storage = GameStorage.forGame(tempFilesDir(), Platform.GBA, "GAME", "AAAA", 0x1L)
+        storage.setWriteConsent("items", true, FP)
+        assertEquals(true, storage.writeConsent("items", FP))
+        // Same id, different code (an update, or another pack claiming the id): not asked yet.
+        assertNull(storage.writeConsent("items", "other-fingerprint"))
+        storage.setWriteConsent("items", false, "other-fingerprint")
+        assertEquals(false, storage.writeConsent("items", "other-fingerprint"))
+        assertNull(storage.writeConsent("items", FP))
+    }
+
+    @Test
+    fun answersFromBeforeFingerprintsAreAskedAgain() {
+        val storage = GameStorage.forGame(tempFilesDir(), Platform.GBA, "GAME", "AAAA", 0x1L).ensureDirs()
+        File(storage.dir, "consent.json").writeText("""{"memory-write":{"items":true}}""")
+        assertNull(storage.writeConsent("items", FP))
     }
 
     @Test
     fun brokenConsentFileMeansNotAsked() {
         val storage = GameStorage.forGame(tempFilesDir(), Platform.GBA, "GAME", "AAAA", 0x1L).ensureDirs()
         File(storage.dir, "consent.json").writeText("{not json")
-        assertNull(storage.writeConsent("items"))
-        storage.setWriteConsent("items", true)
-        assertEquals(true, storage.writeConsent("items"))
+        assertNull(storage.writeConsent("items", FP))
+        storage.setWriteConsent("items", true, FP)
+        assertEquals(true, storage.writeConsent("items", FP))
     }
 }

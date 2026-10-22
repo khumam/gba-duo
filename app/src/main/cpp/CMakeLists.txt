@@ -58,6 +58,9 @@ list(FILTER LUA_SOURCES EXCLUDE REGEX "/lua\\.c$|/luac\\.c$")
 
 add_library(lua STATIC ${LUA_SOURCES})
 target_include_directories(lua PUBLIC "${LUA_DIR}/src")
+# lstrlib.c's pattern matcher calls this (script.c) so a pathological pattern can't
+# run past the script's time budget (local patch to the vendored source).
+target_compile_definitions(lua PRIVATE LUA_PATTERN_STEP_HOOK=gbaduo_pattern_step)
 
 # ---------------------------------------------------------------------------
 # Vendored rcheevos 12.5.0 (RetroAchievements runtime, MIT — see engine/rcheevos).

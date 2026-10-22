@@ -31,19 +31,24 @@ class GameStorage private constructor(val dir: File) {
 
     /**
      * The player's answer to "let pack [packId] change this game?": true, false, or null
-     * when not asked yet. Kept in this game's folder, per pack.
+     * when not asked yet. Kept in this game's folder, per pack, with the pack's
+     * [fingerprint] (PackFingerprint) when asked: if the pack has changed since (an
+     * update, or another pack using the same id), it's null again, so the player is asked
+     * about the code that will actually run.
      */
-    fun writeConsent(packId: String): Boolean? {
+    fun writeConsent(packId: String, fingerprint: String): Boolean? {
         val json = runCatching { JSONObject(consentFile.readText()) }.getOrNull() ?: return null
         val packs = json.optJSONObject(MEMORY_WRITE) ?: return null
-        return if (packs.has(packId)) packs.optBoolean(packId) else null
+        val answer = packs.optJSONObject(packId) ?: return null
+        if (answer.optString(FINGERPRINT) != fingerprint || !answer.has(ALLOWED)) return null
+        return answer.optBoolean(ALLOWED)
     }
 
-    fun setWriteConsent(packId: String, allowed: Boolean) {
+    fun setWriteConsent(packId: String, allowed: Boolean, fingerprint: String) {
         ensureDirs()
         val json = runCatching { JSONObject(consentFile.readText()) }.getOrNull() ?: JSONObject()
         val packs = json.optJSONObject(MEMORY_WRITE) ?: JSONObject().also { json.put(MEMORY_WRITE, it) }
-        packs.put(packId, allowed)
+        packs.put(packId, JSONObject().put(ALLOWED, allowed).put(FINGERPRINT, fingerprint))
         val tmp = File(dir, "consent.json.tmp")
         tmp.writeText(json.toString())
         if (!tmp.renameTo(consentFile)) {
@@ -79,6 +84,8 @@ class GameStorage private constructor(val dir: File) {
     companion object {
         private const val MAX_TITLE_LENGTH = 48
         private const val MEMORY_WRITE = "memory-write"
+        private const val ALLOWED = "allowed"
+        private const val FINGERPRINT = "fingerprint"
 
         /** Finds this game's existing folder by CRC (even if its title part differs), or names a new one. Doesn't create it. */
         fun forGame(filesDir: File, platform: Platform, title: String, gameCode: String, crc32: Long): GameStorage {

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <lua.h>
 #include <lauxlib.h>
@@ -30,8 +31,20 @@
 #define LOGE(...) LOG_PRINT(LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 #define SCRIPT_MEMORY_LIMIT (16u * 1024u * 1024u)
-#define INSTRUCTION_BUDGET_PER_TICK 5000000L
-#define HOOK_INSTRUCTION_INTERVAL 10000
+/*
+ * Each update(), action and ui change runs on the emu thread between frames, so it gets
+ * a budget: Lua instructions plus charged C work (charge()), and wall-clock time. The
+ * revamp packs use about 50K and under 1 ms on a desktop; 1M and 25 ms (one or two
+ * frames) leave room for heavier packs while a runaway one costs at most a hitch.
+ * Loading (top level + init(), once per game start) gets more: it parses data tables.
+ */
+#define INSTRUCTION_BUDGET_PER_TICK 1000000L
+#define TIME_BUDGET_PER_TICK_MS 25
+#define INSTRUCTION_BUDGET_LOAD 5000000L
+#define TIME_BUDGET_LOAD_MS 250
+/* How often the count hook checks the budget: often enough that a loop of slow single
+ * instructions (string.rep of megabytes) overshoots the time limit by little. */
+#define HOOK_INSTRUCTION_INTERVAL 200
 #define JSON_MAX_DEPTH 32
 /* Decoded images kept at once, and their total size: a pack showing a full item
  * grid (each icon its own image) plus a map stays cached instead of re-decoding
@@ -56,6 +69,8 @@ struct GbaDuoScript {
     lua_State* L;
     size_t memUsed;
     long instructionsLeft;
+    long instructionBudget; /* what instructionsLeft started at */
+    struct timespec deadline;
     char packDir[1024];
     char lastError[512];
     struct CachedImage images[IMAGE_CACHE_SIZE];
@@ -76,6 +91,9 @@ static pthread_mutex_t g_imageLock = PTHREAD_MUTEX_INITIALIZER;
 /* Capped allocator + instruction-count hook                                */
 /* ------------------------------------------------------------------------ */
 
+static bool past_deadline(void);
+static void instruction_hook(lua_State* L, lua_Debug* ar);
+
 static void* script_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
     struct GbaDuoScript* s = (struct GbaDuoScript*) ud;
     if (nsize == 0) {
@@ -95,15 +113,73 @@ static void* script_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
         return NULL;
     }
     s->memUsed = newUsed;
+    /* A big allocation past the deadline (string.rep, table.concat of megabytes): have
+     * the count hook check on the very next instruction rather than up to
+     * HOOK_INSTRUCTION_INTERVAL slow ones later. lua_sethook is safe at any point. */
+    if (nsize >= 65536 && s->L && past_deadline()) {
+        lua_sethook(s->L, instruction_hook, LUA_MASKCOUNT, 1);
+    }
     return newPtr;
+}
+
+/* Starts a call's budget: [instructions] and [ms] of wall-clock time from now. */
+static void start_budget(long instructions, long ms) {
+    if (g_script.L) {
+        lua_sethook(g_script.L, instruction_hook, LUA_MASKCOUNT, HOOK_INSTRUCTION_INTERVAL);
+    }
+    g_script.instructionsLeft = instructions;
+    g_script.instructionBudget = instructions;
+    clock_gettime(CLOCK_MONOTONIC, &g_script.deadline);
+    g_script.deadline.tv_sec += ms / 1000;
+    g_script.deadline.tv_nsec += (ms % 1000) * 1000000L;
+    if (g_script.deadline.tv_nsec >= 1000000000L) {
+        g_script.deadline.tv_sec++;
+        g_script.deadline.tv_nsec -= 1000000000L;
+    }
+}
+
+static bool past_deadline(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return now.tv_sec > g_script.deadline.tv_sec ||
+           (now.tv_sec == g_script.deadline.tv_sec && now.tv_nsec > g_script.deadline.tv_nsec);
+}
+
+static void check_budget(lua_State* L) {
+    if (g_script.instructionsLeft <= 0) {
+        luaL_error(L, "script exceeded its per-tick instruction budget");
+    }
+    if (past_deadline()) {
+        luaL_error(L, "script exceeded its per-tick time limit");
+    }
+}
+
+/* Called by Lua's pattern matcher (lstrlib.c, LUA_PATTERN_STEP_HOOK) on every match
+ * step: a pattern like ".-.-.-.-x" on a long string is one C call that could run for
+ * minutes, out of the count hook's reach. Checks the clock every 1024 steps. */
+void gbaduo_pattern_step(lua_State* L) {
+    static unsigned steps;
+    if ((++steps & 1023u) == 0 && past_deadline()) {
+        luaL_error(L, "script exceeded its per-tick time limit");
+    }
 }
 
 static void instruction_hook(lua_State* L, lua_Debug* ar) {
     (void) ar;
     g_script.instructionsLeft -= HOOK_INSTRUCTION_INTERVAL;
-    if (g_script.instructionsLeft <= 0) {
-        luaL_error(L, "script exceeded its per-tick instruction budget");
-    }
+    check_budget(L);
+}
+
+/*
+ * C work a call does for the script (bytes read, pixels drawn) comes out of the same
+ * budget, one instruction per unit: otherwise a loop of a few Lua instructions around
+ * mem.read(addr, 65536) or an uncached gfx.* call could hold the emu thread for minutes.
+ * Call before allocating anything: on an empty budget this raises a Lua error.
+ */
+static void charge(lua_State* L, size_t units) {
+    long cost = units > (size_t) INSTRUCTION_BUDGET_LOAD ? INSTRUCTION_BUDGET_LOAD : (long) units;
+    g_script.instructionsLeft -= cost;
+    check_budget(L);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -154,6 +230,7 @@ static int l_mem_read(lua_State* L) {
     lua_Integer n = luaL_checkinteger(L, 2);
     if (n < 0) n = 0;
     if (n > 65536) n = 65536;
+    charge(L, (size_t) n);
     if (n == 0) {
         lua_pushliteral(L, "");
         return 1;
@@ -303,8 +380,17 @@ static uint8_t* lz77_decompress(uint32_t addr, size_t* outSize) {
     return out;
 }
 
+/** The output size an LZ77 block at [addr] claims (capped), 0 if it isn't one: for charge(). */
+static size_t lz77_claimed_size(uint32_t addr) {
+    uint32_t header = gbaduo_bus_read32(addr);
+    if ((header & 0xFF) != 0x10) return 0;
+    size_t size = (header >> 8) & 0xFFFFFF;
+    return size > LZ77_MAX_OUTPUT ? LZ77_MAX_OUTPUT : size;
+}
+
 static int l_lz77(lua_State* L) {
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
+    charge(L, lz77_claimed_size(addr));
     size_t size = 0;
     uint8_t* data = lz77_decompress(addr, &size);
     if (!data) {
@@ -430,6 +516,7 @@ static int l_gfx_decode(lua_State* L) {
     if (!core) {
         return luaL_error(L, "gfx.decode: no ROM loaded");
     }
+    charge(L, (size_t) width * height + (useLz77 ? lz77_claimed_size(tilesAddr) : 0));
 
     int tilesWide = width / 8;
     int tilesHigh = height / 8;
@@ -564,6 +651,7 @@ static int l_gfx_tilemap(lua_State* L) {
     if (gbaduo_bus_platform() == GBADUO_BUS_NONE) {
         return luaL_error(L, "gfx.tilemap: no ROM loaded");
     }
+    charge(L, (size_t) width * height + (useLz77 ? lz77_claimed_size(tilesAddr) + lz77_claimed_size(mapAddr) : 0));
 
     /* Compressed: unpack both once; a tile or cell past the end reads as 0. */
     uint8_t* tileData = NULL;
@@ -722,6 +810,9 @@ static int l_gfx_sprite(lua_State* L) {
     if (gbaduo_bus_platform() == GBADUO_BUS_NONE) {
         return luaL_error(L, "gfx.sprite: no ROM loaded");
     }
+    size_t work = (size_t) width * height;
+    for (int pi = 0; pi < count; pi++) work += (size_t) parts[pi].w * parts[pi].h;
+    charge(L, work);
 
     int w = (int) width, h = (int) height;
     uint32_t* pixels = calloc((size_t) w * h, sizeof(uint32_t));
@@ -1143,6 +1234,10 @@ const char* gbaduo_script_last_error(void) {
     return g_script.lastError;
 }
 
+long gbaduo_script_budget_used(void) {
+    return g_script.instructionBudget - g_script.instructionsLeft;
+}
+
 bool gbaduo_script_load(const char* source, const char* packDir) {
     if (g_script.L) {
         lua_close(g_script.L);
@@ -1162,7 +1257,7 @@ bool gbaduo_script_load(const char* source, const char* packDir) {
         return false;
     }
 
-    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+    start_budget(INSTRUCTION_BUDGET_LOAD, TIME_BUDGET_LOAD_MS);
     if (luaL_loadstring(L, source) != LUA_OK || lua_pcall(L, 0, 0, 0) != LUA_OK) {
         set_error(lua_tostring(L, -1));
         lua_close(L);
@@ -1174,7 +1269,7 @@ bool gbaduo_script_load(const char* source, const char* packDir) {
     /* Optional init(), run once after load. */
     lua_getglobal(L, "init");
     if (lua_isfunction(L, -1)) {
-        g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+        start_budget(INSTRUCTION_BUDGET_LOAD, TIME_BUDGET_LOAD_MS);
         if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
             const char* err = lua_tostring(L, -1);
             set_error(err ? err : "init() failed");
@@ -1223,7 +1318,7 @@ char* gbaduo_script_tick(void) {
     }
 
     lua_getglobal(L, "ui"); /* update(ui): the companion screen's UI state */
-    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+    start_budget(INSTRUCTION_BUDGET_PER_TICK, TIME_BUDGET_PER_TICK_MS);
     if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
         const char* err = lua_tostring(L, -1);
         set_error(err ? err : "update() failed");
@@ -1275,7 +1370,7 @@ char* gbaduo_script_action(const char* name, gbaduo_push_args push, void* userda
     struct ActionCall c = {name, push, userdata, push ? nargs : 0};
     lua_pushcfunction(L, call_action);
     lua_pushlightuserdata(L, &c);
-    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+    start_budget(INSTRUCTION_BUDGET_PER_TICK, TIME_BUDGET_PER_TICK_MS);
     /* The write window is open for exactly this protected call: lua_pcall returns on
      * success and on every error (a Lua error, out of memory, the instruction budget),
      * so it's always closed again below. */
@@ -1416,7 +1511,7 @@ Java_com_khumam_gbaduo_emu_NativeCore_setScriptUi(JNIEnv* env, jobject thiz, job
     struct JavaCall c = {env, keys, values, n < nValues ? n : nValues, NULL};
     lua_pushcfunction(L, build_ui);
     lua_pushlightuserdata(L, &c);
-    g_script.instructionsLeft = INSTRUCTION_BUDGET_PER_TICK;
+    start_budget(INSTRUCTION_BUDGET_PER_TICK, TIME_BUDGET_PER_TICK_MS);
     if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
         const char* err = lua_tostring(L, -1);
         LOGE("could not set ui: %s", err ? err : "?");

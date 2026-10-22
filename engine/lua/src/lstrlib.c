@@ -567,9 +567,18 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
 }
 
 
+/* GBADuo: pattern matching runs in C, out of reach of the count hook; the embedder
+** checks its time budget from here (see app/src/main/cpp/script.c). */
+#if defined(LUA_PATTERN_STEP_HOOK)
+void LUA_PATTERN_STEP_HOOK (lua_State *L);
+#endif
+
 static const char *match (MatchState *ms, const char *s, const char *p) {
   if (l_unlikely(ms->matchdepth-- == 0))
     luaL_error(ms->L, "pattern too complex");
+#if defined(LUA_PATTERN_STEP_HOOK)
+  LUA_PATTERN_STEP_HOOK(ms->L);
+#endif
   init: /* using goto to optimize tail recursion */
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
