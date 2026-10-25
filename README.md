@@ -114,15 +114,30 @@ the save folder: each game finds its saves by checksum, whatever the file is cal
 
 ### Controls
 
+These are the defaults. Change them in **Settings > Controller**.
+
 | Thor        | Game              |
 | ----------- | ----------------- |
 | D-pad       | D-pad             |
-| A / B       | A / B (Swap A/B flips them) |
+| A / B       | A / B             |
 | L1 / R1     | L / R             |
 | Start       | Start             |
 | Select      | Select            |
 | R2 (hold)   | Fast-forward      |
-| L2 / BACK   | Menu              |
+| L2          | Quick menu        |
+| BACK        | Quick menu (always) |
+
+- **Button mapping** lists every game button and the Thor button that presses it. Pick a
+  row, press a button, done. A button used elsewhere swaps places with it. **Reset to
+  default** restores the table above.
+- **Hotkeys** has seven actions: open the quick menu, fast-forward (hold or toggle),
+  quick save state, quick load state, next and previous save slot, and exit game. Each
+  is one button, or the **hotkey button** plus a button. The hotkey button is none by
+  default. While you hold it nothing reaches the game; a button it shares with a game
+  button reaches the game when you let go.
+- BACK always opens the quick menu, so you can't lock yourself out.
+- A and B now match the labels on the Thor's buttons. To swap them back, use
+  Settings > Controller > Button mapping.
 
 ## Companion packs
 

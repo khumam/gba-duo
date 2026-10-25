@@ -144,4 +144,25 @@ class GameStorageTest {
         storage.setWriteConsent("items", true, FP)
         assertEquals(true, storage.writeConsent("items", FP))
     }
+
+    @Test
+    fun currentSlotDefaultsClampsAndPersists() {
+        val files = tempFilesDir()
+        val storage = GameStorage.forGame(files, Platform.GBA, "POKEMON", "BPEE", 0x1234L)
+        assertEquals(1, storage.currentSlot)
+
+        storage.currentSlot = 3
+        assertEquals(3, GameStorage.forGame(files, Platform.GBA, "POKEMON", "BPEE", 0x1234L).currentSlot)
+
+        storage.currentSlot = 12
+        assertEquals(9, storage.currentSlot)
+
+        File(storage.dir, "settings.json").writeText("""{"slot":"x"}""")
+        assertEquals(1, storage.currentSlot)
+
+        storage.settings.put("shader", "lcd")
+        storage.currentSlot = 4
+        assertEquals("lcd", storage.settings.getString("shader"))
+        assertEquals(4, storage.currentSlot)
+    }
 }

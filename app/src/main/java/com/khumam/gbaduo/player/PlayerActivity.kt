@@ -30,6 +30,9 @@ import com.khumam.gbaduo.library.GameTitle
 import com.khumam.gbaduo.library.RomArchive
 import com.khumam.gbaduo.library.RomHeader
 import com.khumam.gbaduo.library.RomIndex
+import com.khumam.gbaduo.controls.ControlPrefs
+import com.khumam.gbaduo.controls.HotkeyAction
+import com.khumam.gbaduo.emu.KeyResult
 import com.khumam.gbaduo.storage.GameStorage
 import com.khumam.gbaduo.storage.LegacyMigration
 import com.khumam.gbaduo.storage.SaveMirror
@@ -41,6 +44,8 @@ class PlayerActivity : Activity() {
     private lateinit var emu: EmuThread
     private lateinit var audioOut: AudioOut
     private var quickMenu: QuickMenu? = null
+    private var hotkeys: HotkeyActions? = null
+    private var playerNotes: PlayerNotes? = null
     private var companionScreen: CompanionController? = null
     private var companionPresentation: CompanionPresentation? = null
     private var companionActivity: CompanionActivity.Session? = null
@@ -111,7 +116,7 @@ class PlayerActivity : Activity() {
             mirror.syncIn()
         }
 
-        input = InputMapper()
+        input = InputMapper(ControlPrefs.load(this))
         audioOut = AudioOut()
         val gameView = findViewById<GameView>(R.id.game_view)
         gameView.setShader(savedShader)
@@ -137,10 +142,14 @@ class PlayerActivity : Activity() {
                         emu = emu,
                         states = SaveStates(storage),
                         initialShader = savedShader,
-                        onSwapAb = { input.swapAb = it },
                         onSetFfSpeed = { emu.ffMultiplier = it },
                         onSetShader = { savedShader = it; gameView.setShader(it) },
                         onQuit = { finish() },
+                    )
+                    val notes = PlayerNotes(findViewById(android.R.id.content) as android.widget.FrameLayout).also { playerNotes = it }
+                    hotkeys = HotkeyActions(
+                        activity = this@PlayerActivity, emu = emu, states = SaveStates(storage), storage = storage,
+                        quickMenu = quickMenu!!, notes = notes, onQuit = { finish() },
                     )
                     setUpCompanion(header, crc32, storage)
                 } else {
@@ -265,12 +274,32 @@ class PlayerActivity : Activity() {
             KeyEvent.ACTION_UP -> false
             else -> return false
         }
-        if (event.keyCode == KeyEvent.KEYCODE_BUTTON_L2 || event.keyCode == KeyEvent.KEYCODE_BACK) {
-            if (down && event.repeatCount == 0) quickMenu?.show()
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (down && event.repeatCount == 0) openQuickMenu()
             return true
         }
         if (!::input.isInitialized) return false
-        return input.onKey(event.keyCode, down)
+        return when (val result = input.onKey(event.keyCode, down, event.repeatCount)) {
+            KeyResult.Ignored -> false
+            KeyResult.Consumed -> true
+            is KeyResult.Action -> {
+                perform(result.action)
+                true
+            }
+        }
+    }
+
+    /** Lifts held keys first, so nothing stays pressed while the menu has the focus. */
+    private fun openQuickMenu() {
+        if (::input.isInitialized) input.releaseAll()
+        quickMenu?.show()
+    }
+
+    private fun perform(action: HotkeyAction) {
+        if (action == HotkeyAction.QUICK_MENU) return openQuickMenu()
+        // A dialog (exit) takes the focus: lift what's held first.
+        if (action == HotkeyAction.EXIT) input.releaseAll()
+        hotkeys?.perform(action)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
@@ -305,6 +334,7 @@ class PlayerActivity : Activity() {
 
     override fun onDestroy() {
         achievementPopups?.detach()
+        playerNotes?.remove()
         if (::emu.isInitialized) {
             emu.shutdown()
             emu.join(1000)

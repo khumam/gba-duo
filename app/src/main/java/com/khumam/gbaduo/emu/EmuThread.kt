@@ -30,7 +30,7 @@ class EmuThread(
     /** Only until the core has its own copy: a whole ROM (up to 32 MB) shouldn't be held twice. */
     @Volatile private var romBytes: ByteArray? = romBytes
 
-    private val pendingSaveState = java.util.concurrent.atomic.AtomicReference<Pair<String, Boolean>?>(null)
+    private val pendingSaveState = java.util.concurrent.atomic.AtomicReference<StateRequest?>(null)
     @Volatile var lastStateResult: Boolean? = null
 
     @Volatile var loaded = false
@@ -273,16 +273,20 @@ class EmuThread(
         else Log.w(TAG, "could not save the state before the pack's first write")
     }
 
-    /** Thread-safe; services the request on the emu thread between frames. */
-    fun requestState(path: String, save: Boolean) {
-        pendingSaveState.set(path to save)
+    private class StateRequest(val path: String, val save: Boolean, val onDone: ((Boolean) -> Unit)?)
+
+    /** Thread-safe; services the request on the emu thread between frames. [onDone] runs there with the core's result. */
+    fun requestState(path: String, save: Boolean, onDone: ((Boolean) -> Unit)? = null) {
+        pendingSaveState.set(StateRequest(path, save, onDone))
     }
 
     private fun servicePendingStateRequest() {
         val request = pendingSaveState.getAndSet(null) ?: return
-        val (path, save) = request
-        lastStateResult = if (save) NativeCore.saveState(path) else NativeCore.loadState(path)
-        if (save && lastStateResult == true) onSaveDataChanged?.invoke()
+        val (path, save) = request.path to request.save
+        val ok = if (save) NativeCore.saveState(path) else NativeCore.loadState(path)
+        lastStateResult = ok
+        if (save && ok) onSaveDataChanged?.invoke()
+        request.onDone?.invoke(ok)
     }
 
     fun shutdown() {

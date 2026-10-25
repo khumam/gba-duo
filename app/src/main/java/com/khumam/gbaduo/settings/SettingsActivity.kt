@@ -41,6 +41,10 @@ class SettingsActivity : PixelPage() {
             getString(R.string.save_folder_title), getString(R.string.save_folder_summary_none)) {
             startActivity(Intent(this, SaveFolderActivity::class.java))
         }.second
+        menuCard(R.drawable.ic_settings, Pixel.MINT,
+            getString(R.string.controls_title), getString(R.string.controls_summary)) {
+            startActivity(Intent(this, ControllerActivity::class.java))
+        }
         writesSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
             getString(R.string.pack_writes_title), getString(R.string.pack_writes_off)) { toggleWrites() }.second
         raSummary = menuCard(R.drawable.ic_trophy, Pixel.MINT,

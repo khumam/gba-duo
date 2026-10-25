@@ -8,18 +8,16 @@ import com.khumam.gbaduo.emu.ShaderPreset
 import java.text.DateFormat
 import java.util.Date
 
-/** Pause-and-choose overlay: save/load state slots, fast-forward speed, shader, swap A/B, quit. */
+/** Pause-and-choose overlay: save/load state slots, fast-forward speed, shader, quit. */
 class QuickMenu(
     private val context: Context,
     private val emu: EmuThread,
     private val states: SaveStates,
     initialShader: ShaderPreset,
-    private val onSwapAb: (Boolean) -> Unit,
     private val onSetFfSpeed: (Int) -> Unit,
     private val onSetShader: (ShaderPreset) -> Unit,
     private val onQuit: () -> Unit,
 ) {
-    private var swapAb = false
     private var ffSpeed = 2
     private var shader = initialShader
     private var dialog: AlertDialog? = null
@@ -35,7 +33,6 @@ class QuickMenu(
             context.getString(R.string.load_state),
             context.getString(R.string.ff_speed, ffSpeed),
             context.getString(R.string.shader_label, shader.displayName),
-            context.getString(R.string.swap_ab),
             context.getString(R.string.quit),
         ).toTypedArray()
 
@@ -47,8 +44,7 @@ class QuickMenu(
                     2 -> showSlotPicker(save = false)
                     3 -> cycleFfSpeed()
                     4 -> cycleShader()
-                    5 -> { swapAb = !swapAb; onSwapAb(swapAb); emu.paused = false }
-                    6 -> onQuit()
+                    5 -> onQuit()
                 }
             }
             .setOnCancelListener { emu.paused = false }

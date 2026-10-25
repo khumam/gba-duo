@@ -49,6 +49,9 @@
         <activity android:name=".settings.RomFoldersActivity" android:exported="false" />
         <activity android:name=".settings.AboutActivity" android:exported="false" />
         <activity android:name=".settings.SaveFolderActivity" android:exported="false" />
+        <activity android:name=".settings.ControllerActivity" android:exported="false" />
+        <activity android:name=".settings.ButtonMappingActivity" android:exported="false" />
+        <activity android:name=".settings.HotkeysActivity" android:exported="false" />
         <activity android:name=".settings.RetroAchievementsActivity" android:exported="false"
             android:windowSoftInputMode="adjustResize|stateHidden" />
 
