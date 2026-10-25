@@ -1,7 +1,9 @@
 package com.khumam.gbaduo.library.ui
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Rect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -34,6 +36,9 @@ class CartridgeView @JvmOverloads constructor(
         set(value) { field = value; invalidate() }
     var platform: Platform = Platform.GBA
         set(value) { field = value; labelLayout = null; invalidate() }
+    /** Cover art for the label; null draws the title instead. */
+    var art: Bitmap? = null
+        set(value) { if (field !== value) { field = value; invalidate() } }
     var hasPack = false
         set(value) { field = value; invalidate() }
     var selectedCart = false
@@ -224,7 +229,34 @@ class CartridgeView @JvmOverloads constructor(
         canvas.drawText(name, 0, name.length, label.left + dp(5f),
             label.top + bandH / 2 - (fm.ascent + fm.descent) / 2, smallPaint)
 
-        // Title, up to three lines, centred in the space under the band.
+        art?.let { drawArt(canvas, it, bandH) } ?: drawTitle(canvas, bandH)
+        // Outline.
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = lw
+        paint.color = Pixel.INK
+        canvas.drawRect(label, paint)
+    }
+
+    /** The cover, centre-cropped to fill the label under the band. */
+    private fun drawArt(canvas: Canvas, bitmap: Bitmap, bandH: Float) {
+        val area = RectF(label.left, label.top + bandH, label.right, label.bottom)
+        val areaRatio = area.width() / area.height()
+        val bitmapRatio = bitmap.width.toFloat() / bitmap.height
+        val src = if (bitmapRatio > areaRatio) {
+            val w = (bitmap.height * areaRatio).toInt()
+            Rect((bitmap.width - w) / 2, 0, (bitmap.width + w) / 2, bitmap.height)
+        } else {
+            val h = (bitmap.width / areaRatio).toInt()
+            Rect(0, (bitmap.height - h) / 2, bitmap.width, (bitmap.height + h) / 2)
+        }
+        paint.style = Paint.Style.FILL
+        paint.isFilterBitmap = true
+        canvas.drawBitmap(bitmap, src, area, paint)
+        paint.isFilterBitmap = false
+    }
+
+    /** Title, up to three lines, centred in the space under the band. */
+    private fun drawTitle(canvas: Canvas, bandH: Float) {
         val inner = (label.width() - dp(12f)).toInt().coerceAtLeast(1)
         titlePaint.textSize = (label.height() * 0.15f).coerceIn(dp(9f), dp(17f))
         val layout = labelLayout?.takeIf { labelLayoutWidth == inner }
@@ -246,11 +278,6 @@ class CartridgeView @JvmOverloads constructor(
             val cw = codePaint.measureText(gameCode)
             canvas.drawText(gameCode, label.centerX() - cw / 2, label.bottom - codePaint.textSize * 0.45f, codePaint)
         }
-        // Outline.
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = lw
-        paint.color = Pixel.INK
-        canvas.drawRect(label, paint)
     }
 
     /** The ▼ embossed under a Game Boy cart's label. */

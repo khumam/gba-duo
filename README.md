@@ -139,6 +139,23 @@ These are the defaults. Change them in **Settings > Controller**.
 - A and B now match the labels on the Thor's buttons. To swap them back, use
   Settings > Controller > Button mapping.
 
+### Artwork
+
+By default every game is drawn as a cartridge with a text label. **Settings > Scraping**
+puts cover art on the label, from either or both of:
+
+- **An artwork folder** another launcher filled (ES-DE, RetroArch thumbnails, or a plain
+  folder of images named like your ROMs). GBADuo only reads it. Images are matched by the
+  ROM's file name, its title, game code or checksum; screenshots, logos and other
+  platforms' folders are ignored.
+- **SteamGridDB**, with your own free API key (steamgriddb.com > profile > Preferences >
+  API). Game titles are sent to steamgriddb.com to find the cover.
+
+**Scrape library** finds art for every game, folder first. Nothing goes online until you
+press it. In **Library > Game settings** you can search SteamGridDB for one game and
+pick the cover yourself, match it from the folder again, or remove it. Covers you pick or
+remove are never changed by a later scrape.
+
 ## Companion packs
 
 Packs live in their own repo,
@@ -182,9 +199,10 @@ pack's Lua, so you feed it sample data in `preview-data.json`.
 
 ## Privacy
 
-GBADuo has no accounts, ads or analytics, and asks for no permissions: it never goes
-online. Your games, saves and packs never leave your device, unless you pick a save
-folder that syncs somewhere.
+GBADuo has no accounts, ads or analytics. It only goes online when you ask it to: for
+RetroAchievements while you're logged in, and for SteamGridDB when you search or scrape
+artwork (game titles only). Your games, saves and packs never leave your device, unless
+you pick a save folder that syncs somewhere.
 
 <details>
 <summary><strong>AI tooling note</strong></summary>

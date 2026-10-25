@@ -96,6 +96,10 @@ class RomLibrary(private val context: Context) {
         return crc
     }
 
+    /** The CRC32 if already known; never reads the ROM. Cheap enough for the library shelf. */
+    fun cachedCrc32(entry: RomEntry): Long? =
+        entry.uri?.let { index.crc32(it.toString(), entry.size, entry.lastModified) }
+
     private fun collectRomFiles(dir: DocumentFile, depth: Int = 0): List<DocumentFile> {
         val children = dir.listFiles()
         val files = children.filter { it.isFile && it.name?.let(RomArchive::isLibraryFileName) == true }

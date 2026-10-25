@@ -69,6 +69,13 @@ class DocumentSyncDir(private val context: Context, private val doc: DocumentFil
     companion object {
         private const val MIME = "application/octet-stream"
 
+        /** Like [open] for a folder only read from (no write access needed). */
+        fun openReadOnly(context: Context, treeUri: Uri): DocumentSyncDir? {
+            val root = runCatching { DocumentFile.fromTreeUri(context, treeUri) }.getOrNull() ?: return null
+            if (!root.exists() || !root.isDirectory) return null
+            return DocumentSyncDir(context, root)
+        }
+
         /** The picked tree, or null when it can't be reached (permission gone, SD card out). */
         fun open(context: Context, treeUri: Uri): DocumentSyncDir? {
             val root = runCatching { DocumentFile.fromTreeUri(context, treeUri) }.getOrNull() ?: return null

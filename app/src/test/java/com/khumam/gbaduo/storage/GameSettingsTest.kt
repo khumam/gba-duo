@@ -52,4 +52,16 @@ class GameSettingsTest {
         assertEquals("""{"slot":2}""", f.readText())
         assertTrue(!File(f.parentFile, "settings.json.tmp").exists())
     }
+
+    @Test
+    fun artworkLockRoundTripsAndKeepsOtherKeys() {
+        val settings = GameSettings(file())
+        settings.put(GameSettingsKeys.SHADER, "lcd")
+        settings.put(GameSettingsKeys.ARTWORK, GameSettingsKeys.ARTWORK_PICKED)
+        assertEquals("picked", settings.getString(GameSettingsKeys.ARTWORK))
+        assertEquals("lcd", settings.getString(GameSettingsKeys.SHADER))
+        settings.put(GameSettingsKeys.ARTWORK, null)
+        assertNull(settings.getString(GameSettingsKeys.ARTWORK))
+        assertEquals("lcd", settings.getString(GameSettingsKeys.SHADER))
+    }
 }

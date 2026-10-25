@@ -206,6 +206,7 @@ class LibraryActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        carousel.reloadArtwork()
         refresh()
         if (motion) blink.postDelayed(blinkStep, BLINK_MS)
     }
@@ -217,6 +218,7 @@ class LibraryActivity : Activity() {
     }
 
     override fun onDestroy() {
+        carousel.release()
         io.shutdownNow()
         super.onDestroy()
     }
@@ -407,15 +409,19 @@ class LibraryActivity : Activity() {
                 val crc = library.crc32(entry) ?: error("Could not read ${entry.fileName}")
                 val storage = GameStorage.forGame(filesDir, entry.platform, entry.title, entry.gameCode, crc)
                 LegacyMigration.migrate(filesDir, entry.fileName, crc, storage)
-                storage.ensureDirs()
+                crc to storage.ensureDirs()
             },
             onResult = { result ->
-                result.onSuccess { storage ->
+                result.onSuccess { (crc, storage) ->
                     startActivity(
                         Intent(this, GameSettingsActivity::class.java)
                             .putExtra(GameSettingsActivity.EXTRA_GAME_DIR, storage.dir.absolutePath)
                             .putExtra(GameSettingsActivity.EXTRA_TITLE, GameTitle.display(entry.fileName, entry.title))
-                            .putExtra(GameSettingsActivity.EXTRA_PLATFORM, entry.platform.label),
+                            .putExtra(GameSettingsActivity.EXTRA_PLATFORM, entry.platform.label)
+                            .putExtra(GameSettingsActivity.EXTRA_PLATFORM_ID, entry.platform.id)
+                            .putExtra(GameSettingsActivity.EXTRA_FILE_NAME, entry.fileName)
+                            .putExtra(GameSettingsActivity.EXTRA_CODE, entry.gameCode)
+                            .putExtra(GameSettingsActivity.EXTRA_CRC, crc),
                     )
                 }.onFailure { Toast.makeText(this, getString(R.string.load_failed, entry.fileName), Toast.LENGTH_SHORT).show() }
             },

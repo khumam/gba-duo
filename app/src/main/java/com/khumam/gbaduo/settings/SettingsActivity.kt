@@ -8,6 +8,7 @@ import com.khumam.gbaduo.R
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.CompanionSettings
 import com.khumam.gbaduo.library.RomLibrary
+import com.khumam.gbaduo.library.artwork.Artwork
 import com.khumam.gbaduo.library.ui.Pixel
 import com.khumam.gbaduo.storage.SaveFolder
 
@@ -18,6 +19,7 @@ class SettingsActivity : PixelPage() {
     private lateinit var raSummary: TextView
     private lateinit var savesSummary: TextView
     private lateinit var writesSummary: TextView
+    private lateinit var scrapingSummary: TextView
 
     private val raListener: (RetroAchievements.State) -> Unit = { state ->
         raSummary.text = when (state) {
@@ -45,6 +47,10 @@ class SettingsActivity : PixelPage() {
             getString(R.string.controls_title), getString(R.string.controls_summary)) {
             startActivity(Intent(this, ControllerActivity::class.java))
         }
+        scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
+            getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
+            startActivity(Intent(this, ScrapingActivity::class.java))
+        }.second
         writesSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
             getString(R.string.pack_writes_title), getString(R.string.pack_writes_off)) { toggleWrites() }.second
         raSummary = menuCard(R.drawable.ic_trophy, Pixel.MINT,
@@ -63,6 +69,9 @@ class SettingsActivity : PixelPage() {
         val count = RomLibrary(this).folders.size
         foldersSummary.text = if (count == 0) getString(R.string.no_folders_yet) else getString(R.string.rom_folders_summary)
         renderWrites()
+        val artCount = Artwork.store(this).count()
+        scrapingSummary.text = if (artCount == 0) getString(R.string.scraping_summary)
+        else resources.getQuantityString(R.plurals.scraping_summary_count, artCount, artCount)
         val saveFolder = if (SaveFolder.uri(this) != null) SaveFolder.displayName(this) ?: getString(R.string.save_folder_unreachable) else null
         savesSummary.text = saveFolder?.let { getString(R.string.save_folder_summary_set, it) } ?: getString(R.string.save_folder_summary_none)
     }

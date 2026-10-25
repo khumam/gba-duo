@@ -36,4 +36,9 @@ class GameSettings(private val file: File) {
 object GameSettingsKeys {
     const val SLOT = "slot"
     const val SHADER = "shader"
+
+    /** Artwork lock: absent = scraping may change it, `none` = player removed it, `picked` = player chose it. */
+    const val ARTWORK = "artwork"
+    const val ARTWORK_NONE = "none"
+    const val ARTWORK_PICKED = "picked"
 }
