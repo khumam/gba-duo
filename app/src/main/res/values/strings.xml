@@ -59,7 +59,8 @@
     <string name="ra_mastered">Set completed</string>
     <string name="ra_game_summary">%1$d of %2$d achievements unlocked</string>
     <string name="ra_no_achievements">No achievements for this game</string>
-    <string name="ra_game_error">RetroAchievements: %s</string>
+    <string name="ra_game_error">%s</string>
+    <string name="ra_unknown_game">This ROM isn\'t recognized, so achievements are off. ROM hacks and uncommon dumps usually aren\'t supported.</string>
     <string name="ra_disconnected">RetroAchievements: offline, unlocks will be sent later</string>
     <string name="ra_reconnected">RetroAchievements: back online</string>
     <plurals name="ra_points">
