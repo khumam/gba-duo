@@ -79,6 +79,14 @@
     <string name="hud_games">Games</string>
     <string name="hint_browse">Browse</string>
     <string name="hint_pack">Pack</string>
+    <string name="hint_game_settings">Game settings</string>
+    <string name="game_settings">Game settings</string>
+    <string name="game_settings_shader">Shader</string>
+    <string name="shader_off_desc">The game\'s own pixels</string>
+    <string name="shader_gba_color_desc">Colours as on a GBA screen, slightly darker</string>
+    <string name="shader_lcd_desc">Visible pixel grid, like a handheld LCD</string>
+    <string name="shader_scanlines_desc">Dark lines between rows, like a CRT</string>
+    <string name="shader_scale2x_desc">Smoother edges on upscaled pixels</string>
     <string name="hint_jump">Jump 5</string>
     <string name="empty_scanning_title">Loading cartridges</string>
     <string name="empty_no_folder_title">Insert cartridge</string>

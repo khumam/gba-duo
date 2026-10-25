@@ -184,6 +184,13 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="16dp"
                 android:text="@string/companion_pack" />
+
+            <com.khumam.gbaduo.library.ui.PixelButton
+                android:id="@+id/game_settings_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="@string/game_settings" />
         </LinearLayout>
 
         <!-- Control hints, HUD style. -->

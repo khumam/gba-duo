@@ -31,3 +31,9 @@ class GameSettings(private val file: File) {
         }
     }
 }
+
+/** The keys in a game's `settings.json`. */
+object GameSettingsKeys {
+    const val SLOT = "slot"
+    const val SHADER = "shader"
+}

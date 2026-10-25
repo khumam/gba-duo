@@ -33,6 +33,7 @@ import com.khumam.gbaduo.library.RomIndex
 import com.khumam.gbaduo.controls.ControlPrefs
 import com.khumam.gbaduo.controls.HotkeyAction
 import com.khumam.gbaduo.emu.KeyResult
+import com.khumam.gbaduo.storage.GameSettingsKeys
 import com.khumam.gbaduo.storage.GameStorage
 import com.khumam.gbaduo.storage.LegacyMigration
 import com.khumam.gbaduo.storage.SaveMirror
@@ -61,10 +62,8 @@ class PlayerActivity : Activity() {
      */
     private var topResumed = false
 
-    private val prefs by lazy { getSharedPreferences("player", MODE_PRIVATE) }
-    private var savedShader: ShaderPreset
-        get() = ShaderPreset.byId(prefs.getString("shader_id", null))
-        set(value) = prefs.edit().putString("shader_id", value.id).apply()
+    /** This game's shader, from its `settings.json`; Off until the player picks one. */
+    private var savedShader = ShaderPreset.OFF
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,6 +105,9 @@ class PlayerActivity : Activity() {
         val storage = GameStorage.forGame(filesDir, header.platform, header.title, header.gameCode, crc32)
         LegacyMigration.migrate(filesDir, romFileName, crc32, storage)
         storage.ensureDirs()
+        // Shaders used to be one app-wide choice; they are per game now (Library > Game settings).
+        getSharedPreferences("player", MODE_PRIVATE).edit().remove("shader_id").apply()
+        savedShader = ShaderPreset.byId(storage.settings.getString(GameSettingsKeys.SHADER))
 
         // With a save folder set, take in newer saves from it (another device) before the
         // core opens game.sav, then mirror changes out while playing.
@@ -143,7 +145,7 @@ class PlayerActivity : Activity() {
                         states = SaveStates(storage),
                         initialShader = savedShader,
                         onSetFfSpeed = { emu.ffMultiplier = it },
-                        onSetShader = { savedShader = it; gameView.setShader(it) },
+                        onSetShader = { savedShader = it; storage.settings.put(GameSettingsKeys.SHADER, it.id); gameView.setShader(it) },
                         onQuit = { finish() },
                     )
                     val notes = PlayerNotes(findViewById(android.R.id.content) as android.widget.FrameLayout).also { playerNotes = it }

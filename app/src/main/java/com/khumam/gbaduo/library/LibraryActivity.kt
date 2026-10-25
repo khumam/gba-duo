@@ -32,6 +32,7 @@ import com.khumam.gbaduo.library.ui.PixelButton
 import com.khumam.gbaduo.player.PlayerActivity
 import com.khumam.gbaduo.settings.RomFoldersActivity
 import com.khumam.gbaduo.settings.SettingsActivity
+import com.khumam.gbaduo.settings.GameSettingsActivity
 import com.khumam.gbaduo.storage.GameStorage
 import com.khumam.gbaduo.storage.LegacyMigration
 import java.io.File
@@ -101,6 +102,7 @@ class LibraryActivity : Activity() {
         findViewById<PixelButton>(R.id.open_settings).setOnClickListener { openSettings() }
         findViewById<PixelButton>(R.id.play).setOnClickListener { play() }
         findViewById<PixelButton>(R.id.pack_button).setOnClickListener { selectedEntry()?.let(::showCompanionMenu) }
+        findViewById<PixelButton>(R.id.game_settings_button).setOnClickListener { selectedEntry()?.let(::openGameSettings) }
         emptyAction.setOnClickListener { startActivity(Intent(this, RomFoldersActivity::class.java)) }
     }
 
@@ -165,6 +167,7 @@ class LibraryActivity : Activity() {
         }
         findViewById<PixelButton>(R.id.play).style(Pixel.YELLOW)
         findViewById<PixelButton>(R.id.pack_button).style(Pixel.CREAM)
+        findViewById<PixelButton>(R.id.game_settings_button).style(Pixel.CREAM)
 
         pointer.apply { typeface = displayBold; textSize = 18f; setTextColor(Pixel.PINK); setShadowLayer(0.01f, 2f, 2f, Pixel.INK) }
 
@@ -235,6 +238,7 @@ class LibraryActivity : Activity() {
                 }
             }
             KeyEvent.KEYCODE_BUTTON_Y -> if (event.repeatCount == 0) selectedEntry()?.let(::showCompanionMenu)
+            KeyEvent.KEYCODE_BUTTON_X -> if (event.repeatCount == 0) selectedEntry()?.let(::openGameSettings)
             KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_MENU -> if (event.repeatCount == 0) openSettings()
             else -> return super.onKeyDown(keyCode, event)
         }
@@ -350,6 +354,7 @@ class LibraryActivity : Activity() {
             hint("◀ ▶", getString(R.string.hint_browse))
             hint("A", getString(R.string.play))
             hint("Y", getString(R.string.hint_pack))
+            if (!compact) hint("X", getString(R.string.hint_game_settings))
             if (!compact) hint("L R", getString(R.string.hint_jump))
         } else if (canAddFolder) {
             hint("A", getString(R.string.add_rom_folder))
@@ -391,6 +396,28 @@ class LibraryActivity : Activity() {
             onResult = { result ->
                 result.onSuccess { (_, storage, matches) -> showCompanionDialog(storage, matches) }
                     .onFailure { Toast.makeText(this, getString(R.string.load_failed, entry.fileName), Toast.LENGTH_SHORT).show() }
+            },
+        )
+    }
+
+    /** Opens the game's settings page once its folder (keyed by ROM checksum) is known. */
+    private fun openGameSettings(entry: RomEntry) {
+        background(
+            work = {
+                val crc = library.crc32(entry) ?: error("Could not read ${entry.fileName}")
+                val storage = GameStorage.forGame(filesDir, entry.platform, entry.title, entry.gameCode, crc)
+                LegacyMigration.migrate(filesDir, entry.fileName, crc, storage)
+                storage.ensureDirs()
+            },
+            onResult = { result ->
+                result.onSuccess { storage ->
+                    startActivity(
+                        Intent(this, GameSettingsActivity::class.java)
+                            .putExtra(GameSettingsActivity.EXTRA_GAME_DIR, storage.dir.absolutePath)
+                            .putExtra(GameSettingsActivity.EXTRA_TITLE, GameTitle.display(entry.fileName, entry.title))
+                            .putExtra(GameSettingsActivity.EXTRA_PLATFORM, entry.platform.label),
+                    )
+                }.onFailure { Toast.makeText(this, getString(R.string.load_failed, entry.fileName), Toast.LENGTH_SHORT).show() }
             },
         )
     }

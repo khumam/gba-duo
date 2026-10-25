@@ -27,8 +27,8 @@ class GameStorage private constructor(val dir: File) {
 
     /** The save state slot (1..9) that quick save and quick load use. Invalid or missing is 1. */
     var currentSlot: Int
-        get() = settings.getInt(SLOT)?.takeIf { it in 1..9 } ?: 1
-        set(value) = settings.put(SLOT, value.coerceIn(1, 9))
+        get() = settings.getInt(GameSettingsKeys.SLOT)?.takeIf { it in 1..9 } ?: 1
+        set(value) = settings.put(GameSettingsKeys.SLOT, value.coerceIn(1, 9))
 
     /**
      * The save state made automatically just before a companion pack first changes this
@@ -92,7 +92,6 @@ class GameStorage private constructor(val dir: File) {
     companion object {
         private const val MAX_TITLE_LENGTH = 48
         private const val MEMORY_WRITE = "memory-write"
-        private const val SLOT = "slot"
         private const val ALLOWED = "allowed"
         private const val FINGERPRINT = "fingerprint"
 
