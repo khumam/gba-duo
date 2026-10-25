@@ -20,10 +20,39 @@ object SaveLibrary {
         return platform.subdir(existing?.name ?: folderName, create)
     }
 
-    /** One game's sync, private copy <-> save folder. */
-    fun syncGame(storage: GameStorage, root: SyncDir, rootId: String, direction: SaveSync.Direction): SaveSync.Result? {
+    /**
+     * One game's sync, private copy <-> save folder. With [romFileName], a game that has no
+     * save anywhere yet first takes in an old `<ROM name>.sav` the player put in the folder
+     * (see [importLooseSave]).
+     */
+    fun syncGame(
+        storage: GameStorage, root: SyncDir, rootId: String, direction: SaveSync.Direction, romFileName: String? = null,
+    ): SaveSync.Result? {
         val remote = gameDir(root, storage.platformId, storage.folderName, create = true) ?: return null
+        if (romFileName != null && direction == SaveSync.Direction.BOTH && !storage.saveFile.exists()) {
+            runCatching { importLooseSave(root, storage.platformId, romFileName, remote) }
+        }
         return SaveSync(FileSyncDir(storage.dir), remote, rootId).sync(direction)
+    }
+
+    /**
+     * A save made by another emulator, named `<ROM name>.sav`, that the player moved into
+     * the save folder: looked for in its root, then in a folder named after the platform
+     * (`gba`, `GBA`...). It's copied into the game's own folder as `game.sav`, so the usual
+     * sync brings it in. Only when the game has no `game.sav` there yet, so real progress
+     * is never overwritten, and the loose file itself is left as it is.
+     * True when one was copied.
+     */
+    fun importLooseSave(root: SyncDir, platformId: String, romFileName: String, gameDir: SyncDir): Boolean {
+        if (gameDir.entry(SaveSync.SAVE) != null) return false
+        val wanted = LegacyMigration.legacySaveName(romFileName)
+        fun find(dir: SyncDir) = dir.entries().firstOrNull { !it.isDir && it.name.equals(wanted, ignoreCase = true) }?.let { dir to it.name }
+        val rootEntries = root.entries()
+        val platformDir = rootEntries.firstOrNull { it.isDir && it.name.equals(platformId, ignoreCase = true) }
+            ?.let { root.subdir(it.name, create = false) }
+        val (dir, name) = find(root) ?: platformDir?.let(::find) ?: return false
+        dir.openRead(name).use { input -> gameDir.openWrite(SaveSync.SAVE).use { input.copyTo(it) } }
+        return true
     }
 
     data class MoveResult(val games: Int, val failed: List<String>) {

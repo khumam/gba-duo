@@ -23,6 +23,7 @@ class SaveMirror private constructor(
     private val context: Context,
     private val storage: GameStorage,
     private val rootId: String,
+    private val romFileName: String,
 ) {
     /** Called once per session, on a background thread, if the folder can't be reached. */
     @Volatile var onUnavailable: (() -> Unit)? = null
@@ -58,7 +59,7 @@ class SaveMirror private constructor(
             if (warned.compareAndSet(false, true)) onUnavailable?.invoke()
             return false
         }
-        val result = runCatching { SaveLibrary.syncGame(storage, root, rootId, direction) }
+        val result = runCatching { SaveLibrary.syncGame(storage, root, rootId, direction, romFileName) }
             .onFailure { Log.w(TAG, "sync failed", it) }.getOrNull()
         if (result == null) {
             if (warned.compareAndSet(false, true)) onUnavailable?.invoke()
@@ -73,9 +74,9 @@ class SaveMirror private constructor(
         private const val TAG = "SaveMirror"
 
         /** A mirror for this game, or null when no save folder is set. */
-        fun forGame(context: Context, storage: GameStorage): SaveMirror? {
+        fun forGame(context: Context, storage: GameStorage, romFileName: String): SaveMirror? {
             val uri = SaveFolder.uri(context) ?: return null
-            return SaveMirror(context.applicationContext, storage, uri.toString())
+            return SaveMirror(context.applicationContext, storage, uri.toString(), romFileName)
         }
     }
 }

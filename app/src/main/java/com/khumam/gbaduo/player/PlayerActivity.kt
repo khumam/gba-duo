@@ -104,7 +104,7 @@ class PlayerActivity : Activity() {
 
         // With a save folder set, take in newer saves from it (another device) before the
         // core opens game.sav, then mirror changes out while playing.
-        saveMirror = SaveMirror.forGame(this, storage)?.also { mirror ->
+        saveMirror = SaveMirror.forGame(this, storage, romFileName)?.also { mirror ->
             mirror.onUnavailable = {
                 runOnUiThread { Toast.makeText(this, R.string.save_folder_unavailable, Toast.LENGTH_LONG).show() }
             }

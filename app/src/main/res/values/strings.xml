@@ -97,7 +97,7 @@
     <string name="save_folder_move_failed">Couldn\'t copy every save, so nothing changed. Failed: %s</string>
     <string name="save_folder_no_access">GBADuo can\'t write to that folder. Pick another one.</string>
     <string name="save_folder_what_title">What goes there</string>
-    <string name="save_folder_what">One folder per game, named by its platform and ROM checksum: game.sav, states/ and pack.json. Companion packs and the ROM list stay on the device. Games always play from the device\'s own copy, which is copied to the folder after each save, on pause and on quit. Pick an empty folder, or one GBADuo saves are already in.</string>
+    <string name="save_folder_what">One folder per game, named by its platform and ROM checksum: game.sav, states/ and pack.json. Companion packs and the ROM list stay on the device. Games always play from the device\'s own copy, which is copied to the folder after each save, on pause and on quit. Pick an empty folder, or one GBADuo saves are already in.\n\nTo bring in a save from another emulator, put it in this folder (or in a gba / gbc / gb folder inside it) named like the ROM, for example Pokemon Emerald.sav. It is picked up the next time you play that game, if the game has no save in GBADuo yet. The file itself is left as it is.</string>
     <string name="save_folder_conflicts">If a save changed in both places, the newer one is kept and the other is saved next to it as game.sav.conflict-&lt;time&gt;. Nothing is overwritten silently.</string>
     <string name="save_folder_unavailable">Save folder not available: playing from the device\'s copy. Saves are copied there once it\'s back.</string>
     <string name="state_before_pack">Before pack changes — %s</string>
