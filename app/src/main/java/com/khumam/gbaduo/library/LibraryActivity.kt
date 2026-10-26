@@ -154,6 +154,23 @@ class LibraryActivity : Activity() {
             (hud.layoutParams as LinearLayout.LayoutParams).marginEnd = Pixel.dp(this, 10f).toInt()
             info.setPadding(gutter, 0, gutter, 0)
             findViewById<View>(R.id.hints_bar).setPadding(gutter, 0, gutter, 0)
+            // Three buttons side by side: smaller text and gaps so none wraps or runs off the edge.
+            actions.setPadding(gutter, 0, gutter, 0)
+            val gap = Pixel.dp(this, 10f).toInt()
+            findViewById<PixelButton>(R.id.play).apply {
+                val narrow = Pixel.dp(this@LibraryActivity, 96f).toInt()
+                setMinWidth(narrow)
+                minimumWidth = narrow
+                textSize = 14f
+            }
+            findViewById<PixelButton>(R.id.pack_button).apply {
+                textSize = 14f
+                (layoutParams as LinearLayout.LayoutParams).marginStart = gap
+            }
+            findViewById<PixelButton>(R.id.game_settings_button).apply {
+                textSize = 14f
+                (layoutParams as LinearLayout.LayoutParams).marginStart = gap
+            }
         }
         // The empty / scanning box: 560dp, or the screen width minus a margin when narrower.
         empty.layoutParams = empty.layoutParams.apply {
