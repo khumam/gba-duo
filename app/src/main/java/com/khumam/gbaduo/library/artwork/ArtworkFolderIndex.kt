@@ -14,7 +14,7 @@ class ArtworkFolderIndex private constructor(private val images: List<Image>) {
     /** An image: the folders above it and its file name. */
     class Image(val dirs: List<String>, val fileName: String) {
         val path: String get() = (dirs + fileName).joinToString("/")
-        val stem: String get() = ArtworkNames.stem(fileName)
+        val stem: String get() = ArtworkNames.imageStem(fileName)
 
         fun open(root: SyncDir): InputStream {
             var dir = root
@@ -69,11 +69,11 @@ class ArtworkFolderIndex private constructor(private val images: List<Image>) {
         )
 
         /** Cover-like folders, best first. */
-        private val COVER_FOLDERS = listOf("covers", "boxart", "box2dfront", "named_boxarts", "box", "grid", "images")
+        private val COVER_FOLDERS = listOf("covers", "boxart", "box2dfront", "named_boxarts", "box", "grid", "icon", "hero", "images")
 
         private val OTHER_MEDIA = setOf(
             "screenshots", "titlescreens", "named_snaps", "named_titles", "marquees", "wheel",
-            "logos", "fanart", "videos", "manuals", "backcovers", "miximages", "physicalmedia", "3dboxes",
+            "logo", "logos", "screenshot", "screenshot_title", "screenshot_gameplay", "fanart", "videos", "manuals", "backcovers", "miximages", "physicalmedia", "3dboxes",
         )
 
         fun build(root: SyncDir): ArtworkFolderIndex {

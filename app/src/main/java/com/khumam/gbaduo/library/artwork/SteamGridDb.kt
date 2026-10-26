@@ -1,6 +1,5 @@
 package com.khumam.gbaduo.library.artwork
 
-import com.khumam.gbaduo.library.Platform
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
@@ -44,20 +43,20 @@ class SteamGridDb(
             }
         }
 
-    /** The cover grids for a game, best-scored first. Wide sizes for GBA, tall for GB/GBC. */
-    fun grids(gameId: Long, platform: Platform): Sgdb<List<SgdbGrid>> {
+    /** The cover grids for a game, best-scored first, in portrait sizes: the cartridge label is portrait. */
+    fun grids(gameId: Long): Sgdb<List<SgdbGrid>> {
         val base = "$BASE/grids/game/$gameId?types=static&nsfw=false&humor=false&epilepsy=false&mimes=image/png,image/jpeg"
-        val sized = if (platform == Platform.GBA) "&dimensions=460x215,920x430" else "&dimensions=600x900,342x482,660x930"
+        val sized = "&dimensions=600x900,342x482,660x930"
         val first = getJson(base + sized, ::parseGrids)
         if (first is Sgdb.Ok && first.value.isEmpty()) return getJson(base, ::parseGrids)
         return first
     }
 
     /** Title -> first game found -> its best cover. Retries a subtitled title with just the main title. */
-    fun cover(title: String, platform: Platform): Sgdb<SgdbGrid> {
+    fun cover(title: String): Sgdb<SgdbGrid> {
         val game = findGame(title)
         if (game !is Sgdb.Ok) return game as Sgdb.Failed
-        return when (val grids = grids(game.value.id, platform)) {
+        return when (val grids = grids(game.value.id)) {
             is Sgdb.Failed -> grids
             is Sgdb.Ok -> grids.value.firstOrNull()?.let { Sgdb.Ok(it) } ?: Sgdb.Failed(Sgdb.Reason.NOT_FOUND)
         }
@@ -74,8 +73,12 @@ class SteamGridDb(
         return Sgdb.Failed(Sgdb.Reason.NOT_FOUND)
     }
 
-    /** The image bytes. Anything over [MAX_DOWNLOAD] counts as not found. */
-    fun download(url: String): Sgdb<ByteArray> = when (val r = request(url)) {
+    /**
+     * The image bytes, from the image server (CDN). It is a different host from the API and
+     * answers 401 to a request that carries the API key, so none is sent. Anything over
+     * [MAX_DOWNLOAD] counts as not found.
+     */
+    fun download(url: String): Sgdb<ByteArray> = when (val r = request(url, authorized = false)) {
         is Sgdb.Failed -> r
         is Sgdb.Ok -> if (r.value.body.size > MAX_DOWNLOAD) Sgdb.Failed(Sgdb.Reason.NOT_FOUND) else Sgdb.Ok(r.value.body)
     }
@@ -101,17 +104,18 @@ class SteamGridDb(
             .getOrElse { Sgdb.Failed(Sgdb.Reason.OFFLINE) }
     }
 
-    private fun request(url: String): Sgdb<HttpResponse> {
+    private fun request(url: String, authorized: Boolean = true): Sgdb<HttpResponse> {
         var waited = false
         while (true) {
             val response = try {
-                http.get(url, mapOf("Authorization" to "Bearer $key"))
+                http.get(url, if (authorized) mapOf("Authorization" to "Bearer $key") else emptyMap())
             } catch (e: IOException) {
                 return Sgdb.Failed(Sgdb.Reason.OFFLINE)
             }
             when (response.code) {
                 200 -> return Sgdb.Ok(response)
-                401, 403 -> return Sgdb.Failed(Sgdb.Reason.KEY_REJECTED)
+                // Only the API can say the key is bad; the image server just refuses.
+                401, 403 -> return Sgdb.Failed(if (authorized) Sgdb.Reason.KEY_REJECTED else Sgdb.Reason.OFFLINE)
                 404 -> return Sgdb.Failed(Sgdb.Reason.NOT_FOUND)
                 429 -> {
                     if (waited) return Sgdb.Failed(Sgdb.Reason.SLOW_DOWN)

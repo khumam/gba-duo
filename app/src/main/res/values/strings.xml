@@ -31,7 +31,9 @@
     <string name="controls_buttons_summary">Choose which button presses A, B, L, R…</string>
     <string name="controls_hotkeys_title">Hotkeys</string>
     <string name="controls_hotkeys_summary">Quick save, fast-forward and more</string>
-    <string name="controls_press">Press a button… (Back or hold 2s to cancel)</string>
+    <string name="controls_remap_tab">Remap</string>
+    <string name="controls_press_title">Press a button for %s</string>
+    <string name="controls_press_hint">Back, or holding any button for 2 seconds, cancels.</string>
     <string name="controls_moved">%1$s moved to %2$s</string>
     <string name="controls_cleared">%1$s was cleared</string>
     <string name="controls_refused_back">Back always opens the quick menu</string>
@@ -82,11 +84,6 @@
     <string name="hint_game_settings">Game settings</string>
     <string name="game_settings">Game settings</string>
     <string name="game_settings_shader">Shader</string>
-    <string name="shader_off_desc">The game\'s own pixels</string>
-    <string name="shader_gba_color_desc">Colours as on a GBA screen, slightly darker</string>
-    <string name="shader_lcd_desc">Visible pixel grid, like a handheld LCD</string>
-    <string name="shader_scanlines_desc">Dark lines between rows, like a CRT</string>
-    <string name="shader_scale2x_desc">Smoother edges on upscaled pixels</string>
     <string name="hint_jump">Jump 5</string>
     <string name="empty_scanning_title">Loading cartridges</string>
     <string name="empty_no_folder_title">Insert cartridge</string>

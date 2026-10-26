@@ -1,5 +1,6 @@
 package com.khumam.gbaduo.settings
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -25,7 +26,7 @@ import java.util.concurrent.Executors
 class GameSettingsActivity : PixelPage() {
 
     private lateinit var settings: GameSettings
-    private val summaries = mutableMapOf<ShaderPreset, TextView>()
+    private lateinit var shaderSummary: TextView
     private lateinit var artworkState: TextView
     private val io = Executors.newSingleThreadExecutor()
 
@@ -43,14 +44,8 @@ class GameSettingsActivity : PixelPage() {
             hud(listOf(intent.getStringExtra(EXTRA_PLATFORM).orEmpty() to intent.getStringExtra(EXTRA_TITLE).orEmpty())),
             spaced(0, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
-        content.addView(label(getString(R.string.game_settings_shader)), spaced(24))
-
-        var first: android.view.View? = null
-        for (preset in ShaderPreset.entries) {
-            val (card, summary) = menuCard(R.drawable.ic_settings, Pixel.YELLOW, preset.displayName, description(preset)) { pick(preset) }
-            summaries[preset] = summary
-            if (first == null) first = card
-        }
+        val (shaderCard, summary) = menuCard(R.drawable.ic_settings, Pixel.YELLOW, getString(R.string.game_settings_shader), "") { chooseShader() }
+        shaderSummary = summary
         render()
 
         content.addView(label(getString(R.string.game_settings_artwork)), spaced(24))
@@ -60,7 +55,7 @@ class GameSettingsActivity : PixelPage() {
         menuCard(R.drawable.ic_settings, Pixel.CORAL, getString(R.string.artwork_remove), getString(R.string.artwork_remove_desc)) { removeArtwork() }
         menuCard(R.drawable.ic_settings, Pixel.MINT, getString(R.string.artwork_auto), getString(R.string.artwork_auto_desc)) { backToAuto() }
         renderArtwork()
-        focusFirst(first!!)
+        focusFirst(shaderCard)
     }
 
     override fun onResume() {
@@ -142,25 +137,27 @@ class GameSettingsActivity : PixelPage() {
         super.onDestroy()
     }
 
-    private fun description(preset: ShaderPreset): String = getString(
-        when (preset) {
-            ShaderPreset.OFF -> R.string.shader_off_desc
-            ShaderPreset.GBA_COLOR -> R.string.shader_gba_color_desc
-            ShaderPreset.LCD -> R.string.shader_lcd_desc
-            ShaderPreset.SCANLINES -> R.string.shader_scanlines_desc
-            ShaderPreset.SCALE2X -> R.string.shader_scale2x_desc
-        },
-    )
+    private fun current() = ShaderPreset.byId(settings.getString(GameSettingsKeys.SHADER))
 
-    private fun pick(preset: ShaderPreset) {
-        settings.put(GameSettingsKeys.SHADER, preset.id)
-        render()
+    /** The row shows the picked shader. */
+    private fun render() {
+        val picked = current()
+        shaderSummary.text = picked.displayName
     }
 
-    /** The picked shader is marked with a check. */
-    private fun render() {
-        val picked = ShaderPreset.byId(settings.getString(GameSettingsKeys.SHADER))
-        for ((preset, summary) in summaries) summary.text = (if (preset == picked) "✓ " else "") + description(preset)
+    /** A list of the shaders to choose from; picking one saves it for this game at once. */
+    private fun chooseShader() {
+        val presets = ShaderPreset.entries
+        val labels = presets.map { it.displayName }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.game_settings_shader)
+            .setSingleChoiceItems(labels, presets.indexOf(current())) { dialog, which ->
+                settings.put(GameSettingsKeys.SHADER, presets[which].id)
+                render()
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     companion object {

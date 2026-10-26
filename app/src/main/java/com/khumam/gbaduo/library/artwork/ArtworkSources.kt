@@ -52,7 +52,7 @@ object Artwork {
         val key = ArtworkPrefs.sgdbKey(context) ?: return null
         val api = SteamGridDb(key, UrlHttp())
         return { target ->
-            when (val cover = api.cover(target.title, target.platform)) {
+            when (val cover = api.cover(target.title)) {
                 is Sgdb.Failed -> cover
                 is Sgdb.Ok -> when (val image = api.download(cover.value.url)) {
                     is Sgdb.Failed -> image

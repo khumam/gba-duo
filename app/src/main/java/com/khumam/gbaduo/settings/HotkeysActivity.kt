@@ -36,6 +36,8 @@ class HotkeysActivity : CapturePage() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         page(getString(R.string.controls_hotkeys_title), listOf("▲ ▼" to "Choose", "A" to "Change", "Y" to "Clear", "B" to "Back"))
+        // Results show here (and as a toast); the "press a button" prompt is a modal.
+        addStatus(top = 0)
         scheme = ControlPrefs.load(this)
 
         val (hotkeyCard, hotkeyText) = menuCard(R.drawable.ic_settings, Pixel.PINK,
@@ -62,7 +64,6 @@ class HotkeysActivity : CapturePage() {
                 content.addView(ffMode, spaced(10, ViewGroup.LayoutParams.WRAP_CONTENT))
             }
         }
-        addStatus(top = 16)
         content.addView(button(getString(R.string.controls_reset), Pixel.WHITE_SOFT) { reset() },
             spaced(20, ViewGroup.LayoutParams.WRAP_CONTENT))
         render()
@@ -91,7 +92,7 @@ class HotkeysActivity : CapturePage() {
     }
 
     private fun changeHotkeyButton() {
-        beginCapture(KeyCapture(scheme.hotkeyButton, allowCombo = false)) { binding ->
+        beginCapture(KeyCapture(scheme.hotkeyButton, allowCombo = false), getString(R.string.controls_hotkey_button)) { binding ->
             val key = (binding as? Binding.Single)?.keyCode ?: return@beginCapture
             val dropped = scheme.actionsUnassignedBy(key)
             if (dropped.isEmpty()) {
@@ -115,7 +116,7 @@ class HotkeysActivity : CapturePage() {
     }
 
     private fun change(action: HotkeyAction) {
-        beginCapture(KeyCapture(scheme.hotkeyButton, allowCombo = scheme.hotkeyButton != null)) { binding ->
+        beginCapture(KeyCapture(scheme.hotkeyButton, allowCombo = scheme.hotkeyButton != null), getString(action.labelRes())) { binding ->
             binding ?: return@beginCapture
             when (val result = scheme.assignAction(action, binding)) {
                 is Change.Done -> {

@@ -37,4 +37,10 @@ class ArtworkNamesTest {
             ArtworkNames.exactCandidates("Mario & Luigi: Superstar Saga (USA).gba"))
         assertEquals(listOf("wario land"), ArtworkNames.exactCandidates("Wario Land.gbc"))
     }
+
+    @Test
+    fun imageStemDropsTheCocoonSuffix() {
+        assertEquals("Metroid Fusion (USA)", ArtworkNames.imageStem("Metroid Fusion (USA)__cocoon_edit_67_6c4d.jpg"))
+        assertEquals("Metroid Fusion (USA)", ArtworkNames.imageStem("Metroid Fusion (USA).png"))
+    }
 }

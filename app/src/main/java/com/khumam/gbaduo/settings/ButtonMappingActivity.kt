@@ -24,6 +24,8 @@ class ButtonMappingActivity : CapturePage() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         page(getString(R.string.controls_buttons_title), listOf("▲ ▼" to "Choose", "A" to "Change", "B" to "Back"))
+        // Results show here (and as a toast); the "press a button" prompt is a modal.
+        addStatus(top = 0)
         scheme = ControlPrefs.load(this)
 
         var first: android.view.View? = null
@@ -33,7 +35,6 @@ class ButtonMappingActivity : CapturePage() {
             values[bit] = value
             if (first == null) first = card
         }
-        addStatus(top = 16)
         content.addView(button(getString(R.string.controls_reset), Pixel.WHITE_SOFT) { reset() },
             spaced(20, ViewGroup.LayoutParams.WRAP_CONTENT))
         focusFirst(first!!)
@@ -44,7 +45,7 @@ class ButtonMappingActivity : CapturePage() {
     }
 
     private fun change(bit: Int) {
-        beginCapture(KeyCapture(scheme.hotkeyButton, allowCombo = false)) { binding ->
+        beginCapture(KeyCapture(scheme.hotkeyButton, allowCombo = false), KeyNames.gameButton(bit)) { binding ->
             val key = (binding as? Binding.Single)?.keyCode ?: return@beginCapture
             when (val result = scheme.assignButton(bit, key)) {
                 is Change.Done -> {

@@ -42,6 +42,8 @@ abstract class PixelPage : Activity() {
     protected lateinit var content: LinearLayout
         private set
 
+    private var firstFocus: View? = null
+
     /** Builds the page frame and returns; add the page's pieces to [content]. */
     protected fun page(title: String, hints: List<Pair<String, String>> = DEFAULT_HINTS) {
         window.setBackgroundDrawable(NightGridDrawable(this))
@@ -124,7 +126,11 @@ abstract class PixelPage : Activity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             when (event.keyCode) {
-                KeyEvent.KEYCODE_BUTTON_A -> { currentFocus?.performClick(); return true }
+                KeyEvent.KEYCODE_BUTTON_A -> {
+                    val focused = currentFocus
+                    if (focused != null) focused.performClick() else startFocus()
+                    return true
+                }
                 KeyEvent.KEYCODE_BUTTON_B -> { finish(); return true }
             }
         }
@@ -132,10 +138,21 @@ abstract class PixelPage : Activity() {
     }
 
     /**
+     * A pressed while nothing has focus (a page opened by touch or without a D-pad press yet):
+     * show the focus on the page's first item, as a D-pad press would, instead of doing nothing.
+     */
+    private fun startFocus() {
+        val target = firstFocus ?: ArrayList<View>().also { content.addFocusables(it, View.FOCUS_DOWN) }.firstOrNull() ?: return
+        // From touch mode a plain requestFocus() is refused; this one also leaves touch mode.
+        target.requestFocusFromTouch()
+    }
+
+    /**
      * Where D-pad focus starts on this page. Opened by touch, Android only shows focus after
      * the first D-pad press, which then lands here instead of on the Back button.
      */
     protected fun focusFirst(view: View) {
+        firstFocus = view
         view.isFocusedByDefault = true
         view.post { view.requestFocus() }
     }
@@ -257,6 +274,13 @@ abstract class PixelPage : Activity() {
 
     /** DESIGN.md's dialog box, with its yellow tab, holding [build]'s views. */
     protected fun dialogBox(tab: String, build: LinearLayout.() -> Unit): LinearLayout {
+        lateinit var box: LinearLayout
+        content.addView(buildDialogBox(tab) { box = this; build() }, spaced(8))
+        return box
+    }
+
+    /** The same box, not yet on the page: for putting it in an overlay. */
+    protected fun buildDialogBox(tab: String, build: LinearLayout.() -> Unit): FrameLayout {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = DialogBoxDrawable(this@PixelPage)
@@ -279,8 +303,7 @@ abstract class PixelPage : Activity() {
         frame.addView(tabView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             .apply { marginStart = dp(24) })
         box.build()
-        content.addView(frame, spaced(8))
-        return box
+        return frame
     }
 
     /** Body text inside a lavender box (ink on lavender). */

@@ -115,7 +115,7 @@ class ArtworkPickerActivity : PixelPage() {
     private fun loadGrids(game: SgdbGame) {
         message(getString(R.string.artwork_searching), error = false)
         io.execute {
-            val result = api.grids(game.id, platform)
+            val result = api.grids(game.id)
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 when (result) {
@@ -140,7 +140,7 @@ class ArtworkPickerActivity : PixelPage() {
                 isClickable = true
                 setOnClickListener { choose(grid) }
             }
-            strip.addView(thumb, LinearLayout.LayoutParams(dp(if (platform == Platform.GBA) 190 else 120), dp(if (platform == Platform.GBA) 100 else 170)).apply { marginEnd = dp(12) })
+            strip.addView(thumb, LinearLayout.LayoutParams(dp(120), dp(160)).apply { marginEnd = dp(12) })
             if (first == null) first = thumb
             io.execute {
                 val bytes = (api.download(grid.thumb) as? Sgdb.Ok)?.value ?: return@execute

@@ -121,4 +121,29 @@ class ArtworkFolderIndexTest {
         val image = ArtworkFolderIndex.build(dir).match("Game.gba", "", "", 0, Platform.GBA)!!
         assertEquals("x", image.open(dir).use { String(it.readBytes()) })
     }
+
+    @Test
+    fun cocoonSuffixIsIgnoredAndIconIsTheCover() {
+        val rom = "Legend of Zelda, The - The Minish Cap (Europe) (En,Fr,De,Es,It)"
+        touch("downloaded_media/gba/icon/$rom" + "__cocoon_edit_68_4ddc.png")
+        touch("downloaded_media/gba/hero/$rom" + "__cocoon_edit_68_955c.jpg")
+        touch("downloaded_media/gba/logo/$rom" + "__cocoon_edit_68_0501.png")
+        touch("downloaded_media/gba/screenshot_title/$rom" + "__cocoon_edit_68_c291.jpg")
+        touch("downloaded_media/gba/screenshot_gameplay/$rom" + "__cocoon_edit_68_955b.jpg")
+        assertEquals("downloaded_media/gba/icon/$rom" + "__cocoon_edit_68_4ddc.png", match("$rom.gba"))
+    }
+
+    @Test
+    fun cocoonHeroIsUsedWhenThereIsNoIcon() {
+        touch("downloaded_media/gba/hero/Game__cocoon_edit_1_ab.jpg")
+        touch("downloaded_media/gba/logo/Game__cocoon_edit_1_cd.png")
+        assertEquals("downloaded_media/gba/hero/Game__cocoon_edit_1_ab.jpg", match("Game.gba"))
+    }
+
+    @Test
+    fun cocoonLogoAndScreenshotsAreNeverCovers() {
+        touch("downloaded_media/gba/logo/Game__cocoon_edit_1_cd.png")
+        touch("downloaded_media/gba/screenshot_title/Game__cocoon_edit_1_ef.jpg")
+        assertNull(match("Game.gba"))
+    }
 }

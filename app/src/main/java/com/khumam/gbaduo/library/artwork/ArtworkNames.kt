@@ -13,6 +13,9 @@ object ArtworkNames {
         return if (dot > 0) name.substring(0, dot) else name
     }
 
+    /** An image's name without its extension and without the `__cocoon_...` suffix Cocoon appends to its downloads. */
+    fun imageStem(fileName: String): String = stem(fileName).substringBefore("__cocoon_")
+
     /** RetroArch's thumbnail naming: characters it can't put in a file name become `_`. */
     fun retroArch(name: String): String = name.replace(RETROARCH_FORBIDDEN, "_")
 

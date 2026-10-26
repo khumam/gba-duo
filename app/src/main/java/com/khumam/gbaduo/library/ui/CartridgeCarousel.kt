@@ -182,6 +182,6 @@ class CartridgeCarousel(
     }
 
     private companion object {
-        const val ITEM_WIDTH_DP = 236f
+        const val ITEM_WIDTH_DP = 158f
     }
 }
