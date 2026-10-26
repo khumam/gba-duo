@@ -3,7 +3,6 @@ package com.khumam.gbaduo.library.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Rect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -119,7 +118,6 @@ class CartridgeView @JvmOverloads constructor(
         canvas.drawPath(body, paint)
         drawHighlight(canvas)
         drawRidges(canvas)
-        drawConnector(canvas)
 
         // Label sticker.
         layoutLabel(bodyBounds)
@@ -189,36 +187,17 @@ class CartridgeView @JvmOverloads constructor(
         }
     }
 
-    /** The cartridge's edge connector along the bottom: a dark strip with pin lines. */
-    private fun drawConnector(canvas: Canvas) {
-        val b = bodyBounds
-        val h = b.height() * 0.07f
-        val left = b.left + b.width() * 0.14f
-        val right = b.right - b.width() * 0.14f
-        val top = b.bottom - b.height() * 0.045f - h
-        paint.style = Paint.Style.FILL
-        paint.color = shade(shellColor, -0.45f)
-        canvas.drawRect(left, top, right, top + h, paint)
-        paint.color = shade(shellColor, 0.2f)
-        val pins = 9
-        val gap = (right - left) / pins
-        val pw = dp(2f)
-        for (i in 0 until pins) {
-            val x = left + gap * (i + 0.5f) - pw / 2
-            canvas.drawRect(x, top + h * 0.2f, x + pw, top + h * 0.8f, paint)
-        }
-    }
-
     private fun layoutLabel(b: RectF) {
-        label.set(b.left + b.width() * 0.11f, b.top + b.height() * 0.15f,
-            b.right - b.width() * 0.11f, b.bottom - b.height() * 0.16f)
+        label.set(b.left + b.width() * 0.07f, b.top + b.height() * 0.17f,
+            b.right - b.width() * 0.07f, b.bottom - b.height() * 0.07f)
     }
 
     private fun drawLabel(canvas: Canvas) {
         val lw = dp(2f)
         val cover = art
         if (cover != null) {
-            drawArt(canvas, cover, label)
+            fitLabelTo(cover)
+            drawArt(canvas, cover)
             drawPlatformTag(canvas)
         } else {
             // Face, header band with the platform name, then the title.
@@ -264,20 +243,19 @@ class CartridgeView @JvmOverloads constructor(
         canvas.drawText(text, label.left + padX, top + h / 2 - (fm.ascent + fm.descent) / 2, smallPaint)
     }
 
-    /** The cover, centre-cropped to fill the label under the band. */
-    private fun drawArt(canvas: Canvas, bitmap: Bitmap, area: RectF) {
-        val areaRatio = area.width() / area.height()
-        val bitmapRatio = bitmap.width.toFloat() / bitmap.height
-        val src = if (bitmapRatio > areaRatio) {
-            val w = (bitmap.height * areaRatio).toInt()
-            Rect((bitmap.width - w) / 2, 0, (bitmap.width + w) / 2, bitmap.height)
-        } else {
-            val h = (bitmap.width / areaRatio).toInt()
-            Rect(0, (bitmap.height - h) / 2, bitmap.width, (bitmap.height + h) / 2)
-        }
+    /** Shrinks [label] to the cover's own proportions, centred in the face, so nothing is cropped. */
+    private fun fitLabelTo(bitmap: Bitmap) {
+        val scale = min(label.width() / bitmap.width, label.height() / bitmap.height)
+        val w = bitmap.width * scale
+        val h = bitmap.height * scale
+        label.set(label.centerX() - w / 2, label.centerY() - h / 2, label.centerX() + w / 2, label.centerY() + h / 2)
+    }
+
+    /** The cover, drawn whole into the (already fitted) label. */
+    private fun drawArt(canvas: Canvas, bitmap: Bitmap) {
         paint.style = Paint.Style.FILL
         paint.isFilterBitmap = true
-        canvas.drawBitmap(bitmap, src, area, paint)
+        canvas.drawBitmap(bitmap, null, label, paint)
         paint.isFilterBitmap = false
     }
 

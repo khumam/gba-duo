@@ -88,6 +88,9 @@ class OutlineText @JvmOverloads constructor(
     var fillColor = Pixel.PURPLE
     var strokeColor = Pixel.INK
     var shadowColor = Pixel.INK
+    /** From this character on, the fill is [accentColor] (the "DUO" of the wordmark); -1 for none. */
+    var accentFrom = -1
+    var accentColor = Pixel.YELLOW
     /** Outline width outside the glyphs (the stroke is drawn centred, so twice this). */
     var strokeWidthPx = Pixel.dp(context, 0.8f)
     var shadowPx = Pixel.dp(context, 3f)
@@ -135,7 +138,14 @@ class OutlineText @JvmOverloads constructor(
         canvas.drawText(shown, x, y, paint)
         paint.style = Paint.Style.FILL
         paint.color = fillColor
-        canvas.drawText(shown, x, y, paint)
+        val split = accentFrom.takeIf { it in 0 until shown.length }
+        if (split == null) {
+            canvas.drawText(shown, x, y, paint)
+        } else {
+            canvas.drawText(shown, 0, split, x, y, paint)
+            paint.color = accentColor
+            canvas.drawText(shown, split, shown.length, x + paint.measureText(shown, 0, split), y, paint)
+        }
         paint.textSize = fullSize
     }
 }

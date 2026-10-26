@@ -138,6 +138,7 @@ class LibraryActivity : Activity() {
 
         findViewById<OutlineText>(R.id.wordmark).apply {
             text = getString(R.string.app_name).uppercase()
+            accentFrom = text.length - "DUO".length // GBA in purple, DUO in yellow
             setTextSizeSp(if (compact) 22f else 30f)
         }
         gameTitle.apply {

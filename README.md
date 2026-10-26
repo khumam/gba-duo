@@ -142,7 +142,7 @@ These are the defaults. Change them in **Settings > Controller**.
 ### Artwork
 
 By default every game is drawn as a cartridge with a text label. **Settings > Scraping**
-puts cover art on the label, from either or both of:
+puts cover art on the label. Choose where covers come from under **Scraping › Providers**; a scrape tries them in this order:
 
 - **An artwork folder** another launcher filled (ES-DE, RetroArch thumbnails, or a plain
   folder of images named like your ROMs). GBADuo only reads it. Images are matched by the
@@ -152,9 +152,10 @@ puts cover art on the label, from either or both of:
   API). Game titles are sent to steamgriddb.com to find the cover.
 
 **Scrape library** finds art for every game, folder first. Nothing goes online until you
-press it. In **Library > Game settings** you can search SteamGridDB for one game and
-pick the cover yourself, match it from the folder again, or remove it. Covers you pick or
-remove are never changed by a later scrape.
+press it. It skips games that already have a cover and games whose cover you removed.
+In **Library > Game settings** you can search SteamGridDB for one game and choose its
+cover, use the artwork folder, remove the cover, or reset the game so scraping can set
+it again.
 
 ## Companion packs
 
