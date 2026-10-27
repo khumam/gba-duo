@@ -9,7 +9,7 @@ varying vec2 texCoord;
 uniform float boundBrightness;
 
 void main() {
-    vec4 color = texture2D(tex, texCoord);
+    vec4 color = cc(texture2D(tex, texCoord));
 
     if (mod(texCoord.s * texSize.x * 3.0, 3.0) < 1.0 ||
         mod(texCoord.t * texSize.y * 3.0, 3.0) < 1.0) {

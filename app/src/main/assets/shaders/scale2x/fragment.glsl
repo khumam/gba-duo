@@ -14,11 +14,11 @@ void main() {
     // A B C
     // D E F
     // G H I
-    vec4 B = texture2D(tex, texCoord + vec2(0.0, o.y));
-    vec4 D = texture2D(tex, texCoord + vec2(-o.x, 0.0));
-    vec4 E = texture2D(tex, texCoord + vec2(0.0, 0.0));
-    vec4 F = texture2D(tex, texCoord + vec2(o.x, 0.0));
-    vec4 H = texture2D(tex, texCoord + vec2(0.0, -o.y));
+    vec4 B = cc(texture2D(tex, texCoord + vec2(0.0, o.y)));
+    vec4 D = cc(texture2D(tex, texCoord + vec2(-o.x, 0.0)));
+    vec4 E = cc(texture2D(tex, texCoord + vec2(0.0, 0.0)));
+    vec4 F = cc(texture2D(tex, texCoord + vec2(o.x, 0.0)));
+    vec4 H = cc(texture2D(tex, texCoord + vec2(0.0, -o.y)));
     vec2 p = texCoord * texSize;
     // p = the texCoord within a pixel [0...1]
     p = fract(p);

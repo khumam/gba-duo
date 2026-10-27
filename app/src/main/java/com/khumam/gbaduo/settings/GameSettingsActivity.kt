@@ -7,6 +7,8 @@ import android.widget.Toast
 import android.view.ViewGroup
 import android.widget.TextView
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.emu.ColorCorrection
+import com.khumam.gbaduo.emu.ColorSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.Platform
@@ -28,6 +30,7 @@ class GameSettingsActivity : PixelPage() {
 
     private lateinit var settings: GameSettings
     private lateinit var shaderSummary: TextView
+    private lateinit var colorSummary: TextView
     private lateinit var artworkState: TextView
     private val io = Executors.newSingleThreadExecutor()
 
@@ -47,6 +50,7 @@ class GameSettingsActivity : PixelPage() {
         )
         val (shaderCard, summary) = menuCard(R.drawable.ic_settings, Pixel.YELLOW, getString(R.string.game_settings_shader), "") { chooseShader() }
         shaderSummary = summary
+        colorSummary = menuCard(R.drawable.ic_settings, Pixel.MINT, getString(R.string.color_title), "") { chooseColor() }.second
         render()
 
         content.addView(label(getString(R.string.game_settings_artwork)), spaced(24))
@@ -148,6 +152,26 @@ class GameSettingsActivity : PixelPage() {
 
     private fun render() {
         shaderSummary.text = label(picked())
+        colorSummary.text = colorLabel(pickedColor())
+    }
+
+    private fun pickedColor() = ColorCorrection.byId(settings.getString(GameSettingsKeys.COLOR))
+
+    private fun colorLabel(correction: ColorCorrection) =
+        if (correction == ColorCorrection.OFF) getString(R.string.shader_follow_default, ColorSettings.default(this).displayName)
+        else correction.displayName
+
+    private fun chooseColor() {
+        val options = ColorCorrection.entries
+        AlertDialog.Builder(this)
+            .setTitle(R.string.color_title)
+            .setSingleChoiceItems(options.map(::colorLabel).toTypedArray(), options.indexOf(pickedColor())) { dialog, which ->
+                settings.put(GameSettingsKeys.COLOR, options[which].takeIf { it != ColorCorrection.OFF }?.id)
+                render()
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     /** A list of the shaders to choose from; picking one saves it for this game at once. */

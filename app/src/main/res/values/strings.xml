@@ -87,6 +87,8 @@
     <string name="shader_title">Shader</string>
     <string name="shader_summary">Default look for every game</string>
     <string name="shader_summary_current">Default: %1$s</string>
+    <string name="color_title">Color correction</string>
+    <string name="color_summary">Colors like the real screen</string>
     <string name="shader_follow_default">Default (%1$s)</string>
     <string name="hint_jump">Jump 5</string>
     <string name="empty_scanning_title">Loading cartridges</string>

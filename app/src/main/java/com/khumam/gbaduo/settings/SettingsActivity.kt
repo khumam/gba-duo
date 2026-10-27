@@ -7,6 +7,8 @@ import android.widget.TextView
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.CompanionSettings
+import com.khumam.gbaduo.emu.ColorCorrection
+import com.khumam.gbaduo.emu.ColorSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.RomLibrary
@@ -23,6 +25,7 @@ class SettingsActivity : PixelPage() {
     private lateinit var writesSummary: TextView
     private lateinit var scrapingSummary: TextView
     private lateinit var shaderSummary: TextView
+    private lateinit var colorSummary: TextView
 
     private val raListener: (RetroAchievements.State) -> Unit = { state ->
         raSummary.text = when (state) {
@@ -52,6 +55,8 @@ class SettingsActivity : PixelPage() {
         }
         shaderSummary = menuCard(R.drawable.ic_settings, Pixel.YELLOW,
             getString(R.string.shader_title), getString(R.string.shader_summary)) { chooseShader() }.second
+        colorSummary = menuCard(R.drawable.ic_settings, Pixel.MINT,
+            getString(R.string.color_title), getString(R.string.color_summary)) { chooseColor() }.second
         scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
             getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
             startActivity(Intent(this, ScrapingActivity::class.java))
@@ -75,6 +80,7 @@ class SettingsActivity : PixelPage() {
         foldersSummary.text = if (count == 0) getString(R.string.no_folders_yet) else getString(R.string.rom_folders_summary)
         renderWrites()
         shaderSummary.text = getString(R.string.shader_summary_current, ShaderSettings.default(this).displayName)
+        colorSummary.text = getString(R.string.shader_summary_current, ColorSettings.default(this).displayName)
         val artCount = Artwork.store(this).count()
         scrapingSummary.text = if (artCount == 0) getString(R.string.scraping_summary)
         else resources.getQuantityString(R.plurals.scraping_summary_count, artCount, artCount)
@@ -90,6 +96,20 @@ class SettingsActivity : PixelPage() {
             .setSingleChoiceItems(presets.map { it.displayName }.toTypedArray(), presets.indexOf(ShaderSettings.default(this))) { dialog, which ->
                 ShaderSettings.setDefault(this, presets[which])
                 shaderSummary.text = getString(R.string.shader_summary_current, presets[which].displayName)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** The app-wide color correction; a game can still pick its own in Game settings. */
+    private fun chooseColor() {
+        val options = ColorCorrection.entries
+        AlertDialog.Builder(this)
+            .setTitle(R.string.color_title)
+            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(ColorSettings.default(this))) { dialog, which ->
+                ColorSettings.setDefault(this, options[which])
+                colorSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
                 dialog.dismiss()
             }
             .setNegativeButton(android.R.string.cancel, null)

@@ -22,6 +22,7 @@ import com.khumam.gbaduo.companion.PackFingerprint
 import com.khumam.gbaduo.companion.PackManifest
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.emu.AudioOut
+import com.khumam.gbaduo.emu.ColorSettings
 import com.khumam.gbaduo.emu.EmuThread
 import com.khumam.gbaduo.emu.GameView
 import com.khumam.gbaduo.emu.InputMapper
@@ -123,6 +124,7 @@ class PlayerActivity : Activity() {
         audioOut = AudioOut()
         val gameView = findViewById<GameView>(R.id.game_view)
         gameView.setShader(savedShader)
+        gameView.setColorCorrection(ColorSettings.forGame(this, storage.settings))
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
         saveMirror?.let { mirror ->
             emu.onSaveDataChanged = mirror::requestOut
