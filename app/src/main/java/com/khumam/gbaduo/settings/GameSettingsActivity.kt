@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.TextView
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.emu.ShaderPreset
+import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.Platform
 import com.khumam.gbaduo.library.artwork.Artwork
 import com.khumam.gbaduo.library.artwork.ArtworkPrefs
@@ -21,7 +22,7 @@ import java.util.concurrent.Executors
 
 /**
  * Library > Game settings: options that belong to one game, kept in its `settings.json`.
- * The shader (Off until picked) and the cover artwork; later options are one more row.
+ * The shader (Off follows the app-wide default) and the cover artwork; later options are one more row.
  */
 class GameSettingsActivity : PixelPage() {
 
@@ -137,22 +138,25 @@ class GameSettingsActivity : PixelPage() {
         super.onDestroy()
     }
 
-    private fun current() = ShaderPreset.byId(settings.getString(GameSettingsKeys.SHADER))
+    /** This game's own shader; Off (or none saved) means it follows the app-wide default. */
+    private fun picked() = ShaderPreset.byId(settings.getString(GameSettingsKeys.SHADER))
 
-    /** The row shows the picked shader. */
+    /** Off reads as "Default (X)", since an Off game uses the app-wide shader. */
+    private fun label(preset: ShaderPreset) =
+        if (preset == ShaderPreset.OFF) getString(R.string.shader_follow_default, ShaderSettings.default(this).displayName)
+        else preset.displayName
+
     private fun render() {
-        val picked = current()
-        shaderSummary.text = picked.displayName
+        shaderSummary.text = label(picked())
     }
 
     /** A list of the shaders to choose from; picking one saves it for this game at once. */
     private fun chooseShader() {
         val presets = ShaderPreset.entries
-        val labels = presets.map { it.displayName }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle(R.string.game_settings_shader)
-            .setSingleChoiceItems(labels, presets.indexOf(current())) { dialog, which ->
-                settings.put(GameSettingsKeys.SHADER, presets[which].id)
+            .setSingleChoiceItems(presets.map(::label).toTypedArray(), presets.indexOf(picked())) { dialog, which ->
+                settings.put(GameSettingsKeys.SHADER, presets[which].takeIf { it != ShaderPreset.OFF }?.id)
                 render()
                 dialog.dismiss()
             }

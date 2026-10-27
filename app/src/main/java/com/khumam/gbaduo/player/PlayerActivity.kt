@@ -26,6 +26,7 @@ import com.khumam.gbaduo.emu.EmuThread
 import com.khumam.gbaduo.emu.GameView
 import com.khumam.gbaduo.emu.InputMapper
 import com.khumam.gbaduo.emu.ShaderPreset
+import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.GameTitle
 import com.khumam.gbaduo.library.RomArchive
 import com.khumam.gbaduo.library.RomHeader
@@ -107,7 +108,7 @@ class PlayerActivity : Activity() {
         storage.ensureDirs()
         // Shaders used to be one app-wide choice; they are per game now (Library > Game settings).
         getSharedPreferences("player", MODE_PRIVATE).edit().remove("shader_id").apply()
-        savedShader = ShaderPreset.byId(storage.settings.getString(GameSettingsKeys.SHADER))
+        savedShader = ShaderSettings.forGame(this, storage.settings)
 
         // With a save folder set, take in newer saves from it (another device) before the
         // core opens game.sav, then mirror changes out while playing.
