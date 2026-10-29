@@ -17,6 +17,9 @@ private const val TAG = "GameView"
 /** Largest offscreen texture side for sharp scaling; anything bigger draws directly. */
 private const val MAX_PRESCALE_SIDE = 4096
 
+/** The picture height [TiltShift.maxRadius] is given for; the blur scales with the picture. */
+private const val TILT_REFERENCE_HEIGHT = 960f
+
 /**
  * Blit of the emulator's RGBA8888 framebuffer (240x160 for GBA, 160x144 for GB/GBC) in the
  * chosen [AspectRatio], with a swappable post-process shader.
@@ -66,11 +69,18 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         requestRender()
     }
 
+    /** Thread-safe; read by the GL thread on the next frame. */
+    fun setTiltShift(tilt: TiltShift) {
+        renderer.tiltShift = tilt
+        requestRender()
+    }
+
     private inner class Renderer(private val assets: AssetManager) : GLSurfaceView.Renderer {
         @Volatile var pendingShader: ShaderPreset = ShaderPreset.OFF
         @Volatile var colorMode = 0f
         @Volatile var integerScale = false
         @Volatile var aspect = AspectRatio.ORIGINAL
+        @Volatile var tiltShift = TiltShift.OFF
         @Volatile var videoSize: Pair<Int, Int> = 240 to 160
 
         private var activeShader: ShaderPreset? = null
@@ -88,6 +98,16 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var prescaleWidth = 0
         private var prescaleHeight = 0
         private var prescaleReady = false
+        private var tiltProgram = 0
+        private var tiltPositionHandle = 0
+        private var tiltAxisHandle = -1
+        private var tiltRadiusHandle = -1
+        private var tiltFocusHandle = -1
+        private val tiltTextures = IntArray(2)
+        private val tiltFbos = IntArray(2)
+        private var tiltWidth = 0
+        private var tiltHeight = 0
+        private var tiltReady = false
         private var surfaceWidth = 0
         private var surfaceHeight = 0
         private lateinit var vertexBuffer: FloatBuffer
@@ -111,6 +131,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
 
             applyShader(ShaderPreset.OFF)
             setUpPrescale()
+            setUpTilt()
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -147,11 +168,39 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             // A picture that isn't a whole-number multiple of the game would get rows and columns of uneven
             // width, and a linear shrink makes edges pop between sharp and soft as it scrolls. Draw it at a whole multiple
             // first and shrink that by exact area, so pixel edges stay crisp and move smoothly.
-            val sharp = !integerScale && prescaleReady && !ScreenFit.isWholeNumber(size, videoWidth, videoHeight)
-            if (sharp && drawPrescaled(size, x, y, videoWidth, videoHeight)) return
+            val tilt = tiltShift
+            if (tilt != TiltShift.OFF && sizeTilt(size.width, size.height)) {
+                // Picture into an offscreen texture, then blurred sideways and up-down onto the screen.
+                drawPicture(tiltFbos[0], 0, 0, size, videoWidth, videoHeight)
+                val radius = tilt.maxRadius * size.height / TILT_REFERENCE_HEIGHT
+                tiltPass(tiltTextures[0], tiltFbos[1], 0, 0, size, 1f, 0f, radius, tilt.focus)
+                tiltPass(tiltTextures[1], 0, x, y, size, 0f, 1f, radius, tilt.focus)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            } else {
+                drawPicture(0, x, y, size, videoWidth, videoHeight)
+            }
+        }
 
+        /** The game picture, [size] big, with its corner at ([x], [y]) of framebuffer [fbo] (0: the screen). */
+        private fun drawPicture(fbo: Int, x: Int, y: Int, size: ViewportSize, videoWidth: Int, videoHeight: Int) {
+            val sharp = !integerScale && prescaleReady && !ScreenFit.isWholeNumber(size, videoWidth, videoHeight)
+            if (sharp && drawPrescaled(fbo, size, x, y, videoWidth, videoHeight)) return
+
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
             GLES20.glViewport(x, y, size.width, size.height)
             drawGame(videoWidth, videoHeight)
+        }
+
+        /** Blurs [source] along ([axisX], [axisY]) into [fbo] (0: the screen) at ([x], [y]). */
+        private fun tiltPass(source: Int, fbo: Int, x: Int, y: Int, size: ViewportSize, axisX: Float, axisY: Float, radius: Float, focus: Float) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+            GLES20.glViewport(x, y, size.width, size.height)
+            GLES20.glUseProgram(tiltProgram)
+            GLES20.glUniform2f(tiltAxisHandle, axisX / size.width, axisY / size.height)
+            GLES20.glUniform1f(tiltRadiusHandle, radius)
+            GLES20.glUniform1f(tiltFocusHandle, focus)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, source)
+            drawQuad(tiltPositionHandle)
         }
 
         /** The chosen shader over the whole viewport; the game texture must be bound. */
@@ -173,7 +222,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         }
 
         /** Game at a whole multiple of its size into an offscreen texture, then area-averaged onto the screen. False: couldn't. */
-        private fun drawPrescaled(size: ViewportSize, x: Int, y: Int, videoWidth: Int, videoHeight: Int): Boolean {
+        private fun drawPrescaled(fbo: Int, size: ViewportSize, x: Int, y: Int, videoWidth: Int, videoHeight: Int): Boolean {
             val factor = ScreenFit.prescale(size, videoWidth, videoHeight)
             val width = videoWidth * factor
             val height = videoHeight * factor
@@ -182,7 +231,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, prescaleFbo)
             GLES20.glViewport(0, 0, width, height)
             drawGame(videoWidth, videoHeight)
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
 
             GLES20.glViewport(x, y, size.width, size.height)
             GLES20.glUseProgram(blitProgram)
@@ -221,6 +270,64 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             prescaleFbo = ids[0]
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
             prescaleReady = true
+        }
+
+        private fun setUpTilt() {
+            tiltReady = false
+            tiltWidth = 0
+            tiltHeight = 0
+            tiltProgram = runCatching { buildProgram("shaders/tilt/vertex.glsl", "shaders/tilt/fragment.glsl", "tilt") }
+                .getOrElse { error ->
+                    Log.e(TAG, "Failed to build tilt-shift shader, blur off", error)
+                    return
+                }
+            tiltPositionHandle = GLES20.glGetAttribLocation(tiltProgram, "position")
+            GLES20.glUseProgram(tiltProgram)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(tiltProgram, "tex"), 0)
+            tiltAxisHandle = GLES20.glGetUniformLocation(tiltProgram, "axis")
+            tiltRadiusHandle = GLES20.glGetUniformLocation(tiltProgram, "maxRadius")
+            tiltFocusHandle = GLES20.glGetUniformLocation(tiltProgram, "focus")
+
+            GLES20.glGenTextures(2, tiltTextures, 0)
+            GLES20.glGenFramebuffers(2, tiltFbos, 0)
+            for (texId in tiltTextures) {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            }
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            tiltReady = true
+        }
+
+        /** Gives both offscreen textures this size; false (and the blur off) when the GPU won't render into them. */
+        private fun sizeTilt(width: Int, height: Int): Boolean {
+            if (!tiltReady) return false
+            if (width == tiltWidth && height == tiltHeight) return true
+            var complete = true
+            for (i in 0..1) {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tiltTextures[i])
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+                )
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, tiltFbos[i])
+                GLES20.glFramebufferTexture2D(
+                    GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tiltTextures[i], 0,
+                )
+                complete = complete && GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE
+            }
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            if (!complete) {
+                Log.e(TAG, "Offscreen ${width}x$height not renderable, tilt-shift off")
+                tiltReady = false
+                return false
+            }
+            tiltWidth = width
+            tiltHeight = height
+            return true
         }
 
         /** Gives the offscreen texture this size; false (and sharp scaling off) when the GPU won't render into it. */

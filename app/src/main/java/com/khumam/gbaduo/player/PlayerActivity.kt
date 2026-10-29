@@ -30,6 +30,7 @@ import com.khumam.gbaduo.emu.InputMapper
 import com.khumam.gbaduo.emu.ScaleSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
+import com.khumam.gbaduo.emu.TiltShiftSettings
 import com.khumam.gbaduo.library.GameTitle
 import com.khumam.gbaduo.library.RomArchive
 import com.khumam.gbaduo.library.RomHeader
@@ -129,6 +130,7 @@ class PlayerActivity : Activity() {
         gameView.setColorCorrection(ColorSettings.forGame(this, storage.settings))
         gameView.setIntegerScaling(ScaleSettings.integer(this))
         gameView.setAspectRatio(AspectSettings.default(this))
+        gameView.setTiltShift(TiltShiftSettings.default(this))
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
         saveMirror?.let { mirror ->
             emu.onSaveDataChanged = mirror::requestOut

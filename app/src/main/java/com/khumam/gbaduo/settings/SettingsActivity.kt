@@ -11,6 +11,8 @@ import com.khumam.gbaduo.emu.AspectRatio
 import com.khumam.gbaduo.emu.AspectSettings
 import com.khumam.gbaduo.emu.ColorCorrection
 import com.khumam.gbaduo.emu.ColorSettings
+import com.khumam.gbaduo.emu.TiltShift
+import com.khumam.gbaduo.emu.TiltShiftSettings
 import com.khumam.gbaduo.emu.ScaleSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
@@ -30,6 +32,7 @@ class SettingsActivity : PixelPage() {
     private lateinit var shaderSummary: TextView
     private lateinit var colorSummary: TextView
     private lateinit var aspectSummary: TextView
+    private lateinit var tiltSummary: TextView
     private lateinit var scaleSummary: TextView
 
     private val raListener: (RetroAchievements.State) -> Unit = { state ->
@@ -64,6 +67,8 @@ class SettingsActivity : PixelPage() {
             getString(R.string.color_title), getString(R.string.color_summary)) { chooseColor() }.second
         aspectSummary = menuCard(R.drawable.ic_settings, Pixel.CORAL,
             getString(R.string.aspect_title), getString(R.string.aspect_summary)) { chooseAspect() }.second
+        tiltSummary = menuCard(R.drawable.ic_settings, Pixel.YELLOW,
+            getString(R.string.tilt_title), getString(R.string.tilt_summary)) { chooseTilt() }.second
         scaleSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
             getString(R.string.scale_title), getString(R.string.scale_off)) { toggleScale() }.second
         scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
@@ -91,6 +96,7 @@ class SettingsActivity : PixelPage() {
         shaderSummary.text = getString(R.string.shader_summary_current, ShaderSettings.default(this).displayName)
         colorSummary.text = getString(R.string.shader_summary_current, ColorSettings.default(this).displayName)
         aspectSummary.text = getString(R.string.shader_summary_current, AspectSettings.default(this).displayName)
+        tiltSummary.text = getString(R.string.shader_summary_current, TiltShiftSettings.default(this).displayName)
         renderScale()
         val artCount = Artwork.store(this).count()
         scrapingSummary.text = if (artCount == 0) getString(R.string.scraping_summary)
@@ -121,6 +127,20 @@ class SettingsActivity : PixelPage() {
             .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(ColorSettings.default(this))) { dialog, which ->
                 ColorSettings.setDefault(this, options[which])
                 colorSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Blur toward the top and bottom of the game picture; the next game started uses it. */
+    private fun chooseTilt() {
+        val options = TiltShift.entries
+        AlertDialog.Builder(this)
+            .setTitle(R.string.tilt_title)
+            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(TiltShiftSettings.default(this))) { dialog, which ->
+                TiltShiftSettings.setDefault(this, options[which])
+                tiltSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
                 dialog.dismiss()
             }
             .setNegativeButton(android.R.string.cancel, null)
