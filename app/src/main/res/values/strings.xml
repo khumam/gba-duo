@@ -63,6 +63,8 @@
     <string name="slot_empty">Slot %d — empty</string>
     <string name="ff_speed">Fast-forward: %dx</string>
     <string name="shader_label">Shader: %s</string>
+    <string name="scale_label_on">Integer scaling: On</string>
+    <string name="scale_label_off">Integer scaling: Off</string>
     <string name="companion_pack">Companion pack</string>
     <string name="import_pack">Import pack…</string>
     <string name="no_pack">None</string>
@@ -89,6 +91,11 @@
     <string name="shader_summary_current">Default: %1$s</string>
     <string name="color_title">Color correction</string>
     <string name="color_summary">Colors like the real screen</string>
+    <string name="aspect_title">Aspect ratio</string>
+    <string name="aspect_summary">Shape of the game picture</string>
+    <string name="scale_title">Integer scaling</string>
+    <string name="scale_on">On: exact pixels, smaller picture</string>
+    <string name="scale_off">Off: full size picture</string>
     <string name="shader_follow_default">Default (%1$s)</string>
     <string name="hint_jump">Jump 5</string>
     <string name="empty_scanning_title">Loading cartridges</string>

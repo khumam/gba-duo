@@ -21,11 +21,13 @@ import com.khumam.gbaduo.companion.CompanionSettings
 import com.khumam.gbaduo.companion.PackFingerprint
 import com.khumam.gbaduo.companion.PackManifest
 import com.khumam.gbaduo.companion.PackStore
+import com.khumam.gbaduo.emu.AspectSettings
 import com.khumam.gbaduo.emu.AudioOut
 import com.khumam.gbaduo.emu.ColorSettings
 import com.khumam.gbaduo.emu.EmuThread
 import com.khumam.gbaduo.emu.GameView
 import com.khumam.gbaduo.emu.InputMapper
+import com.khumam.gbaduo.emu.ScaleSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.GameTitle
@@ -125,6 +127,8 @@ class PlayerActivity : Activity() {
         val gameView = findViewById<GameView>(R.id.game_view)
         gameView.setShader(savedShader)
         gameView.setColorCorrection(ColorSettings.forGame(this, storage.settings))
+        gameView.setIntegerScaling(ScaleSettings.integer(this))
+        gameView.setAspectRatio(AspectSettings.default(this))
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
         saveMirror?.let { mirror ->
             emu.onSaveDataChanged = mirror::requestOut
@@ -147,8 +151,10 @@ class PlayerActivity : Activity() {
                         emu = emu,
                         states = SaveStates(storage),
                         initialShader = savedShader,
+                        initialIntegerScaling = ScaleSettings.integer(this@PlayerActivity),
                         onSetFfSpeed = { emu.ffMultiplier = it },
                         onSetShader = { savedShader = it; storage.settings.put(GameSettingsKeys.SHADER, it.id); gameView.setShader(it) },
+                        onSetIntegerScaling = { ScaleSettings.setInteger(this@PlayerActivity, it); gameView.setIntegerScaling(it) },
                         onQuit = { finish() },
                     )
                     val notes = PlayerNotes(findViewById(android.R.id.content) as android.widget.FrameLayout).also { playerNotes = it }

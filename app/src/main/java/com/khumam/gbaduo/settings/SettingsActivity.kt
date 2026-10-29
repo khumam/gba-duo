@@ -7,8 +7,11 @@ import android.widget.TextView
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.CompanionSettings
+import com.khumam.gbaduo.emu.AspectRatio
+import com.khumam.gbaduo.emu.AspectSettings
 import com.khumam.gbaduo.emu.ColorCorrection
 import com.khumam.gbaduo.emu.ColorSettings
+import com.khumam.gbaduo.emu.ScaleSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.RomLibrary
@@ -26,6 +29,8 @@ class SettingsActivity : PixelPage() {
     private lateinit var scrapingSummary: TextView
     private lateinit var shaderSummary: TextView
     private lateinit var colorSummary: TextView
+    private lateinit var aspectSummary: TextView
+    private lateinit var scaleSummary: TextView
 
     private val raListener: (RetroAchievements.State) -> Unit = { state ->
         raSummary.text = when (state) {
@@ -57,6 +62,10 @@ class SettingsActivity : PixelPage() {
             getString(R.string.shader_title), getString(R.string.shader_summary)) { chooseShader() }.second
         colorSummary = menuCard(R.drawable.ic_settings, Pixel.MINT,
             getString(R.string.color_title), getString(R.string.color_summary)) { chooseColor() }.second
+        aspectSummary = menuCard(R.drawable.ic_settings, Pixel.CORAL,
+            getString(R.string.aspect_title), getString(R.string.aspect_summary)) { chooseAspect() }.second
+        scaleSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
+            getString(R.string.scale_title), getString(R.string.scale_off)) { toggleScale() }.second
         scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
             getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
             startActivity(Intent(this, ScrapingActivity::class.java))
@@ -81,6 +90,8 @@ class SettingsActivity : PixelPage() {
         renderWrites()
         shaderSummary.text = getString(R.string.shader_summary_current, ShaderSettings.default(this).displayName)
         colorSummary.text = getString(R.string.shader_summary_current, ColorSettings.default(this).displayName)
+        aspectSummary.text = getString(R.string.shader_summary_current, AspectSettings.default(this).displayName)
+        renderScale()
         val artCount = Artwork.store(this).count()
         scrapingSummary.text = if (artCount == 0) getString(R.string.scraping_summary)
         else resources.getQuantityString(R.plurals.scraping_summary_count, artCount, artCount)
@@ -114,6 +125,30 @@ class SettingsActivity : PixelPage() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /** The shape of the game picture, on whichever screen the game runs. */
+    private fun chooseAspect() {
+        val options = AspectRatio.entries
+        AlertDialog.Builder(this)
+            .setTitle(R.string.aspect_title)
+            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(AspectSettings.default(this))) { dialog, which ->
+                AspectSettings.setDefault(this, options[which])
+                aspectSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun renderScale() {
+        scaleSummary.text = getString(if (ScaleSettings.integer(this)) R.string.scale_on else R.string.scale_off)
+    }
+
+    /** Flips at once; the next game started uses it. */
+    private fun toggleScale() {
+        ScaleSettings.setInteger(this, !ScaleSettings.integer(this))
+        renderScale()
     }
 
     private fun renderWrites() {

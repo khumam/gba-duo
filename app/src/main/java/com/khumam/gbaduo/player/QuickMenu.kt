@@ -8,18 +8,21 @@ import com.khumam.gbaduo.emu.ShaderPreset
 import java.text.DateFormat
 import java.util.Date
 
-/** Pause-and-choose overlay: save/load state slots, fast-forward speed, shader, quit. */
+/** Pause-and-choose overlay: save/load state slots, fast-forward speed, shader, integer scaling, quit. */
 class QuickMenu(
     private val context: Context,
     private val emu: EmuThread,
     private val states: SaveStates,
     initialShader: ShaderPreset,
+    initialIntegerScaling: Boolean,
     private val onSetFfSpeed: (Int) -> Unit,
     private val onSetShader: (ShaderPreset) -> Unit,
+    private val onSetIntegerScaling: (Boolean) -> Unit,
     private val onQuit: () -> Unit,
 ) {
     private var ffSpeed = 2
     private var shader = initialShader
+    private var integerScaling = initialIntegerScaling
     private var dialog: AlertDialog? = null
 
     /** True while the menu (or its slot picker) is open; it has input focus then. */
@@ -33,6 +36,7 @@ class QuickMenu(
             context.getString(R.string.load_state),
             context.getString(R.string.ff_speed, ffSpeed),
             context.getString(R.string.shader_label, shader.displayName),
+            context.getString(if (integerScaling) R.string.scale_label_on else R.string.scale_label_off),
             context.getString(R.string.quit),
         ).toTypedArray()
 
@@ -44,7 +48,8 @@ class QuickMenu(
                     2 -> showSlotPicker(save = false)
                     3 -> cycleFfSpeed()
                     4 -> cycleShader()
-                    5 -> onQuit()
+                    5 -> toggleIntegerScaling()
+                    6 -> onQuit()
                 }
             }
             .setOnCancelListener { emu.paused = false }
@@ -60,6 +65,12 @@ class QuickMenu(
     private fun cycleShader() {
         shader = ShaderPreset.next(shader)
         onSetShader(shader)
+        emu.paused = false
+    }
+
+    private fun toggleIntegerScaling() {
+        integerScaling = !integerScaling
+        onSetIntegerScaling(integerScaling)
         emu.paused = false
     }
 

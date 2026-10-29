@@ -14,9 +14,12 @@ import javax.microedition.khronos.opengles.GL10
 
 private const val TAG = "GameView"
 
+/** Largest offscreen texture side for sharp scaling; anything bigger draws directly. */
+private const val MAX_PRESCALE_SIDE = 4096
+
 /**
- * Aspect-fit blit of the emulator's RGBA8888 framebuffer (240x160 for GBA,
- * 160x144 for GB/GBC), with a swappable post-process shader.
+ * Blit of the emulator's RGBA8888 framebuffer (240x160 for GBA, 160x144 for GB/GBC) in the
+ * chosen [AspectRatio], with a swappable post-process shader.
  */
 class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(context, attrs) {
 
@@ -51,9 +54,23 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         requestRender()
     }
 
+    /** Thread-safe; read by the GL thread on the next frame. */
+    fun setIntegerScaling(enabled: Boolean) {
+        renderer.integerScale = enabled
+        requestRender()
+    }
+
+    /** Thread-safe; read by the GL thread on the next frame. */
+    fun setAspectRatio(aspect: AspectRatio) {
+        renderer.aspect = aspect
+        requestRender()
+    }
+
     private inner class Renderer(private val assets: AssetManager) : GLSurfaceView.Renderer {
         @Volatile var pendingShader: ShaderPreset = ShaderPreset.OFF
         @Volatile var colorMode = 0f
+        @Volatile var integerScale = false
+        @Volatile var aspect = AspectRatio.ORIGINAL
         @Volatile var videoSize: Pair<Int, Int> = 240 to 160
 
         private var activeShader: ShaderPreset? = null
@@ -62,6 +79,15 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var positionHandle = 0
         private var texSizeHandle = -1
         private var colorModeHandle = -1
+        private var blitProgram = 0
+        private var blitPositionHandle = 0
+        private var blitSrcSizeHandle = -1
+        private var blitDstSizeHandle = -1
+        private var prescaleTexture = 0
+        private var prescaleFbo = 0
+        private var prescaleWidth = 0
+        private var prescaleHeight = 0
+        private var prescaleReady = false
         private var surfaceWidth = 0
         private var surfaceHeight = 0
         private lateinit var vertexBuffer: FloatBuffer
@@ -84,6 +110,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 .apply { put(values); position(0) }
 
             applyShader(ShaderPreset.OFF)
+            setUpPrescale()
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -91,11 +118,9 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             surfaceHeight = height
         }
 
-        /** Largest viewport with the game's aspect ratio, centered (black bars on the rest). */
-        private fun applyAspectFitViewport(videoWidth: Int, videoHeight: Int) {
-            val scale = minOf(surfaceWidth.toFloat() / videoWidth, surfaceHeight.toFloat() / videoHeight)
-            val width = (videoWidth * scale).toInt()
-            val height = (videoHeight * scale).toInt()
+        /** Viewport in the chosen [AspectRatio] (whole-number scaled if enabled), centered; black bars on the rest. */
+        private fun applyViewport(videoWidth: Int, videoHeight: Int) {
+            val (width, height) = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspect, integerScale)
             GLES20.glViewport((surfaceWidth - width) / 2, (surfaceHeight - height) / 2, width, height)
         }
 
@@ -108,14 +133,6 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             val buffer = frameBuffer ?: return
             val (videoWidth, videoHeight) = videoSize
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            applyAspectFitViewport(videoWidth, videoHeight)
-            GLES20.glUseProgram(program)
-            if (colorModeHandle >= 0) {
-                GLES20.glUniform1f(colorModeHandle, colorMode)
-            }
-            if (texSizeHandle >= 0) {
-                GLES20.glUniform2f(texSizeHandle, videoWidth.toFloat(), videoHeight.toFloat())
-            }
 
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
             buffer.rewind()
@@ -124,10 +141,111 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
             )
 
-            GLES20.glEnableVertexAttribArray(positionHandle)
-            GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+            val size = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspect, integerScale)
+            val x = (surfaceWidth - size.width) / 2
+            val y = (surfaceHeight - size.height) / 2
+            // A picture that isn't a whole-number multiple of the game would get rows and columns of uneven
+            // width, and a linear shrink makes edges pop between sharp and soft as it scrolls. Draw it at a whole multiple
+            // first and shrink that by exact area, so pixel edges stay crisp and move smoothly.
+            val sharp = !integerScale && prescaleReady && !ScreenFit.isWholeNumber(size, videoWidth, videoHeight)
+            if (sharp && drawPrescaled(size, x, y, videoWidth, videoHeight)) return
 
+            GLES20.glViewport(x, y, size.width, size.height)
+            drawGame(videoWidth, videoHeight)
+        }
+
+        /** The chosen shader over the whole viewport; the game texture must be bound. */
+        private fun drawGame(videoWidth: Int, videoHeight: Int) {
+            GLES20.glUseProgram(program)
+            if (colorModeHandle >= 0) {
+                GLES20.glUniform1f(colorModeHandle, colorMode)
+            }
+            if (texSizeHandle >= 0) {
+                GLES20.glUniform2f(texSizeHandle, videoWidth.toFloat(), videoHeight.toFloat())
+            }
+            drawQuad(positionHandle)
+        }
+
+        private fun drawQuad(handle: Int) {
+            GLES20.glEnableVertexAttribArray(handle)
+            GLES20.glVertexAttribPointer(handle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        }
+
+        /** Game at a whole multiple of its size into an offscreen texture, then area-averaged onto the screen. False: couldn't. */
+        private fun drawPrescaled(size: ViewportSize, x: Int, y: Int, videoWidth: Int, videoHeight: Int): Boolean {
+            val factor = ScreenFit.prescale(size, videoWidth, videoHeight)
+            val width = videoWidth * factor
+            val height = videoHeight * factor
+            if (width > MAX_PRESCALE_SIDE || height > MAX_PRESCALE_SIDE || !sizePrescale(width, height)) return false
+
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, prescaleFbo)
+            GLES20.glViewport(0, 0, width, height)
+            drawGame(videoWidth, videoHeight)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+
+            GLES20.glViewport(x, y, size.width, size.height)
+            GLES20.glUseProgram(blitProgram)
+            GLES20.glUniform2f(blitSrcSizeHandle, width.toFloat(), height.toFloat())
+            GLES20.glUniform2f(blitDstSizeHandle, size.width.toFloat(), size.height.toFloat())
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, prescaleTexture)
+            drawQuad(blitPositionHandle)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            return true
+        }
+
+        private fun setUpPrescale() {
+            prescaleReady = false
+            prescaleWidth = 0
+            prescaleHeight = 0
+            blitProgram = runCatching { buildProgram("shaders/blit/vertex.glsl", "shaders/blit/fragment.glsl", "blit") }
+                .getOrElse { error ->
+                    Log.e(TAG, "Failed to build blit shader, sharp scaling off", error)
+                    return
+                }
+            blitPositionHandle = GLES20.glGetAttribLocation(blitProgram, "position")
+            GLES20.glUseProgram(blitProgram)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(blitProgram, "tex"), 0)
+            blitSrcSizeHandle = GLES20.glGetUniformLocation(blitProgram, "srcSize")
+            blitDstSizeHandle = GLES20.glGetUniformLocation(blitProgram, "dstSize")
+
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0)
+            prescaleTexture = ids[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, prescaleTexture)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glGenFramebuffers(1, ids, 0)
+            prescaleFbo = ids[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            prescaleReady = true
+        }
+
+        /** Gives the offscreen texture this size; false (and sharp scaling off) when the GPU won't render into it. */
+        private fun sizePrescale(width: Int, height: Int): Boolean {
+            if (width == prescaleWidth && height == prescaleHeight) return true
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, prescaleTexture)
+            GLES20.glTexImage2D(
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+            )
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, prescaleFbo)
+            GLES20.glFramebufferTexture2D(
+                GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, prescaleTexture, 0,
+            )
+            val complete = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            if (!complete) {
+                Log.e(TAG, "Offscreen ${width}x$height not renderable, sharp scaling off")
+                prescaleReady = false
+                return false
+            }
+            prescaleWidth = width
+            prescaleHeight = height
+            return true
         }
 
         /** Compiles+links [preset]; on failure logs and keeps whatever program was already active. */
@@ -161,11 +279,13 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             }
         }
 
-        private fun buildProgram(preset: ShaderPreset): Int {
-            val vertexSource = assets.open(preset.vertexAsset).bufferedReader().use { it.readText() }
+        private fun buildProgram(preset: ShaderPreset): Int = buildProgram(preset.vertexAsset, preset.fragmentAsset, preset.id)
+
+        private fun buildProgram(vertexAsset: String, fragmentAsset: String, name: String): Int {
+            val vertexSource = assets.open(vertexAsset).bufferedReader().use { it.readText() }
             val correction = assets.open("shaders/color_correction.glsl").bufferedReader().use { it.readText() }
             // Every fragment shader opens with this exact line; the correction goes right after it.
-            val fragmentSource = assets.open(preset.fragmentAsset).bufferedReader().use { it.readText() }
+            val fragmentSource = assets.open(fragmentAsset).bufferedReader().use { it.readText() }
                 .replaceFirst("precision mediump float;", "precision mediump float;\n$correction")
 
             val vertex = compileShader(GLES20.GL_VERTEX_SHADER, vertexSource)
@@ -182,7 +302,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             if (linked[0] == 0) {
                 val log = GLES20.glGetProgramInfoLog(program)
                 GLES20.glDeleteProgram(program)
-                error("Link failed for '${preset.id}': $log")
+                error("Link failed for '$name': $log")
             }
             return program
         }

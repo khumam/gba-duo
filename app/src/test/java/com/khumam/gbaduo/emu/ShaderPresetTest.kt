@@ -7,7 +7,7 @@ class ShaderPresetTest {
 
     @Test
     fun byIdFindsMatchingPreset() {
-        assertEquals(ShaderPreset.GBA_COLOR, ShaderPreset.byId("gba_color"))
+        assertEquals(ShaderPreset.LCD, ShaderPreset.byId("lcd"))
         assertEquals(ShaderPreset.SCALE2X, ShaderPreset.byId("scale2x"))
     }
 
