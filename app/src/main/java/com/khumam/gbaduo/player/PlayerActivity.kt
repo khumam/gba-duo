@@ -153,9 +153,11 @@ class PlayerActivity : Activity() {
                         emu = emu,
                         states = SaveStates(storage),
                         initialShader = savedShader,
+                        initialTilt = TiltShiftSettings.default(this@PlayerActivity),
                         initialIntegerScaling = ScaleSettings.integer(this@PlayerActivity),
                         onSetFfSpeed = { emu.ffMultiplier = it },
                         onSetShader = { savedShader = it; storage.settings.put(GameSettingsKeys.SHADER, it.id); gameView.setShader(it) },
+                        onSetTiltShift = { TiltShiftSettings.setDefault(this@PlayerActivity, it); gameView.setTiltShift(it) },
                         onSetIntegerScaling = { ScaleSettings.setInteger(this@PlayerActivity, it); gameView.setIntegerScaling(it) },
                         onQuit = { finish() },
                     )

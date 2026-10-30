@@ -63,6 +63,7 @@
     <string name="slot_empty">Slot %d — empty</string>
     <string name="ff_speed">Fast-forward: %dx</string>
     <string name="shader_label">Shader: %s</string>
+    <string name="tilt_label">Tilt-shift: %s</string>
     <string name="scale_label_on">Integer scaling: On</string>
     <string name="scale_label_off">Integer scaling: Off</string>
     <string name="companion_pack">Companion pack</string>
