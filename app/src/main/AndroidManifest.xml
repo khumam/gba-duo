@@ -56,6 +56,7 @@
         <activity android:name=".settings.ArtworkFolderActivity" android:exported="false" />
         <activity android:name=".settings.SteamGridDbActivity" android:exported="false" />
         <activity android:name=".settings.ArtworkPickerActivity" android:exported="false" />
+        <activity android:name=".settings.PackCatalogActivity" android:exported="false" />
         <activity android:name=".settings.ButtonMappingActivity" android:exported="false" />
         <activity android:name=".settings.HotkeysActivity" android:exported="false" />
         <activity android:name=".settings.RetroAchievementsActivity" android:exported="false"

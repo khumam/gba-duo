@@ -30,6 +30,7 @@ import com.khumam.gbaduo.library.ui.Pixel
 import com.khumam.gbaduo.library.ui.PixelBoxDrawable
 import com.khumam.gbaduo.library.ui.PixelButton
 import com.khumam.gbaduo.player.PlayerActivity
+import com.khumam.gbaduo.settings.PackCatalogActivity
 import com.khumam.gbaduo.settings.RomFoldersActivity
 import com.khumam.gbaduo.settings.SettingsActivity
 import com.khumam.gbaduo.settings.GameSettingsActivity
@@ -414,7 +415,7 @@ class LibraryActivity : Activity() {
                 Triple(crc, storage, packStore.matching(entry.gameCode, crc))
             },
             onResult = { result ->
-                result.onSuccess { (_, storage, matches) -> showCompanionDialog(storage, matches) }
+                result.onSuccess { (_, storage, matches) -> showCompanionDialog(entry, storage, matches) }
                     .onFailure { Toast.makeText(this, getString(R.string.load_failed, entry.fileName), Toast.LENGTH_SHORT).show() }
             },
         )
@@ -446,7 +447,7 @@ class LibraryActivity : Activity() {
         )
     }
 
-    private fun showCompanionDialog(storage: GameStorage, matches: List<PackManifest>) {
+    private fun showCompanionDialog(entry: RomEntry, storage: GameStorage, matches: List<PackManifest>) {
         val assignedId = storage.packId
         val labels = mutableListOf(getString(R.string.no_pack))
         labels += matches.map { pack ->
@@ -454,15 +455,25 @@ class LibraryActivity : Activity() {
             if (pack.canWriteMemory) "$name · ${getString(R.string.pack_modifies_game)}" else name
         }
         labels += getString(R.string.import_pack)
+        labels += getString(R.string.pack_web_get)
 
         AlertDialog.Builder(this)
             .setTitle(R.string.companion_pack)
             .setItems(labels.toTypedArray()) { _, which ->
                 when (which) {
                     0 -> storage.packId = null
-                    labels.size - 1 -> {
+                    labels.size - 2 -> {
                         pickPackFor = storage
                         pickPackZip()
+                    }
+                    labels.size - 1 -> {
+                        pickPackFor = storage
+                        startActivityForResult(
+                            Intent(this, PackCatalogActivity::class.java)
+                                .putExtra(PackCatalogActivity.EXTRA_GAME_CODE, entry.gameCode)
+                                .putExtra(PackCatalogActivity.EXTRA_TITLE, GameTitle.display(entry.fileName, entry.title)),
+                            REQUEST_WEB_PACK,
+                        )
                     }
                     else -> storage.packId = matches[which - 1].id
                 }
@@ -481,6 +492,12 @@ class LibraryActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_PICK_PACK) handlePackPicked(resultCode, data)
+        if (requestCode == REQUEST_WEB_PACK) {
+            val storage = pickPackFor
+            pickPackFor = null
+            val id = data?.getStringExtra(PackCatalogActivity.EXTRA_PACK_ID)
+            if (resultCode == RESULT_OK && id != null) storage?.packId = id
+        }
     }
 
     private fun handlePackPicked(resultCode: Int, data: Intent?) {
@@ -506,6 +523,7 @@ class LibraryActivity : Activity() {
 
     companion object {
         private const val REQUEST_PICK_PACK = 2
+        private const val REQUEST_WEB_PACK = 3
         private const val KEY_LAST_SELECTED = "last_selected"
         private const val JUMP = 5
         private const val BLINK_MS = 530L
