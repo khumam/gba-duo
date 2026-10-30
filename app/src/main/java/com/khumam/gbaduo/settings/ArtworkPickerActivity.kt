@@ -74,10 +74,15 @@ class ArtworkPickerActivity : PixelPage() {
         })
     }
 
+    private fun busy(text: String) {
+        results.removeAllViews()
+        results.addView(busyRow(text), spaced(12))
+    }
+
     private fun search() {
         val name = query.text.toString().trim()
         if (name.isEmpty()) return
-        message(getString(R.string.artwork_searching), error = false)
+        busy(getString(R.string.artwork_searching))
         io.execute {
             val result = api.search(name)
             runOnUiThread {
@@ -113,7 +118,7 @@ class ArtworkPickerActivity : PixelPage() {
     }
 
     private fun loadGrids(game: SgdbGame) {
-        message(getString(R.string.artwork_searching), error = false)
+        busy(getString(R.string.artwork_searching))
         io.execute {
             val result = api.grids(game.id)
             runOnUiThread {
@@ -153,7 +158,7 @@ class ArtworkPickerActivity : PixelPage() {
     }
 
     private fun choose(grid: SgdbGrid) {
-        message(getString(R.string.artwork_searching), error = false)
+        busy(getString(R.string.artwork_downloading))
         io.execute {
             val stored = (api.download(grid.url) as? Sgdb.Ok)?.value?.let(ArtworkImages::encode)?.also {
                 Artwork.store(this).put(platform.id, crc, it, "steamgriddb", grid.id.toString())

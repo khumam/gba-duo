@@ -206,6 +206,7 @@
     <string name="artwork_search">Game name</string>
     <string name="artwork_search_go">Search</string>
     <string name="artwork_searching">Searching…</string>
+    <string name="artwork_downloading">Downloading cover…</string>
     <string name="artwork_no_results">Nothing found for that name</string>
     <string name="artwork_pick_hint">Search and choose a cover</string>
     <string name="artwork_saved">Cover saved</string>

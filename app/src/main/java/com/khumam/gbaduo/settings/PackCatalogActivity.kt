@@ -65,6 +65,11 @@ class PackCatalogActivity : PixelPage() {
         }
     }
 
+    private fun busy(text: String) {
+        results.removeAllViews()
+        results.addView(busyRow(text), spaced(12))
+    }
+
     private fun failText(failed: Fetch.Failed): String = when (failed.reason) {
         Fetch.Reason.OFFLINE -> getString(R.string.pack_web_offline)
         Fetch.Reason.UNSUPPORTED_CATALOG -> getString(R.string.pack_web_unsupported)
@@ -75,7 +80,7 @@ class PackCatalogActivity : PixelPage() {
     }
 
     private fun load() {
-        message(getString(R.string.pack_web_loading), error = false)
+        busy(getString(R.string.pack_web_loading))
         io.execute {
             val result = downloader.catalog()
             runOnUiThread {
@@ -124,7 +129,7 @@ class PackCatalogActivity : PixelPage() {
     }
 
     private fun download(pack: CatalogPack) {
-        message(getString(R.string.pack_web_downloading, pack.title), error = false)
+        busy(getString(R.string.pack_web_downloading, pack.title))
         io.execute {
             val result = downloader.install(pack)
             runOnUiThread {

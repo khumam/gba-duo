@@ -2,6 +2,7 @@ package com.khumam.gbaduo.settings
 
 import android.app.Activity
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Paint
@@ -20,6 +21,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import com.khumam.gbaduo.BuildConfig
@@ -254,6 +256,22 @@ abstract class PixelPage : Activity() {
         setLineSpacing(0f, 1.35f)
         setTextColor(Pixel.ON_INK_SOFT)
     }.also { content.addView(it, spaced(top)) }
+
+    /** A spinner beside [text], for work in progress. Not added to the page: the caller places it. */
+    protected fun busyRow(text: String): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(ProgressBar(this@PixelPage).apply {
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(Pixel.YELLOW)
+        }, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(12) })
+        addView(TextView(this@PixelPage).apply {
+            this.text = text
+            typeface = Fonts.body(this@PixelPage, 500)
+            textSize = 14f
+            setTextColor(Pixel.YELLOW)
+        })
+    }
 
     /** HUD readout: ink cells, Silkscreen label in lavender-grey, value in white or yellow. */
     protected fun hud(cells: List<Pair<String, String>>): TextView {
