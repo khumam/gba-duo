@@ -15,6 +15,9 @@ unsigned fake_writes = 0;
 static uint8_t gba_ewram[0x40000];
 static uint8_t gba_iwram[0x8000];
 static uint8_t gb_space[0x10000];
+// Palette RAM and VRAM, readable (and raw-writable, for building scenes) on the GBA.
+static uint8_t gba_palette[0x400];
+static uint8_t gba_vram[0x18000];
 // A cartridge ROM at 0x08000000, when a test loads one (fake_load_rom).
 static uint8_t* rom;
 static size_t romSize;
@@ -25,6 +28,8 @@ static uint8_t* cell(uint32_t a) {
     if (fake_platform == GBADUO_BUS_GBA) {
         if (a >= 0x02000000u && a <= 0x0203FFFFu) return &gba_ewram[a - 0x02000000u];
         if (a >= 0x03000000u && a <= 0x03007FFFu) return &gba_iwram[a - 0x03000000u];
+        if (a >= 0x05000000u && a < 0x05000400u) return &gba_palette[a - 0x05000000u];
+        if (a >= 0x06000000u && a < 0x06018000u) return &gba_vram[a - 0x06000000u];
         if (rom && a >= 0x08000000u && a - 0x08000000u < romSize) return &rom[a - 0x08000000u];
         return &elsewhere[a % sizeof(elsewhere)];
     }
@@ -38,6 +43,8 @@ void fake_reset(int platform) {
     memset(gba_ewram, 0, sizeof(gba_ewram));
     memset(gba_iwram, 0, sizeof(gba_iwram));
     memset(gb_space, 0, sizeof(gb_space));
+    memset(gba_palette, 0, sizeof(gba_palette));
+    memset(gba_vram, 0, sizeof(gba_vram));
     memset(elsewhere, 0, sizeof(elsewhere));
 }
 

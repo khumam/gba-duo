@@ -8,12 +8,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "wide.h"
+
 struct lua_State;
 
 /** Most bytes one mem.write* call may write. */
 #define SCRIPT_WRITE_MAX_PER_CALL 64u
 /** Most bytes one tap (one action call) may write in total. */
 #define SCRIPT_WRITE_MAX_PER_TAP 256u
+/** Most bytes one game.lua frame() may write in total. */
+#define SCRIPT_WRITE_MAX_PER_FRAME 256u
 
 /** Pushes an action's arguments (exactly as many as announced) onto [L]. */
 typedef void (*gbaduo_push_args)(struct lua_State* L, void* userdata);
@@ -38,6 +42,41 @@ char* gbaduo_script_action(const char* name, gbaduo_push_args push, void* userda
 const char* gbaduo_script_last_error(void);
 
 void gbaduo_script_unload(void);
+
+/*
+ * The game's script (game.lua): a second sandbox, independent of the companion's
+ * (own globals, budgets, errors, image cache). Both run on the emu thread.
+ */
+
+/** Replaces any loaded game script with [source]; runs its top level, then init(). False on failure. */
+bool gbaduo_game_load(const char* source, const char* packDir);
+
+void gbaduo_game_unload(void);
+
+bool gbaduo_game_loaded(void);
+
+/** Why the last game-script load/hook failed; "" when it didn't. */
+const char* gbaduo_game_last_error(void);
+
+/** Whether the game script defines a global function [hook] ("frame" or "wide"). */
+bool gbaduo_game_has(const char* hook);
+
+/** False after five hook errors in a row, until the next gbaduo_game_load. */
+bool gbaduo_game_enabled(void);
+
+/**
+ * Calls frame({frame=, width=, left=}) with its per-frame budget. The write window is
+ * open for this call only when [may_write]. False on an error or the budget (the reason
+ * in gbaduo_game_last_error()); true when it ran, or the script has no frame().
+ */
+bool gbaduo_game_frame(int64_t frameCounter, int width, int left, bool may_write);
+
+/**
+ * Calls wide({width=, left=, match=}) (read-only). True with [out] filled when it
+ * returned a world; false for nil/false (no error) or an error, a wrong field or the
+ * budget (the reason in gbaduo_game_last_error()).
+ */
+bool gbaduo_game_wide(int width, int left, float match, struct WideWorld* out);
 
 /** For tests: a malloc'd copy of the ARGB8888 image for a "gfx:..." key, or NULL. */
 uint32_t* gbaduo_script_image(const char* key, int* width, int* height);

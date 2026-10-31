@@ -36,6 +36,9 @@ object PackInstaller {
             for (style in manifest.styleFiles) {
                 if (!File(tempDir, style).isFile) throw InstallException("Pack is missing $style")
             }
+            manifest.gameScriptFile?.let { gameScript ->
+                if (!File(tempDir, gameScript).isFile) throw InstallException("Pack is missing $gameScript")
+            }
 
             val finalDir = File(packsDir, manifest.id)
             if (finalDir.exists()) finalDir.deleteRecursively()

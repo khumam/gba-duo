@@ -499,6 +499,205 @@ static void cache_keeps_many_small_images(void) {
     CHECK(found == 40);
 }
 
+/* ---- two instances: main.lua's and game.lua's -------------------------------------- */
+
+static void two_instances_dont_share_state(void) {
+    load("A = 1\nfunction update() return { a = A or 0, b = B or 0 } end\n");
+    /* init() errors if the companion's global leaked into the game instance. */
+    CHECK(gbaduo_game_load("B = 2\nfunction init() if A ~= nil then error('leak') end end\n", "."));
+    CHECK(gbaduo_game_loaded());
+    char* tick = gbaduo_script_tick();
+    CHECK(json_has(tick, "\"a\":1"));
+    CHECK(json_has(tick, "\"b\":0"));
+    free(tick);
+    gbaduo_game_unload();
+}
+
+static void unloading_one_leaves_the_other(void) {
+    load("function update() return { ok = true } end\n");
+    CHECK(gbaduo_game_load("function init() end\n", "."));
+    gbaduo_game_unload();
+    CHECK(!gbaduo_game_loaded());
+    char* tick = gbaduo_script_tick();
+    CHECK(json_has(tick, "\"ok\":true"));
+    free(tick);
+
+    CHECK(gbaduo_game_load("function init() end\n", "."));
+    gbaduo_script_unload();
+    CHECK(gbaduo_game_loaded());
+    CHECK(gbaduo_script_tick() == NULL);
+    gbaduo_game_unload();
+}
+
+static void game_load_failure_leaves_companion_alone(void) {
+    load("function update() return { ok = true } end\n");
+    CHECK(!gbaduo_game_load("this is not lua", "."));
+    CHECK(!gbaduo_game_loaded());
+    CHECK(strlen(gbaduo_game_last_error()) > 0);
+    CHECK(strlen(gbaduo_script_last_error()) == 0);
+    char* tick = gbaduo_script_tick();
+    CHECK(json_has(tick, "\"ok\":true"));
+    free(tick);
+}
+
+/* ---- game.lua hooks: frame() and wide() -------------------------------------------- */
+
+static void gload(const char* source) {
+    if (!gbaduo_game_load(source, ".")) {
+        fprintf(stderr, "game load failed: %s\n", gbaduo_game_last_error());
+        exit(2);
+    }
+}
+
+static uint32_t peek32(uint32_t a) {
+    return (uint32_t) fake_peek(a) | (uint32_t) fake_peek(a + 1) << 8 | (uint32_t) fake_peek(a + 2) << 16 |
+           (uint32_t) fake_peek(a + 3) << 24;
+}
+
+static void has_hooks_only_when_defined(void) {
+    gload("x = 1\n");
+    CHECK(!gbaduo_game_has("frame"));
+    CHECK(!gbaduo_game_has("wide"));
+    gload("function frame() end\n");
+    CHECK(gbaduo_game_has("frame"));
+    CHECK(!gbaduo_game_has("wide"));
+    gload("function wide() end\n");
+    CHECK(!gbaduo_game_has("frame"));
+    CHECK(gbaduo_game_has("wide"));
+    gbaduo_game_unload();
+    CHECK(!gbaduo_game_has("frame"));
+}
+
+static void frame_receives_view(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    gload("function frame(v) mem.write32(0x02000000, v.frame); mem.write16(0x02000004, v.width); mem.write16(0x02000006, v.left) end\n");
+    CHECK(gbaduo_game_frame(123456, 320, 40, true));
+    CHECK(peek32(0x02000000) == 123456u);
+    CHECK(peek32(0x02000004) == (320u | 40u << 16));
+    gbaduo_game_unload();
+}
+
+static void writes_refused_outside_frame(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    gload("TOP = mem.write8(0x02000010, 1)\n"
+          "function init() INIT = mem.write8(0x02000011, 1) end\n"
+          "function wide() mem.write8(0x02000012, 1) end\n");
+    CHECK(fake_writes == 0);
+    struct WideWorld w;
+    CHECK(!gbaduo_game_wide(320, 40, 1.0f, &w));
+    CHECK(fake_writes == 0);
+    gbaduo_game_unload();
+}
+
+static void frame_writes_need_the_window(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    gload("function frame() mem.write8(0x02000020, 7) end\n");
+    CHECK(gbaduo_game_frame(1, 240, 0, false));
+    CHECK(fake_peek(0x02000020) == 0);
+    CHECK(fake_writes == 0);
+    CHECK(gbaduo_game_frame(2, 240, 0, true));
+    CHECK(fake_peek(0x02000020) == 7);
+    gbaduo_game_unload();
+}
+
+static void frame_write_cap(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    gload("function frame() for i = 0, 4 do mem.write(0x02000100 + i * 64, string.rep('\\1', 64)) end end\n");
+    CHECK(gbaduo_game_frame(1, 240, 0, true));
+    CHECK(fake_writes == SCRIPT_WRITE_MAX_PER_FRAME);
+    CHECK(fake_peek(0x02000100 + 3 * 64) == 1);
+    CHECK(fake_peek(0x02000100 + 4 * 64) == 0);
+    /* The allowance is per frame: the next frame writes again. */
+    CHECK(gbaduo_game_frame(2, 240, 0, true));
+    CHECK(fake_writes == 2 * SCRIPT_WRITE_MAX_PER_FRAME);
+    gbaduo_game_unload();
+}
+
+static void wide_returns_world(void) {
+    gload("function wide(v) return { x = -5, y = 7, grid = 0x02000000, gridW = 3, gridH = 2, idMask = 0x3FF,\n"
+          "  border = 0x02001000, borderW = 2, borderH = 2, metatiles = 0x02002000, metatiles2 = 0x02004000,\n"
+          "  borderShift = 7, undefinedId = 0x3FF,\n"
+          "  split = 640, tiles = 0x06000000, palette = 0x05000000 } end\n");
+    struct WideWorld w;
+    memset(&w, 0, sizeof(w));
+    CHECK(gbaduo_game_wide(320, 40, 1.0f, &w));
+    CHECK(w.x == -5 && w.y == 7);
+    CHECK(w.grid == 0x02000000u && w.gridW == 3 && w.gridH == 2 && w.idMask == 0x3FF);
+    CHECK(w.border == 0x02001000u && w.borderW == 2 && w.borderH == 2);
+    CHECK(w.borderShift == 7 && w.undefinedId == 0x3FF);
+    CHECK(w.metatiles == 0x02002000u && w.metatiles2 == 0x02004000u && w.split == 640);
+    CHECK(w.tiles == 0x06000000u && w.palette == 0x05000000u);
+    CHECK(strlen(gbaduo_game_last_error()) == 0);
+
+    /* The view reaches Lua. */
+    gload("function wide(v) return { x = v.width, y = v.left, split = math.floor(v.match * 100), grid = 0, gridW = 1, gridH = 1,\n"
+          "  idMask = 0, border = 0, borderW = 1, borderH = 1, metatiles = 0, metatiles2 = 0, tiles = 0, palette = 0 } end\n");
+    CHECK(gbaduo_game_wide(320, 40, 0.5f, &w));
+    CHECK(w.x == 320 && w.y == 40 && w.split == 50);
+    CHECK(w.borderShift == 0 && w.undefinedId == -1); /* both optional */
+    gbaduo_game_unload();
+}
+
+static void wide_nil_is_hidden_not_error(void) {
+    struct WideWorld w;
+    gload("function wide() return nil end\n");
+    CHECK(!gbaduo_game_wide(320, 40, 1.0f, &w));
+    CHECK(strlen(gbaduo_game_last_error()) == 0);
+    gload("function wide() return false end\n");
+    CHECK(!gbaduo_game_wide(320, 40, 1.0f, &w));
+    CHECK(strlen(gbaduo_game_last_error()) == 0);
+    CHECK(gbaduo_game_enabled());
+    gbaduo_game_unload();
+}
+
+static void wide_missing_field_is_error(void) {
+    struct WideWorld w;
+    gload("function wide() return { x = 0, y = 0, grid = 0, gridH = 1, idMask = 0, border = 0, borderW = 1, borderH = 1,\n"
+          "  metatiles = 0, metatiles2 = 0, split = 0, tiles = 0, palette = 0 } end\n");
+    CHECK(!gbaduo_game_wide(320, 40, 1.0f, &w));
+    CHECK(strstr(gbaduo_game_last_error(), "gridW") != NULL);
+    gbaduo_game_unload();
+}
+
+static void frame_error_skips_and_keeps_running(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    load("function update() return { ok = true } end\n");
+    gload("function frame(v) if v.frame == 1 then error('boom') end mem.write8(0x02000040, 9) end\n");
+    CHECK(!gbaduo_game_frame(1, 240, 0, true));
+    CHECK(strstr(gbaduo_game_last_error(), "boom") != NULL);
+    CHECK(gbaduo_game_frame(2, 240, 0, true));
+    CHECK(fake_peek(0x02000040) == 9);
+    CHECK(strlen(gbaduo_game_last_error()) == 0);
+    char* tick = gbaduo_script_tick();
+    CHECK(json_has(tick, "\"ok\":true"));
+    free(tick);
+    gbaduo_game_unload();
+}
+
+static void budget_is_enforced(void) {
+    gload("function frame() while true do end end\n");
+    CHECK(!gbaduo_game_frame(1, 240, 0, false));
+    CHECK(strstr(gbaduo_game_last_error(), "exceeded") != NULL);
+    gbaduo_game_unload();
+}
+
+static void five_errors_turn_it_off(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    const char* src = "function frame() mem.write8(0x02000030, 1); error('x') end\n";
+    gload(src);
+    for (int i = 0; i < 5; i++) {
+        CHECK(gbaduo_game_enabled());
+        CHECK(!gbaduo_game_frame(i, 240, 0, true));
+    }
+    CHECK(!gbaduo_game_enabled());
+    fake_reset(GBADUO_BUS_GBA);
+    CHECK(!gbaduo_game_frame(6, 240, 0, true));
+    CHECK(fake_peek(0x02000030) == 0); /* Lua did not run */
+    gload(src);
+    CHECK(gbaduo_game_enabled());
+    gbaduo_game_unload();
+}
+
 int main(void) {
     refused_outside_an_action();
     refused_without_permission();
@@ -518,6 +717,20 @@ int main(void) {
     sprite_composes_parts();
     sprite_rejects_bad_parts();
     cache_keeps_many_small_images();
+    two_instances_dont_share_state();
+    unloading_one_leaves_the_other();
+    game_load_failure_leaves_companion_alone();
+    has_hooks_only_when_defined();
+    frame_receives_view();
+    writes_refused_outside_frame();
+    frame_writes_need_the_window();
+    frame_write_cap();
+    wide_returns_world();
+    wide_nil_is_hidden_not_error();
+    wide_missing_field_is_error();
+    frame_error_skips_and_keeps_running();
+    budget_is_enforced();
+    five_errors_turn_it_off();
     gbaduo_script_unload();
 
     printf("%d checks, %d failed\n", checks, failures);

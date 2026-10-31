@@ -40,6 +40,11 @@
  */
 #define INSTRUCTION_BUDGET_PER_TICK 1000000L
 #define TIME_BUDGET_PER_TICK_MS 25
+/* game.lua's frame() and wide() run every frame, each with its own small budget. */
+#define INSTRUCTION_BUDGET_PER_FRAME 100000L
+#define TIME_BUDGET_PER_FRAME_MS 2
+/* Hook errors in a row (per hook) after which game.lua is switched off. */
+#define GAME_MAX_ERROR_STREAK 5
 #define INSTRUCTION_BUDGET_LOAD 5000000L
 #define TIME_BUDGET_LOAD_MS 250
 /* How often the count hook checks the budget: often enough that a loop of slow single
@@ -79,9 +84,25 @@ struct GbaDuoScript {
      * (see gbaduo_script_action); tapBytesLeft is that call's remaining allowance. */
     bool writeWindow;
     uint32_t tapBytesLeft;
+    /* game.lua: consecutive errors of frame() / wide(); five of either switch it off. */
+    int errorStreak[2];
+    bool disabled;
+    bool loggedWrite;
 };
 
-static struct GbaDuoScript g_script;
+/* Two independent sandboxes: main.lua's (the companion) and game.lua's. Both run on the
+ * emu thread; each public entry point selects its own with activate(), and the Lua C
+ * callbacks work on whichever is active. The selection is per thread, so nativeImage on
+ * the UI thread (always the companion's) can't disturb a game hook mid-call. */
+enum { SCRIPT_COMPANION = 0, SCRIPT_GAME = 1 };
+
+static struct GbaDuoScript g_scripts[2];
+static __thread struct GbaDuoScript* g_active = &g_scripts[SCRIPT_COMPANION];
+#define g_script (*g_active)
+
+static void activate(int which) {
+    g_active = &g_scripts[which];
+}
 
 /* Guards g_script.images: gfx.decode/unloadScript run on the emu thread while
  * nativeImage is called from the UI thread. */
@@ -275,7 +296,11 @@ static int write_checked(lua_State* L, lua_Integer address, const uint8_t* bytes
         return write_refused(L, "not writable RAM");
     }
     g_script.tapBytesLeft -= (uint32_t) size;
-    LOG_PRINT(LOG_INFO, "Companion", "pack wrote %u byte(s) at 0x%08X", (unsigned) size, (unsigned) address);
+    /* game.lua can write every frame: log the first write, not sixty a second. */
+    if (g_active != &g_scripts[SCRIPT_GAME] || !g_script.loggedWrite) {
+        g_script.loggedWrite = true;
+        LOG_PRINT(LOG_INFO, "Companion", "pack wrote %u byte(s) at 0x%08X", (unsigned) size, (unsigned) address);
+    }
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -310,6 +335,7 @@ static int l_mem_write(lua_State* L) {
 }
 
 bool gbaduo_script_writes_open(void) {
+    activate(SCRIPT_COMPANION);
     return g_script.writeWindow;
 }
 
@@ -848,6 +874,7 @@ static int l_gfx_sprite(lua_State* L) {
 
 /* For tests: a copy of the decoded image for [key] ("gfx:..."), or NULL. Caller frees. */
 uint32_t* gbaduo_script_image(const char* key, int* width, int* height) {
+    activate(SCRIPT_COMPANION);
     if (strncmp(key, "gfx:", 4) != 0) return NULL;
     uint32_t wanted = (uint32_t) strtoul(key + 4, NULL, 16);
     pthread_mutex_lock(&g_imageLock);
@@ -1231,14 +1258,16 @@ static void set_error(const char* message) {
 }
 
 const char* gbaduo_script_last_error(void) {
+    activate(SCRIPT_COMPANION);
     return g_script.lastError;
 }
 
 long gbaduo_script_budget_used(void) {
+    activate(SCRIPT_COMPANION);
     return g_script.instructionBudget - g_script.instructionsLeft;
 }
 
-bool gbaduo_script_load(const char* source, const char* packDir) {
+static bool load_active(const char* source, const char* packDir) {
     if (g_script.L) {
         lua_close(g_script.L);
         g_script.L = NULL;
@@ -1248,6 +1277,9 @@ bool gbaduo_script_load(const char* source, const char* packDir) {
     g_script.lastError[0] = '\0';
     g_script.writeWindow = false;
     g_script.tapBytesLeft = 0;
+    memset(g_script.errorStreak, 0, sizeof(g_script.errorStreak));
+    g_script.disabled = false;
+    g_script.loggedWrite = false;
 
     strncpy(g_script.packDir, packDir ? packDir : "", sizeof(g_script.packDir) - 1);
 
@@ -1283,6 +1315,190 @@ bool gbaduo_script_load(const char* source, const char* packDir) {
     return true;
 }
 
+bool gbaduo_script_load(const char* source, const char* packDir) {
+    activate(SCRIPT_COMPANION);
+    return load_active(source, packDir);
+}
+
+bool gbaduo_game_load(const char* source, const char* packDir) {
+    activate(SCRIPT_GAME);
+    return load_active(source, packDir);
+}
+
+bool gbaduo_game_loaded(void) {
+    return g_scripts[SCRIPT_GAME].L != NULL;
+}
+
+const char* gbaduo_game_last_error(void) {
+    return g_scripts[SCRIPT_GAME].lastError;
+}
+
+/* ---- game.lua hooks ----------------------------------------------------------- */
+
+enum { HOOK_FRAME = 0, HOOK_WIDE = 1 };
+
+bool gbaduo_game_has(const char* hook) {
+    activate(SCRIPT_GAME);
+    if (!g_script.L) return false;
+    bool defined = lua_getglobal(g_script.L, hook) == LUA_TFUNCTION;
+    lua_pop(g_script.L, 1);
+    return defined;
+}
+
+bool gbaduo_game_enabled(void) {
+    activate(SCRIPT_GAME);
+    return g_script.L != NULL && !g_script.disabled;
+}
+
+/* A hook failed: remember why, and switch game.lua off after too many in a row. */
+static void hook_failed(int hook, const char* what, const char* err) {
+    char message[512];
+    snprintf(message, sizeof(message), "%s: %s", what, err ? err : "failed");
+    set_error(message);
+    if (++g_script.errorStreak[hook] >= GAME_MAX_ERROR_STREAK) {
+        g_script.disabled = true;
+        LOGE("game.lua switched off after %d %s errors in a row: %s", GAME_MAX_ERROR_STREAK, what, message);
+    }
+}
+
+static void push_view(lua_State* L, lua_Integer frame, int width, int left, bool withMatch, float match) {
+    lua_createtable(L, 0, 4);
+    if (frame >= 0) {
+        lua_pushinteger(L, frame);
+        lua_setfield(L, -2, "frame");
+    }
+    lua_pushinteger(L, width);
+    lua_setfield(L, -2, "width");
+    lua_pushinteger(L, left);
+    lua_setfield(L, -2, "left");
+    if (withMatch) {
+        lua_pushnumber(L, (lua_Number) match);
+        lua_setfield(L, -2, "match");
+    }
+}
+
+bool gbaduo_game_frame(int64_t frameCounter, int width, int left, bool may_write) {
+    activate(SCRIPT_GAME);
+    if (!g_script.L || g_script.disabled) return false;
+    lua_State* L = g_script.L;
+    g_script.lastError[0] = '\0';
+    if (lua_getglobal(L, "frame") != LUA_TFUNCTION) {
+        lua_pop(L, 1);
+        return true;
+    }
+    push_view(L, (lua_Integer) frameCounter, width, left, false, 0.0f);
+    start_budget(INSTRUCTION_BUDGET_PER_FRAME, TIME_BUDGET_PER_FRAME_MS);
+    g_script.writeWindow = may_write;
+    g_script.tapBytesLeft = SCRIPT_WRITE_MAX_PER_FRAME;
+    int status = lua_pcall(L, 1, 0, 0);
+    g_script.writeWindow = false;
+    g_script.tapBytesLeft = 0;
+    if (status != LUA_OK) {
+        hook_failed(HOOK_FRAME, "frame()", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return false;
+    }
+    g_script.errorStreak[HOOK_FRAME] = 0;
+    return true;
+}
+
+/* An integer field of the table on top of the stack, within [min, max]. */
+static bool world_field(lua_State* L, const char* name, lua_Integer min, lua_Integer max, lua_Integer* out) {
+    char message[96];
+    lua_getfield(L, -1, name);
+    if (!lua_isinteger(L, -1)) {
+        lua_pop(L, 1);
+        snprintf(message, sizeof(message), "result needs an integer field '%s'", name);
+        set_error(message);
+        return false;
+    }
+    lua_Integer v = lua_tointeger(L, -1);
+    lua_pop(L, 1);
+    if (v < min || v > max) {
+        snprintf(message, sizeof(message), "field '%s' is out of range", name);
+        set_error(message);
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+/* Like world_field, but a missing field is [fallback] (a present one still has to be a valid integer). */
+static bool world_field_or(lua_State* L, const char* name, lua_Integer min, lua_Integer max, lua_Integer fallback, lua_Integer* out) {
+    lua_getfield(L, -1, name);
+    bool absent = lua_isnil(L, -1);
+    lua_pop(L, 1);
+    if (absent) {
+        *out = fallback;
+        return true;
+    }
+    return world_field(L, name, min, max, out);
+}
+
+/* The world table on top of the stack into [out]; false (error set) for a bad field. */
+static bool read_world(lua_State* L, struct WideWorld* out) {
+    lua_Integer v;
+    struct WideWorld w;
+    memset(&w, 0, sizeof(w));
+#define INT_FIELD(name, lo, hi, dst) if (!world_field(L, name, lo, hi, &v)) return false; dst = v
+    INT_FIELD("x", INT32_MIN, INT32_MAX, w.x);
+    INT_FIELD("y", INT32_MIN, INT32_MAX, w.y);
+    INT_FIELD("grid", 0, UINT32_MAX, w.grid);
+    INT_FIELD("gridW", INT32_MIN, INT32_MAX, w.gridW);
+    INT_FIELD("gridH", INT32_MIN, INT32_MAX, w.gridH);
+    INT_FIELD("idMask", 0, 0xFFFF, w.idMask);
+    INT_FIELD("border", 0, UINT32_MAX, w.border);
+    INT_FIELD("borderW", INT32_MIN, INT32_MAX, w.borderW);
+    INT_FIELD("borderH", INT32_MIN, INT32_MAX, w.borderH);
+    if (!world_field_or(L, "borderShift", INT32_MIN, INT32_MAX, 0, &v)) return false;
+    w.borderShift = (int) v;
+    if (!world_field_or(L, "undefinedId", -1, 0xFFFF, -1, &v)) return false;
+    w.undefinedId = (int) v;
+    INT_FIELD("metatiles", 0, UINT32_MAX, w.metatiles);
+    INT_FIELD("metatiles2", 0, UINT32_MAX, w.metatiles2);
+    INT_FIELD("split", INT32_MIN, INT32_MAX, w.split);
+    INT_FIELD("tiles", 0, UINT32_MAX, w.tiles);
+    INT_FIELD("palette", 0, UINT32_MAX, w.palette);
+#undef INT_FIELD
+    *out = w;
+    return true;
+}
+
+bool gbaduo_game_wide(int width, int left, float match, struct WideWorld* out) {
+    activate(SCRIPT_GAME);
+    if (!g_script.L || g_script.disabled) return false;
+    lua_State* L = g_script.L;
+    g_script.lastError[0] = '\0';
+    if (lua_getglobal(L, "wide") != LUA_TFUNCTION) {
+        lua_pop(L, 1);
+        return false;
+    }
+    push_view(L, -1, width, left, true, match);
+    start_budget(INSTRUCTION_BUDGET_PER_FRAME, TIME_BUDGET_PER_FRAME_MS);
+    g_script.writeWindow = false;
+    g_script.tapBytesLeft = 0;
+    if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+        hook_failed(HOOK_WIDE, "wide()", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return false;
+    }
+    bool ok = false;
+    if (lua_isnil(L, -1) || (lua_isboolean(L, -1) && !lua_toboolean(L, -1))) {
+        g_script.errorStreak[HOOK_WIDE] = 0; /* "no world": not an error */
+    } else if (!lua_istable(L, -1)) {
+        hook_failed(HOOK_WIDE, "wide()", "must return a table, nil or false");
+    } else if (!read_world(L, out)) {
+        char reason[512];
+        snprintf(reason, sizeof(reason), "%s", g_script.lastError);
+        hook_failed(HOOK_WIDE, "wide()", reason);
+    } else {
+        g_script.errorStreak[HOOK_WIDE] = 0;
+        ok = true;
+    }
+    lua_pop(L, 1);
+    return ok;
+}
+
 /* The table on top of the stack as malloc'd JSON, popped; NULL (with [what] in the error) if too large. */
 static char* pop_json(lua_State* L, const char* what) {
     struct JsonBuf buf = {0};
@@ -1304,6 +1520,7 @@ static char* pop_json(lua_State* L, const char* what) {
 }
 
 char* gbaduo_script_tick(void) {
+    activate(SCRIPT_COMPANION);
     if (!g_script.L) {
         return NULL;
     }
@@ -1361,6 +1578,7 @@ static int call_action(lua_State* L) {
 }
 
 char* gbaduo_script_action(const char* name, gbaduo_push_args push, void* userdata, int nargs, bool may_write) {
+    activate(SCRIPT_COMPANION);
     if (!g_script.L) {
         return NULL;
     }
@@ -1393,7 +1611,7 @@ char* gbaduo_script_action(const char* name, gbaduo_push_args push, void* userda
     return pop_json(L, "action");
 }
 
-void gbaduo_script_unload(void) {
+static void unload_active(void) {
     if (g_script.L) {
         lua_close(g_script.L);
         g_script.L = NULL;
@@ -1402,6 +1620,16 @@ void gbaduo_script_unload(void) {
     g_script.memUsed = 0;
     g_script.writeWindow = false;
     g_script.tapBytesLeft = 0;
+}
+
+void gbaduo_script_unload(void) {
+    activate(SCRIPT_COMPANION);
+    unload_active();
+}
+
+void gbaduo_game_unload(void) {
+    activate(SCRIPT_GAME);
+    unload_active();
 }
 
 /* ---- JNI entry points (NativeCore) ------------------------------------------ */
@@ -1502,6 +1730,7 @@ static int build_ui(lua_State* L) {
 
 JNIEXPORT void JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_setScriptUi(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray values) {
+    activate(SCRIPT_COMPANION);
     if (!g_script.L) {
         return;
     }
@@ -1553,12 +1782,11 @@ Java_com_khumam_gbaduo_emu_NativeCore_callScriptAction(JNIEnv* env, jobject thiz
     return result;
 }
 
-JNIEXPORT jstring JNICALL
-Java_com_khumam_gbaduo_emu_NativeCore_lastScriptError(JNIEnv* env, jobject thiz) {
-    /* Lua error messages can quote script bytes; keep only valid UTF-8 for NewStringUTF. */
-    char safe[sizeof(g_script.lastError)];
-    const unsigned char* s = (const unsigned char*) g_script.lastError;
-    size_t n = strlen(g_script.lastError);
+/* Lua error messages can quote script bytes; keep only valid UTF-8 for NewStringUTF. */
+static jstring error_string(JNIEnv* env, const char* message) {
+    char safe[512];
+    const unsigned char* s = (const unsigned char*) message;
+    size_t n = strlen(message);
     size_t out = 0;
     for (size_t i = 0; i < n && out < sizeof(safe) - 1;) {
         uint32_t cp;
@@ -1576,6 +1804,44 @@ Java_com_khumam_gbaduo_emu_NativeCore_lastScriptError(JNIEnv* env, jobject thiz)
     return (*env)->NewStringUTF(env, safe);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_lastScriptError(JNIEnv* env, jobject thiz) {
+    return error_string(env, gbaduo_script_last_error());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_lastGameError(JNIEnv* env, jobject thiz) {
+    return error_string(env, gbaduo_game_last_error());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_loadGameScript(JNIEnv* env, jobject thiz, jstring source, jstring packDir) {
+    const char* packDirChars = (*env)->GetStringUTFChars(env, packDir, NULL);
+    const char* sourceChars = (*env)->GetStringUTFChars(env, source, NULL);
+    bool ok = packDirChars && sourceChars && gbaduo_game_load(sourceChars, packDirChars);
+    if (sourceChars) (*env)->ReleaseStringUTFChars(env, source, sourceChars);
+    if (packDirChars) (*env)->ReleaseStringUTFChars(env, packDir, packDirChars);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_unloadGameScript(JNIEnv* env, jobject thiz) {
+    gbaduo_game_unload();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_gameHas(JNIEnv* env, jobject thiz, jstring hook) {
+    const char* hookChars = (*env)->GetStringUTFChars(env, hook, NULL);
+    bool has = hookChars && gbaduo_game_has(hookChars);
+    if (hookChars) (*env)->ReleaseStringUTFChars(env, hook, hookChars);
+    return has ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_gameFrame(JNIEnv* env, jobject thiz, jlong frame, jint width, jint left, jboolean mayWrite) {
+    return gbaduo_game_frame((int64_t) frame, width, left, mayWrite == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_unloadScript(JNIEnv* env, jobject thiz) {
     gbaduo_script_unload();
@@ -1583,6 +1849,7 @@ Java_com_khumam_gbaduo_emu_NativeCore_unloadScript(JNIEnv* env, jobject thiz) {
 
 JNIEXPORT jintArray JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_nativeImage(JNIEnv* env, jobject thiz, jstring key) {
+    activate(SCRIPT_COMPANION);
     const char* keyChars = (*env)->GetStringUTFChars(env, key, NULL);
     uint32_t wanted = 0;
     if (strncmp(keyChars, "gfx:", 4) == 0) {

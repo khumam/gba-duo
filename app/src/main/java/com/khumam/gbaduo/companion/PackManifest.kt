@@ -27,6 +27,8 @@ data class PackManifest(
     val styleFiles: List<String> = emptyList(),
     /** What the pack may do beyond reading the game: see [PERMISSIONS]. */
     val permissions: Set<String> = emptySet(),
+    /** The pack's game.lua (relative to the pack root), run against the game itself every frame; see [GameScriptAccess]. */
+    val gameScriptFile: String? = null,
 ) {
     /** The pack's actions may change the game's RAM (`mem.write*`), once the player allows it. */
     val canWriteMemory: Boolean get() = MEMORY_WRITE in permissions
@@ -38,10 +40,11 @@ data class PackManifest(
     class InvalidManifestException(message: String) : Exception(message)
 
     companion object {
-        /** 1: original format. 2: adds `styles` (CSS). 3: adds `permissions`. */
-        const val SUPPORTED_FORMAT_VERSION = 3
+        /** 1: original format. 2: adds `styles` (CSS). 3: adds `permissions`. 4: adds `gameScript`. */
+        const val SUPPORTED_FORMAT_VERSION = 4
         private const val STYLES_FORMAT_VERSION = 2
         private const val PERMISSIONS_FORMAT_VERSION = 3
+        private const val GAME_SCRIPT_FORMAT_VERSION = 4
 
         const val MEMORY_WRITE = "memory-write"
 
@@ -97,6 +100,10 @@ data class PackManifest(
             if (permissionsJson != null && formatVersion < PERMISSIONS_FORMAT_VERSION) {
                 throw InvalidManifestException("'permissions' needs formatVersion $PERMISSIONS_FORMAT_VERSION")
             }
+            val gameScriptFile = root.optString("gameScript", "").ifBlank { null }
+            if (gameScriptFile != null && formatVersion < GAME_SCRIPT_FORMAT_VERSION) {
+                throw InvalidManifestException("'gameScript' needs formatVersion $GAME_SCRIPT_FORMAT_VERSION")
+            }
             val unknown = permissions - PERMISSIONS
             if (unknown.isNotEmpty()) {
                 throw InvalidManifestException("Unknown permission ${unknown.joinToString()}")
@@ -116,6 +123,7 @@ data class PackManifest(
                 values = values,
                 styleFiles = styleFiles,
                 permissions = permissions,
+                gameScriptFile = gameScriptFile,
             )
         }
     }

@@ -13,6 +13,7 @@ import android.widget.Toast
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.achievements.AchievementPopups
 import com.khumam.gbaduo.achievements.RetroAchievements
+import com.khumam.gbaduo.companion.WideControl
 import com.khumam.gbaduo.companion.CompanionActivity
 import com.khumam.gbaduo.companion.CompanionController
 import com.khumam.gbaduo.companion.CompanionPlacement
@@ -132,6 +133,7 @@ class PlayerActivity : Activity() {
         gameView.setAspectRatio(AspectSettings.default(this))
         gameView.setTiltShift(TiltShiftSettings.default(this))
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
+        emu.wideEnabled = storage.settings.getString(GameSettingsKeys.WIDE) == GameSettingsKeys.WIDE_ON
         saveMirror?.let { mirror ->
             emu.onSaveDataChanged = mirror::requestOut
             // After the core is unloaded, so the save it writes on the way out is included.
@@ -141,6 +143,17 @@ class PlayerActivity : Activity() {
 
         // The quick menu and companion screen talk to the core, so wait until the emu thread has loaded it.
         waitForLoadThenSetUp(gameView, header, crc32, storage)
+    }
+
+    /** Wide view on or off for this game (from the companion screen's button), kept in the game's settings. */
+    private fun setWide(on: Boolean, storage: GameStorage) {
+        if (on && !emu.wideAvailable) {
+            Toast.makeText(this, R.string.wide_unavailable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        storage.settings.put(GameSettingsKeys.WIDE, if (on) GameSettingsKeys.WIDE_ON else null)
+        emu.wideEnabled = on
+        emu.requestSnapshot()
     }
 
     private fun waitForLoadThenSetUp(gameView: GameView, header: RomHeader, crc32: Long, storage: GameStorage) {
@@ -214,7 +227,9 @@ class PlayerActivity : Activity() {
         // Taps on the companion screen reach the pack's Lua through the emu thread.
         emu.onActionResult = { result -> runOnUiThread { companionScreen?.applyScriptResult(result) } }
         controller.onUiChange = emu::setUiState
-        controller.onScriptCall = emu::callAction
+        controller.onScriptCall = { name, args ->
+            if (WideControl.handles(name)) setWide(WideControl.next(emu.wideEnabled, args), storage) else emu.callAction(name, args)
+        }
         emu.setUiState(controller.uiState)
     }
 

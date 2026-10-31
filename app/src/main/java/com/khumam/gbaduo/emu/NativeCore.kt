@@ -24,6 +24,20 @@ object NativeCore {
 
     /** Video output size of the loaded game: 240x160 for GBA, 160x144 for GB/GBC. 0 if no core loaded. */
     external fun videoWidth(): Int
+
+    /**
+     * Wide view (GBA games only), between frames: draws the game's 240-wide frame in the middle of a
+     * picture [width] wide (even, clamped to 240..400; 240 = off) and returns the width now in effect.
+     * Call [videoWidth] and `GameView.setVideoSize` afterwards. The margins are painted from game.lua's
+     * `wide()` each frame while it holds up; a game with no `wide()` just shows black margins.
+     */
+    external fun setWide(width: Int): Int
+
+    /** Whether the last frame showed painted margins. */
+    external fun wideShown(): Boolean
+
+    /** How well game.lua's world predicted the frame's edge columns last frame, 0..1 (for calibration). */
+    external fun wideMatch(): Float
     external fun videoHeight(): Int
 
     /** Fills [out] (interleaved stereo s16) with as many frames as available; returns frame count. */
@@ -68,6 +82,28 @@ object NativeCore {
     external fun lastScriptError(): String?
 
     external fun unloadScript()
+
+    /**
+     * The pack's game.lua: a second sandbox next to the companion's, run against the game
+     * itself. [loadGameScript] replaces any loaded one (top level, then `init()`; false on
+     * failure, see [lastGameError]).
+     */
+    external fun loadGameScript(source: String, packDir: String): Boolean
+
+    external fun unloadGameScript()
+
+    /** Whether game.lua defines a global function [hook] (`"frame"` or `"wide"`). */
+    external fun gameHas(hook: String): Boolean
+
+    /**
+     * Calls game.lua's `frame({frame, width, left})`. [mayWrite]: whether its `mem.write*` may
+     * change the game during this call (the pack has the memory-write permission and the player
+     * allowed it); writes are refused at every other time, in native code. False on an error.
+     */
+    external fun gameFrame(frame: Long, width: Int, left: Int, mayWrite: Boolean): Boolean
+
+    /** Reason the last game.lua load or hook call failed, if any. */
+    external fun lastGameError(): String?
 
     /** `[width, height, ...ARGB8888 pixels]` for a `"gfx:..."` key from `gfx.decode`, or null if unknown. */
     external fun nativeImage(key: String): IntArray?

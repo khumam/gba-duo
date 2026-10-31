@@ -314,6 +314,9 @@ The checks live in the app, not in the pack's Lua, so a pack can't skip them:
 Writes don't roll back: if an action writes and then errors, what it wrote
 stays. Write last, after every check.
 
+A pack can also change the game on its own, every frame, from a `game.lua`:
+see [game.lua](game-script.md).
+
 Find real addresses before you write anything, and check a "safe to act"
 condition first: a wrong write can crash the game or spoil the save. See
 [`examples/zelda-items`](examples/zelda-items) and its notes on finding addresses.

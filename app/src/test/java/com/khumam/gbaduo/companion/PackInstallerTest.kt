@@ -101,4 +101,18 @@ class PackInstallerTest {
         val complete = zipOf(tmp, mapOf("manifest.json" to withStyles, "layout.json" to validLayout, "style.css" to "text { color: red }"))
         assertEquals(listOf("style.css"), PackInstaller.install(complete, packsDir).styleFiles)
     }
+
+    @Test
+    fun requiresDeclaredGameScript() {
+        val tmp = createTempDir()
+        val packsDir = File(tmp, "packs").apply { mkdirs() }
+        val withGame = validManifest.replace("\"formatVersion\":1", "\"formatVersion\":4,\"gameScript\":\"game.lua\"")
+        val missing = zipOf(tmp, mapOf("manifest.json" to withGame, "layout.json" to validLayout))
+        val error = runCatching { PackInstaller.install(missing, packsDir) }.exceptionOrNull()
+        assertTrue(error is PackInstaller.InstallException && error.message!!.contains("game.lua"))
+
+        val complete = zipOf(tmp, mapOf("manifest.json" to withGame, "layout.json" to validLayout, "game.lua" to "function frame() end"))
+        assertEquals("game.lua", PackInstaller.install(complete, packsDir).gameScriptFile)
+        assertTrue(File(packsDir, "demo-pipeline/game.lua").isFile)
+    }
 }

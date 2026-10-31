@@ -2,6 +2,7 @@ package com.khumam.gbaduo.companion
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -97,6 +98,19 @@ class PackManifestTest {
         assertEquals(2, manifest.formatVersion)
         assertEquals(listOf("style.css", "theme/dark.css"), manifest.styleFiles)
         assertEquals(emptyList<String>(), PackManifest.parse(validJson).styleFiles)
+    }
+
+    @Test
+    fun formatVersion4AcceptsGameScript() {
+        val v4 = validJson.replace(""""formatVersion": 1""", """"formatVersion": 4, "gameScript": "game.lua"""")
+        assertEquals("game.lua", PackManifest.parse(v4).gameScriptFile)
+        assertNull(PackManifest.parse(validJson).gameScriptFile)
+        assertNull(PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 4""")).gameScriptFile)
+    }
+
+    @Test(expected = PackManifest.InvalidManifestException::class)
+    fun gameScriptNeedsFormatVersion4() {
+        PackManifest.parse(validJson.replace(""""formatVersion": 1""", """"formatVersion": 3, "gameScript": "game.lua""""))
     }
 
     @Test(expected = PackManifest.InvalidManifestException::class)

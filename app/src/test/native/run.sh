@@ -19,4 +19,9 @@ clang $flags -DGBADUO_HOST_TEST -DLUA_PATTERN_STEP_HOOK=gbaduo_pattern_step -I"$
     "$here/script_harness.c" "$here/fake_bus.c" "$cpp/script.c" "$cpp/memwrite.c" $lua_sources \
     -lm -lpthread -o "$out/script_harness"
 
+clang $flags -I"$cpp" -I"$here" \
+    "$here/wide_harness.c" "$here/fake_bus.c" "$cpp/wide.c" \
+    -lm -o "$out/wide_harness"
+
+ASAN_OPTIONS=detect_leaks=${DETECT_LEAKS:-0} UBSAN_OPTIONS=print_stacktrace=1 "$out/wide_harness"
 ASAN_OPTIONS=detect_leaks=${DETECT_LEAKS:-0} UBSAN_OPTIONS=print_stacktrace=1 "$out/script_harness"

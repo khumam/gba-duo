@@ -66,6 +66,7 @@
     <string name="tilt_label">Tilt-shift: %s</string>
     <string name="scale_label_on">Integer scaling: On</string>
     <string name="scale_label_off">Integer scaling: Off</string>
+    <string name="wide_unavailable">This game\'s pack has no wide view.</string>
     <string name="companion_pack">Companion pack</string>
     <string name="import_pack">Import pack…</string>
     <string name="pack_web_get">Get from the web…</string>

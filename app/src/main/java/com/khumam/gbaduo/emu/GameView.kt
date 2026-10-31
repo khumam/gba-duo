@@ -57,9 +57,22 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         requestRender()
     }
 
+    /** The surface's size in pixels (0 x 0 until it exists), for [WideView]. Thread-safe. */
+    val surfaceSize: Pair<Int, Int> get() = renderer.surfaceWidth to renderer.surfaceHeight
+
+    val integerScaling: Boolean get() = renderer.integerScale
+
+    val aspectRatio: AspectRatio get() = renderer.aspect
+
     /** Thread-safe; read by the GL thread on the next frame. */
     fun setIntegerScaling(enabled: Boolean) {
         renderer.integerScale = enabled
+        requestRender()
+    }
+
+    /** Thread-safe: shows the picture in [aspect] instead of the chosen one (null: the chosen one). Used by wide view. */
+    fun setAspectOverride(aspect: AspectRatio?) {
+        renderer.aspectOverride = aspect
         requestRender()
     }
 
@@ -80,6 +93,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         @Volatile var colorMode = 0f
         @Volatile var integerScale = false
         @Volatile var aspect = AspectRatio.ORIGINAL
+        @Volatile var aspectOverride: AspectRatio? = null
         @Volatile var tiltShift = TiltShift.OFF
         @Volatile var videoSize: Pair<Int, Int> = 240 to 160
 
@@ -108,8 +122,8 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var tiltWidth = 0
         private var tiltHeight = 0
         private var tiltReady = false
-        private var surfaceWidth = 0
-        private var surfaceHeight = 0
+        @Volatile var surfaceWidth = 0
+        @Volatile var surfaceHeight = 0
         private lateinit var vertexBuffer: FloatBuffer
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -141,7 +155,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
 
         /** Viewport in the chosen [AspectRatio] (whole-number scaled if enabled), centered; black bars on the rest. */
         private fun applyViewport(videoWidth: Int, videoHeight: Int) {
-            val (width, height) = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspect, integerScale)
+            val (width, height) = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspectOverride ?: aspect, integerScale)
             GLES20.glViewport((surfaceWidth - width) / 2, (surfaceHeight - height) / 2, width, height)
         }
 
@@ -162,7 +176,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
             )
 
-            val size = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspect, integerScale)
+            val size = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspectOverride ?: aspect, integerScale)
             val x = (surfaceWidth - size.width) / 2
             val y = (surfaceHeight - size.height) / 2
             // A picture that isn't a whole-number multiple of the game would get rows and columns of uneven
