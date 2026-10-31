@@ -16,7 +16,7 @@ lua_sources=$(ls "$lua"/*.c | grep -v -e '/lua\.c$' -e '/luac\.c$')
 flags="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wno-unused-function"
 
 clang $flags -DGBADUO_HOST_TEST -DLUA_PATTERN_STEP_HOOK=gbaduo_pattern_step -I"$cpp" -I"$lua" -I"$here" \
-    "$here/script_harness.c" "$here/fake_bus.c" "$cpp/script.c" "$cpp/memwrite.c" $lua_sources \
+    "$here/script_harness.c" "$here/fake_bus.c" "$cpp/script.c" "$cpp/wide.c" "$cpp/memwrite.c" $lua_sources \
     -lm -lpthread -o "$out/script_harness"
 
 clang $flags -I"$cpp" -I"$here" \

@@ -540,6 +540,85 @@ static void game_load_failure_leaves_companion_alone(void) {
     free(tick);
 }
 
+/* ---- gfx.layers ------------------------------------------------------------------- */
+
+/* the wide view's colours: each 5-bit channel widened by repeating its top bits */
+static uint32_t argb_wide(uint16_t c) {
+    uint32_t r = c & 31, g = c >> 5 & 31, b = c >> 10 & 31;
+    return 0xFF000000u | (r << 3 | r >> 2) << 16 | (g << 3 | g >> 2) << 8 | (b << 3 | b >> 2);
+}
+
+static void layers_renders_the_live_map(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    const uint32_t GRID = 0x02010000, MT = 0x02011000, TILES = 0x02012000, PAL = 0x02013000;
+    poke16(PAL + 2, 0x001F);                                  /* index 1: red */
+    poke16(PAL + 4, 0x03E0);                                  /* index 2: green */
+    for (int i = 0; i < 32; i++) { gbaduo_bus_write8(TILES + 32 + (uint32_t) i, 0x11); gbaduo_bus_write8(TILES + 64 + (uint32_t) i, 0x22); }
+    for (int i = 0; i < 4; i++) { poke16(MT + 1 * 8 + (uint32_t) i * 2, 1); poke16(MT + 2 * 8 + (uint32_t) i * 2, 2); }
+    poke16(GRID, 1);                                          /* u32 cell (0,0): metatile 1 */
+    poke16(GRID + 4, 2);                                      /* (1,0): metatile 2 */
+    const char* src =
+        "function update() return { k = gfx.layers{ x = 0, y = 0, width = 48, height = 16, palette = 0x02013000,"
+        " layers = { { grid = 0x02010000, cellBytes = 4, stride = 4, gridW = 2, gridH = 1, idMask = 0xFFF,"
+        " metatiles = 0x02011000, tiles = 0x02012000 } } } } end";
+    load(src);
+    char* r = gbaduo_script_tick();
+    int w = 0, h = 0;
+    uint32_t* px = image_of(r, &w, &h);
+    CHECK(px != NULL && w == 48 && h == 16);
+    if (px) {
+        CHECK(px[0] == argb_wide(0x001F));                        /* metatile 1 */
+        CHECK(px[16] == argb_wide(0x03E0));                       /* metatile 2 */
+        CHECK(px[32] == 0u && px[47] == 0u);                 /* outside the grid: transparent */
+        free(px);
+    }
+    char key1[32] = {0};
+    if (r) sscanf(strstr(r, "gfx:"), "%12[^\"]", key1);
+    free(r);
+    r = gbaduo_script_tick();                                 /* nothing changed: the same picture, the same key */
+    CHECK(r != NULL && strstr(r, key1) != NULL);
+    free(r);
+    poke16(GRID, 2);                                          /* the map changes: another key */
+    r = gbaduo_script_tick();
+    CHECK(r != NULL && strstr(r, key1) == NULL);
+    free(r);
+
+    /* scale 2: every output pixel is the world pixel at the centre of its 2x2 block. */
+    load("function update() return { k = gfx.layers{ x = 0, y = 0, width = 16, height = 8, scale = 2, palette = 0x02013000,"
+         " layers = { { grid = 0x02010000, cellBytes = 4, stride = 4, gridW = 2, gridH = 1, idMask = 0xFFF,"
+         " metatiles = 0x02011000, tiles = 0x02012000 } } } } end");
+    r = gbaduo_script_tick();
+    px = image_of(r, &w, &h);
+    CHECK(px != NULL && w == 16 && h == 8);
+    if (px) {
+        CHECK(px[0] == argb_wide(0x03E0));                        /* world x 1 is metatile 2 (the grid was changed above) */
+        CHECK(px[7] == argb_wide(0x03E0) && px[8] == argb_wide(0x03E0));
+        free(px);
+    }
+    free(r);
+}
+
+static void layers_rejects_bad_arguments(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    const char* L1 = "layers = { { grid = 0x02010000, stride = 4, gridW = 2, gridH = 1, idMask = 0xFFF, metatiles = 0x02011000, tiles = 0x02012000 } }";
+    const char* bad[] = {
+        "gfx.layers{ x = 0, y = 0, width = 600, height = 8, palette = 0, %s }",
+        "gfx.layers{ x = 0, y = 0, width = 8, height = 8, scale = 9, palette = 0, %s }",
+        "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0 }",              /* no layers */
+        "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0, layers = {} }",
+        "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0, layers = { { grid = 0 } } }",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        char call[512], src[640];
+        snprintf(call, sizeof(call), bad[i], L1);
+        snprintf(src, sizeof(src), "actions = {} function actions.go() %s end", call);
+        load(src);
+        char* r = action("go", 0);
+        CHECK(r == NULL && strstr(gbaduo_script_last_error(), "gfx.layers") != NULL);
+        free(r);
+    }
+}
+
 /* ---- game.lua hooks: frame() and wide() -------------------------------------------- */
 
 static void gload(const char* source) {
@@ -716,6 +795,8 @@ int main(void) {
     slow_ticks_hit_the_time_limit();
     sprite_composes_parts();
     sprite_rejects_bad_parts();
+    layers_renders_the_live_map();
+    layers_rejects_bad_arguments();
     cache_keeps_many_small_images();
     two_instances_dont_share_state();
     unloading_one_leaves_the_other();

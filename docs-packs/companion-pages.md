@@ -240,6 +240,18 @@ local sword = gfx.sprite{
     { x = 0, y = 0, w = 16, h = 16, tile = 0x1A0, bank = 3, hflip = false, vflip = false },
   },
 }
+
+-- A live map: the layers a game.lua wide() would return (see game-script.md), read from
+-- emulated memory now, so the picture follows the game. At most 512 x 512 px; `scale`
+-- (1 to 8, default 1) is how many map pixels one picture pixel stands for. Outside the
+-- grids it is transparent. The same map gives the same key, so calling it every tick is fine.
+local area = gfx.layers{
+  x = 0, y = 0,          -- world pixel of the picture's top-left
+  width = 192, height = 192, scale = 2,
+  palette = 0x05000000,
+  layers = { { grid = 0x02001000, cellBytes = 4, stride = 64, gridW = 40, gridH = 40,
+               idMask = 0xFFF, metatiles = 0x02009000, tiles = 0x06004000 } },
+}
 ```
 
 - Everything is read raw from emulated memory, or LZ77-compressed with `lz77 = true`

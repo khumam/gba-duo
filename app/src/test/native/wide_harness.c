@@ -306,8 +306,44 @@ static void layered_world_top_over_bottom_and_black_outside(void) {
     shifted.x = 80;                                       /* world x 0 is the left margin's last column + 1 */
     wide_paint(&shifted, buf, 400, 80, 0);
     CHECK(buf[0] == wide_pixel(&shifted, 0, 0));
-    w.layerCount = 3;
+    w.layerCount = WIDE_MAX_LAYERS + 1;
     CHECK(!wide_world_valid(&w));
+    w.layerCount = 2;
+    w.layers[1].cellBytes = 3;
+    CHECK(!wide_world_valid(&w));                        /* a cell is 2 or 4 bytes */
+}
+
+/* Three layers of u32 cells: the id is the cell's low bits (idMask), its other bits are ignored. */
+static void three_layers_of_u32_cells(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    enum { G0 = 0x02010000u, G1 = 0x02011000u, G2 = 0x02012000u, MT = 0x02020000u, TILES = 0x06000000u };
+    poke16(PALETTE, 0x7C00);
+    poke16(PALETTE + 2, 0x001F);
+    poke16(PALETTE + 4, 0x03E0);
+    poke16(PALETTE + 6, 0x7FFF);
+    for (int i = 0; i < 32; i++) poke8(TILES + 1 * 32 + (uint32_t) i, 0x11);
+    for (int i = 0; i < 32; i++) poke8(TILES + 2 * 32 + (uint32_t) i, 0x22);
+    for (int i = 0; i < 32; i++) poke8(TILES + 3 * 32 + (uint32_t) i, 0x33);
+    for (int i = 0; i < 4; i++) { poke16(MT + 1 * 8 + (uint32_t) i * 2, 1); poke16(MT + 2 * 8 + (uint32_t) i * 2, 2); poke16(MT + 3 * 8 + (uint32_t) i * 2, 3); }
+    poke16(G0, 1); poke16(G0 + 2, 0x0100);               /* cell (0,0): u32 0x01000001: id 1, junk above */
+    poke16(G1, 2); poke16(G1 + 2, 0x0300);               /* the middle layer shows id 2 over it */
+    poke16(G2 + 4, 3);                                   /* the top layer covers only cell (1,0) */
+    struct WideWorld w = {
+        .palette = PALETTE, .layerCount = 3,
+        .layers = {
+            { .grid = G0, .cellBytes = 4, .stride = 4, .gridW = 2, .gridH = 1, .idMask = 0xFFF, .metatiles = MT, .tiles = TILES },
+            { .grid = G1, .cellBytes = 4, .stride = 4, .gridW = 2, .gridH = 1, .idMask = 0xFFF, .metatiles = MT, .tiles = TILES },
+            { .grid = G2, .cellBytes = 4, .stride = 4, .gridW = 2, .gridH = 1, .idMask = 0xFFF, .metatiles = MT, .tiles = TILES },
+        },
+    };
+    CHECK(wide_world_valid(&w));
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(0x03E0));   /* middle layer (index 2) over the bottom one (index 1) */
+    CHECK(wide_pixel(&w, 16, 0) == wide_color(0x7FFF));  /* top layer, index 3, over empty cells */
+    CHECK(wide_pixel(&w, 32, 0) == 0u);                  /* outside the grids: black */
+    uint32_t buf[400 * 160];
+    w.x = 80;                                            /* world x 0 is the left margin's first column */
+    wide_paint(&w, buf, 400, 80, 0);
+    CHECK(buf[0] == wide_pixel(&w, 0, 0) && buf[16] == wide_pixel(&w, 16, 0)); /* the painted row reads the same u32 cells */
 }
 
 int main(void) {
@@ -319,6 +355,7 @@ int main(void) {
     undefined_cell_uses_border();
     split_selects_second_table();
     layered_world_top_over_bottom_and_black_outside();
+    three_layers_of_u32_cells();
     paint_fills_only_margins();
     paint_equals_pixelwise_reference();
     paint_survives_garbage_addresses();

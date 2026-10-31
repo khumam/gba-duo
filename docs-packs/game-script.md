@@ -67,17 +67,18 @@ A metatile is 8 u16 tile entries: bottom layer TL, TR, BL, BR, then top layer TL
 A tile entry: bits 0-9 tile, 10 h-flip, 11 v-flip, 12-15 palette bank. A pixel is the top
 layer's if that is not colour 0, else the bottom layer's, else the backdrop.
 
-### Two layers (`layers`)
+### Several layers (`layers`)
 
-A game whose map is two separate grids (e.g. The Minish Cap) returns `layers` instead of the single-grid
-fields above: `{ x, y, palette, layers = { bottom, top } }` (one or two tables, bottom first). Each
-layer has its own grid, its own metatile table and its own tile data:
+A game whose map is separate grids (e.g. The Minish Cap, Golden Sun) returns `layers` instead of the
+single-grid fields above: `{ x, y, palette, layers = { bottom, ..., top } }` (one to three tables,
+bottom first). Each layer has its own grid, its own metatile table and its own tile data:
 
 | Layer field | Meaning |
 |---|---|
-| `grid`, `stride`, `gridW`, `gridH` | u16 cells, row-major, `stride` cells a row, `gridW` x `gridH` of them in use |
+| `grid`, `stride`, `gridW`, `gridH` | cells, row-major, `stride` cells a row, `gridW` x `gridH` of them in use |
+| `cellBytes` (optional, 2) | 2 for u16 cells, 4 for u32 cells (the id is the cell's low bits, see `idMask`) |
 | `idMask` | metatile id = cell & `idMask` |
-| `special` (optional, 0) | a u16 table: a cell >= `0x4000` reads its id from `special[cell - 0x4000]` |
+| `special` (optional, 0) | a u16 table: a u16 cell >= `0x4000` reads its id from `special[cell - 0x4000]` |
 | `metatiles` | 4 u16 tile entries (TL, TR, BL, BR) per id, 8 bytes each |
 | `tiles` | 4bpp tile data for this layer (its BG's character base) |
 
@@ -106,7 +107,9 @@ pack has no `wide()`).
 ```
 
 `zelda-the-minish-cap-companion/game.lua` is the two-layer example (camera and room origin from
-`gRoomControls`, layers from `gMapTop` / `gMapBottom`). `pokemon-firered-companion/game.lua` is a worked example (FireRed 1.0): it reads the map the
+`gRoomControls`, layers from `gMapTop` / `gMapBottom`). `golden-sun-companion/game.lua` is the
+three-layer one with u32 cells: one grid in EWRAM holds the three BG layers side by side, so each
+layer's `grid` starts at its block of columns and all three share the same `x`, `y`. `pokemon-firered-companion/game.lua` is a worked example (FireRed 1.0): it reads the map the
 game keeps in RAM (`gBackupMapLayout`) and the tilesets from the ROM layout. It follows the camera
 from the BG scroll registers (`mem.u16(0x04000014)`), anchored whenever the player stands still,
 and keeps following across a map connection: the game rebases the tile coordinates there (the

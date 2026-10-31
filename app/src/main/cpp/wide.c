@@ -9,11 +9,11 @@
 #define SEAM_COLUMNS 8
 
 static bool layers_valid(const struct WideWorld* w) {
-    if (w->layerCount < 1 || w->layerCount > 2) return false;
+    if (w->layerCount < 1 || w->layerCount > WIDE_MAX_LAYERS) return false;
     for (int i = 0; i < w->layerCount; i++) {
         const struct WideLayer* l = &w->layers[i];
         if (l->gridW < 1 || l->gridW > MAX_CELLS || l->gridH < 1 || l->gridH > MAX_CELLS ||
-            l->stride < l->gridW || l->stride > MAX_CELLS) {
+            l->stride < l->gridW || l->stride > MAX_CELLS || (l->cellBytes != 0 && l->cellBytes != 2 && l->cellBytes != 4)) {
             return false;
         }
     }
@@ -59,8 +59,14 @@ static bool layer_entry(const struct WideLayer* l, int32_t wx, int32_t wy, uint1
     if (cx < 0 || cx >= l->gridW || cy < 0 || cy >= l->gridH) return false;
     int px = (int) (wx - cx * 16);
     int py = (int) (wy - cy * 16);
-    uint32_t id = gbaduo_bus_read16(l->grid + ((uint32_t) cy * (uint32_t) l->stride + (uint32_t) cx) * 2u);
-    if (id >= 0x4000u && l->special != 0) id = gbaduo_bus_read16(l->special + (id - 0x4000u) * 2u);
+    uint32_t cell = l->grid + ((uint32_t) cy * (uint32_t) l->stride + (uint32_t) cx) * (l->cellBytes == 4 ? 4u : 2u);
+    uint32_t id;
+    if (l->cellBytes == 4) {
+        id = gbaduo_bus_read32(cell);
+    } else {
+        id = gbaduo_bus_read16(cell);
+        if (id >= 0x4000u && l->special != 0) id = gbaduo_bus_read16(l->special + (id - 0x4000u) * 2u);
+    }
     id &= l->idMask;
     *entry = gbaduo_bus_read16(l->metatiles + id * 8u + (uint32_t) ((py >> 3) * 2 + (px >> 3)) * 2u);
     *tx = px & 7;
@@ -183,9 +189,9 @@ static void span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int
 
 /* [n] (1..8) pixels of a layered world, inside one 8-pixel tile column: per layer, one set of bus reads. */
 static void layered_span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out) {
-    uint32_t rows[2] = {0, 0};
-    uint16_t entries[2] = {0, 0};
-    bool has[2] = {false, false};
+    uint32_t rows[WIDE_MAX_LAYERS] = {0};
+    uint16_t entries[WIDE_MAX_LAYERS] = {0};
+    bool has[WIDE_MAX_LAYERS] = {false};
     bool inside = false;
     int tx0 = 0;
     for (int i = 0; i < w->layerCount; i++) {
@@ -249,6 +255,25 @@ void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, 
         int32_t wy = w->y + row;
         wide_row(w, pal, wy, w->x - left, left, line);
         wide_row(w, pal, wy, w->x + WIDE_FRAME_W, right, line + left + WIDE_FRAME_W);
+    }
+}
+
+void wide_render(const struct WideWorld* w, uint32_t* out, int width, int height, int scale) {
+    if (!wide_world_valid(w) || scale < 1) {
+        for (size_t i = 0; i < (size_t) width * (size_t) height; i++) out[i] = 0;
+        return;
+    }
+    uint32_t pal[256];
+    load_palette(w, pal);
+    for (int row = 0; row < height; row++) {
+        int32_t wy = w->y + row * scale + scale / 2;
+        for (int col = 0; col < width; col++) {
+            uint32_t c;
+            wide_row(w, pal, wy, w->x + col * scale + scale / 2, 1, &c);
+            /* wide_color is 0x00BBGGRR; black is 0 too, so a black pixel reads as outside: fine for a map */
+            out[(size_t) row * (size_t) width + (size_t) col] =
+                c == 0 ? 0u : 0xFF000000u | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF);
+        }
     }
 }
 

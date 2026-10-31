@@ -750,6 +750,69 @@ static int l_gfx_tilemap(lua_State* L) {
     return 1;
 }
 
+static bool read_world(lua_State* L, struct WideWorld* out);
+
+/* A whole area map is taller than a sprite sheet: gfx.layers pictures can be larger than the other gfx ones. */
+#define LAYERS_MAX_DIMENSION 512
+
+/*
+ * gfx.layers{ x, y, width, height, scale, palette, layers = {...} } -> "gfx:..." key.
+ *
+ * A picture of a game's live map, the same description wide() returns (see game-script.md): the
+ * layers' grids are read from emulated memory now, so the picture follows the game. It shows
+ * [width] x [height] px (at most 512 each), each the world pixel at the centre of a [scale] x [scale] block (scale 1..8,
+ * default 1), the first block's top-left at world ([x], [y]). Outside the grids it is transparent.
+ * The key depends on the pixels, so an unchanged map gives the same key.
+ */
+static int l_gfx_layers(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_settop(L, 1);
+    lua_getfield(L, 1, "width");
+    lua_Integer width = luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "height");
+    lua_Integer height = luaL_checkinteger(L, -1);
+    lua_getfield(L, 1, "scale");
+    lua_Integer scale = lua_isnil(L, -1) ? 1 : luaL_checkinteger(L, -1);
+    lua_pop(L, 3);
+    if (width <= 0 || height <= 0 || width > LAYERS_MAX_DIMENSION || height > LAYERS_MAX_DIMENSION) {
+        return luaL_error(L, "gfx.layers: width/height must be 1 to %d", LAYERS_MAX_DIMENSION);
+    }
+    if (scale < 1 || scale > 8) {
+        return luaL_error(L, "gfx.layers: scale must be 1 to 8");
+    }
+    if (gbaduo_bus_platform() == GBADUO_BUS_NONE) {
+        return luaL_error(L, "gfx.layers: no game loaded");
+    }
+    struct WideWorld world;
+    lua_pushvalue(L, 1);
+    bool ok = read_world(L, &world);
+    lua_pop(L, 1);
+    if (!ok || world.layerCount == 0) {
+        return luaL_error(L, "gfx.layers: %s", ok ? "field 'layers' is required" : g_script.lastError);
+    }
+    if (!wide_world_valid(&world)) {
+        return luaL_error(L, "gfx.layers: the layers' grid sizes are out of range");
+    }
+    charge(L, (size_t) width * (size_t) height * 4u);
+    int w = (int) width, h = (int) height;
+    uint32_t* pixels = malloc((size_t) w * h * sizeof(uint32_t));
+    if (!pixels) {
+        return luaL_error(L, "gfx.layers: out of memory");
+    }
+    wide_render(&world, pixels, w, h, (int) scale);
+    uint32_t key = fnv1a(pixels, (size_t) w * h * sizeof(uint32_t)) ^ ((uint32_t) w << 16 | (uint32_t) h) ^ 0x1a7e55u;
+    pthread_mutex_lock(&g_imageLock);
+    if (image_cache_find(key)) {
+        pthread_mutex_unlock(&g_imageLock);
+        free(pixels);
+    } else {
+        image_cache_store(key, w, h, pixels);
+        pthread_mutex_unlock(&g_imageLock);
+    }
+    push_image_key(L, key);
+    return 1;
+}
+
 #define SPRITE_MAX_PARTS 32
 
 /*
@@ -1181,6 +1244,7 @@ static void register_api(lua_State* L) {
         {"decode", l_gfx_decode},
         {"tilemap", l_gfx_tilemap},
         {"sprite", l_gfx_sprite},
+        {"layers", l_gfx_layers},
         {NULL, NULL},
     };
     luaL_newlib(L, gfxFuncs);
@@ -1439,15 +1503,15 @@ static bool world_field_or(lua_State* L, const char* name, lua_Integer min, lua_
 static bool read_layers(lua_State* L, struct WideWorld* w) {
     lua_Integer v;
     int n = (int) lua_rawlen(L, -1);
-    if (n < 1 || n > 2) {
-        set_error("field 'layers' needs 1 or 2 tables");
+    if (n < 1 || n > WIDE_MAX_LAYERS) {
+        set_error("field 'layers' needs 1 to 3 tables");
         return false;
     }
     for (int i = 0; i < n; i++) {
         lua_rawgeti(L, -1, i + 1);
         if (!lua_istable(L, -1)) {
             lua_pop(L, 1);
-            set_error("field 'layers' needs 1 or 2 tables");
+            set_error("field 'layers' needs 1 to 3 tables");
             return false;
         }
         struct WideLayer* l = &w->layers[i];
@@ -1462,6 +1526,12 @@ static bool read_layers(lua_State* L, struct WideWorld* w) {
 #undef LAYER_FIELD
         if (!world_field_or(L, "special", 0, UINT32_MAX, 0, &v)) { lua_pop(L, 1); return false; }
         l->special = (uint32_t) v;
+        if (!world_field_or(L, "cellBytes", 2, 4, 2, &v) || (v != 2 && v != 4)) {
+            if (!g_script.lastError[0]) set_error("field 'cellBytes' must be 2 or 4");
+            lua_pop(L, 1);
+            return false;
+        }
+        l->cellBytes = (int) v;
         lua_pop(L, 1);
     }
     w->layerCount = n;

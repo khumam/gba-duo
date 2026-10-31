@@ -11,16 +11,18 @@
 #define WIDE_MAX_W 400
 #define WIDE_FRAME_W 240
 #define WIDE_FRAME_H 160
+#define WIDE_MAX_LAYERS 3
 
 /**
- * One background layer of a two-layer world (e.g. The Minish Cap): its own grid, 2x2-tile metatiles
+ * One background layer of a layered world (e.g. The Minish Cap, Golden Sun): its own grid, 2x2-tile metatiles
  * (4 u16 entries: TL, TR, BL, BR, same bits as WideWorld) and tile data.
  */
 struct WideLayer {
-    uint32_t grid;              /* u16 cells, row-major, [stride] cells a row, gridW x gridH of them in use */
+    uint32_t grid;              /* cells, row-major, [stride] cells a row, gridW x gridH of them in use */
     int stride, gridW, gridH;
+    int cellBytes;              /* 2 (a u16 cell, the default) or 4 (a u32 cell: id = cell & idMask) */
     uint16_t idMask;            /* metatile id = cell & idMask */
-    uint32_t special;           /* u16 table for cells >= 0x4000 (id = table[cell - 0x4000]); 0: none */
+    uint32_t special;           /* u16 table for cells >= 0x4000 (id = table[cell - 0x4000]); 0: none; u16 cells only */
     uint32_t metatiles;         /* metatiles + id * 8 */
     uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */
 };
@@ -45,8 +47,8 @@ struct WideWorld {
     int split;
     uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */
     uint32_t palette;           /* 16 banks x 16 BGR555 */
-    int layerCount;             /* 0: the single grid above; 1..2: [layers] instead, bottom first (the rest above is ignored) */
-    struct WideLayer layers[2]; /* the top layer wins where its pixel is not colour 0; outside the grids it is black */
+    int layerCount;             /* 0: the single grid above; 1..3: [layers] instead, bottom first (the rest above is ignored) */
+    struct WideLayer layers[WIDE_MAX_LAYERS]; /* the top layer wins where its pixel is not colour 0; outside the grids it is black */
 };
 
 /** True when the world's sizes are in range (1..1024 cells each way, split >= 0). */
@@ -63,6 +65,13 @@ uint32_t wide_pixel(const struct WideWorld* w, int32_t wx, int32_t wy);
  * buffer whose GBA frame starts at column [left]. An invalid world paints black.
  */
 void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right);
+
+/**
+ * A picture of the world: [width] x [height] ARGB8888 pixels (Android's order), each the world pixel at the
+ * centre of a [scale] x [scale] block, the first block's top-left at the world's (x, y). Outside the grids
+ * the pixel is 0 (transparent). An invalid world gives all 0.
+ */
+void wide_render(const struct WideWorld* w, uint32_t* out, int width, int height, int scale);
 
 /**
  * The share (0..1) of the 16 edge columns of the frame (GBA x 0..7 and 232..239) that the
