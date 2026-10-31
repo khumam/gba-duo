@@ -13,6 +13,19 @@
 #define WIDE_FRAME_H 160
 
 /**
+ * One background layer of a two-layer world (e.g. The Minish Cap): its own grid, 2x2-tile metatiles
+ * (4 u16 entries: TL, TR, BL, BR, same bits as WideWorld) and tile data.
+ */
+struct WideLayer {
+    uint32_t grid;              /* u16 cells, row-major, [stride] cells a row, gridW x gridH of them in use */
+    int stride, gridW, gridH;
+    uint16_t idMask;            /* metatile id = cell & idMask */
+    uint32_t special;           /* u16 table for cells >= 0x4000 (id = table[cell - 0x4000]); 0: none */
+    uint32_t metatiles;         /* metatiles + id * 8 */
+    uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */
+};
+
+/**
  * A tile-and-metatile world (the Gen 3 Pokémon overworld). Every address is on the GBA bus.
  * A grid cell is one 16x16 px metatile; a metatile is 8 u16 tile entries: bottom layer
  * TL, TR, BL, BR, then top layer TL, TR, BL, BR (tile entry bits: 0-9 tile, 10 h-flip,
@@ -32,6 +45,8 @@ struct WideWorld {
     int split;
     uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */
     uint32_t palette;           /* 16 banks x 16 BGR555 */
+    int layerCount;             /* 0: the single grid above; 1..2: [layers] instead, bottom first (the rest above is ignored) */
+    struct WideLayer layers[2]; /* the top layer wins where its pixel is not colour 0; outside the grids it is black */
 };
 
 /** True when the world's sizes are in range (1..1024 cells each way, split >= 0). */
@@ -55,7 +70,7 @@ void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, 
  */
 float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride, int left);
 
-/** Whether the margins show: hides after 4 bad frames in a row, shows after 8 good ones. */
+/** Whether the margins show: hides after 4 bad frames in a row, shows after 4 good ones. */
 struct WideGate {
     int bad, good;
     bool shown;

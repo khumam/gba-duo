@@ -247,14 +247,14 @@ static void hysteresis_hides_after_four_bad_frames(void) {
     CHECK(!wide_gate_step(&g, true, 0.5f));
 }
 
-static void hysteresis_shows_after_eight_good_frames(void) {
+static void hysteresis_shows_after_four_good_frames(void) {
     struct WideGate g = {0};
-    for (int i = 0; i < 7; i++) CHECK(!wide_gate_step(&g, true, 0.95f));
+    for (int i = 0; i < 3; i++) CHECK(!wide_gate_step(&g, true, 0.95f));
     CHECK(wide_gate_step(&g, true, 0.95f));
     struct WideGate h = {0};
-    for (int i = 0; i < 7; i++) wide_gate_step(&h, true, 0.95f);
+    for (int i = 0; i < 3; i++) wide_gate_step(&h, true, 0.95f);
     wide_gate_step(&h, true, 0.5f);      /* a bad frame restarts the count */
-    for (int i = 0; i < 7; i++) CHECK(!wide_gate_step(&h, true, 0.95f));
+    for (int i = 0; i < 3; i++) CHECK(!wide_gate_step(&h, true, 0.95f));
     CHECK(wide_gate_step(&h, true, 0.95f));
 }
 
@@ -266,6 +266,50 @@ static void no_world_hides_at_once(void) {
     CHECK(!g.shown);
 }
 
+/* A two-layer world: own grids with a 64-cell stride, 4-entry metatiles, special cells. */
+static void layered_world_top_over_bottom_and_black_outside(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    enum { TOPG = 0x02010000u, BOTG = 0x02020000u, TOPM = 0x02030000u, BOTM = 0x02031000u, SPECIAL = 0x02032000u };
+    poke16(PALETTE, 0x7C00);                 /* backdrop: blue */
+    poke16(PALETTE + 2, 0x001F);             /* index 1: red */
+    poke16(PALETTE + 4, 0x03E0);             /* index 2: green */
+    for (int i = 0; i < 32; i++) poke8(TILES + 1 * 32 + (uint32_t) i, 0x11);   /* tile 1: all index 1 */
+    for (int i = 0; i < 32; i++) poke8(TILES + 2 * 32 + (uint32_t) i, 0);
+    poke8(TILES + 2 * 32, 0x02);             /* tile 2: pixel (0,0) is index 2 */
+    poke16(BOTG, 5);                         /* bottom (0,0): metatile 5 */
+    poke16(BOTG + 64 * 2, 6);                /* bottom (0,1) sits one row down: stride 64 */
+    poke16(TOPG, 0x4001);                    /* top (0,0): special cell 1 */
+    poke16(SPECIAL + 2, 7);                  /* special 1 -> metatile 7 */
+    poke16(BOTM + 5 * 8, 1);                 /* metatile 5 bottom TL: tile 1 */
+    poke16(BOTM + 6 * 8 + 6, 1 | (2 << 12)); /* metatile 6 BR: tile 1, bank 2 */
+    poke16(TOPM + 7 * 8, 2);                 /* top metatile 7 TL: tile 2 */
+    poke16(PALETTE + (2 * 16 + 1) * 2, 0x7FFF);
+    struct WideWorld w = {
+        .palette = PALETTE, .layerCount = 2,
+        .layers = {
+            { .grid = BOTG, .stride = 64, .gridW = 2, .gridH = 2, .idMask = 0x7FF, .metatiles = BOTM, .tiles = TILES },
+            { .grid = TOPG, .stride = 64, .gridW = 2, .gridH = 2, .idMask = 0x7FF, .special = SPECIAL, .metatiles = TOPM, .tiles = TILES },
+        },
+    };
+    CHECK(wide_world_valid(&w));
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(0x03E0));   /* the top layer's index 2 */
+    CHECK(wide_pixel(&w, 1, 0) == wide_color(0x001F));   /* top is colour 0 there: the bottom layer shows */
+    CHECK(wide_pixel(&w, 8, 0) == wide_color(0x7C00));   /* both empty: backdrop */
+    CHECK(wide_pixel(&w, 8 + 0, 16 + 8) == wide_color(0x7FFF)); /* second row of the bottom grid, BR, bank 2 */
+    CHECK(wide_pixel(&w, -1, 0) == 0u);                  /* outside the grids: black */
+    CHECK(wide_pixel(&w, 0, 32) == 0u);
+    uint32_t buf[400 * 160];
+    wide_paint(&w, buf, 400, 80, 80);
+    CHECK(buf[0 * 400 + 80 + 240 + 0] == 0u);            /* right margin of row 0: black, nothing there */
+    for (int row = 0; row < 3; row++) CHECK(buf[(size_t) row * 400 + 79] == 0u);
+    struct WideWorld shifted = w;
+    shifted.x = 80;                                       /* world x 0 is the left margin's last column + 1 */
+    wide_paint(&shifted, buf, 400, 80, 0);
+    CHECK(buf[0] == wide_pixel(&shifted, 0, 0));
+    w.layerCount = 3;
+    CHECK(!wide_world_valid(&w));
+}
+
 int main(void) {
     color_matches_mgba();
     pixel_reads_bottom_then_top_then_backdrop();
@@ -274,12 +318,13 @@ int main(void) {
     border_shift_moves_the_block_origin();
     undefined_cell_uses_border();
     split_selects_second_table();
+    layered_world_top_over_bottom_and_black_outside();
     paint_fills_only_margins();
     paint_equals_pixelwise_reference();
     paint_survives_garbage_addresses();
     seam_match_is_one_on_its_own_picture();
     hysteresis_hides_after_four_bad_frames();
-    hysteresis_shows_after_eight_good_frames();
+    hysteresis_shows_after_four_good_frames();
     no_world_hides_at_once();
     printf("wide: %d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

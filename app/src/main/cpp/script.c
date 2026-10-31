@@ -1435,6 +1435,39 @@ static bool world_field_or(lua_State* L, const char* name, lua_Integer min, lua_
     return world_field(L, name, min, max, out);
 }
 
+/* The `layers` array on top of the stack into [w]'s layers, bottom first; false (error set) for a bad one. */
+static bool read_layers(lua_State* L, struct WideWorld* w) {
+    lua_Integer v;
+    int n = (int) lua_rawlen(L, -1);
+    if (n < 1 || n > 2) {
+        set_error("field 'layers' needs 1 or 2 tables");
+        return false;
+    }
+    for (int i = 0; i < n; i++) {
+        lua_rawgeti(L, -1, i + 1);
+        if (!lua_istable(L, -1)) {
+            lua_pop(L, 1);
+            set_error("field 'layers' needs 1 or 2 tables");
+            return false;
+        }
+        struct WideLayer* l = &w->layers[i];
+#define LAYER_FIELD(name, lo, hi, dst) if (!world_field(L, name, lo, hi, &v)) { lua_pop(L, 1); return false; } dst = v
+        LAYER_FIELD("grid", 0, UINT32_MAX, l->grid);
+        LAYER_FIELD("stride", INT32_MIN, INT32_MAX, l->stride);
+        LAYER_FIELD("gridW", INT32_MIN, INT32_MAX, l->gridW);
+        LAYER_FIELD("gridH", INT32_MIN, INT32_MAX, l->gridH);
+        LAYER_FIELD("idMask", 0, 0xFFFF, l->idMask);
+        LAYER_FIELD("metatiles", 0, UINT32_MAX, l->metatiles);
+        LAYER_FIELD("tiles", 0, UINT32_MAX, l->tiles);
+#undef LAYER_FIELD
+        if (!world_field_or(L, "special", 0, UINT32_MAX, 0, &v)) { lua_pop(L, 1); return false; }
+        l->special = (uint32_t) v;
+        lua_pop(L, 1);
+    }
+    w->layerCount = n;
+    return true;
+}
+
 /* The world table on top of the stack into [out]; false (error set) for a bad field. */
 static bool read_world(lua_State* L, struct WideWorld* out) {
     lua_Integer v;
@@ -1443,6 +1476,16 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
 #define INT_FIELD(name, lo, hi, dst) if (!world_field(L, name, lo, hi, &v)) return false; dst = v
     INT_FIELD("x", INT32_MIN, INT32_MAX, w.x);
     INT_FIELD("y", INT32_MIN, INT32_MAX, w.y);
+    INT_FIELD("palette", 0, UINT32_MAX, w.palette);
+    lua_getfield(L, -1, "layers");
+    if (lua_istable(L, -1)) {
+        bool ok = read_layers(L, &w);
+        lua_pop(L, 1);
+        if (!ok) return false;
+        *out = w;
+        return true;
+    }
+    lua_pop(L, 1);
     INT_FIELD("grid", 0, UINT32_MAX, w.grid);
     INT_FIELD("gridW", INT32_MIN, INT32_MAX, w.gridW);
     INT_FIELD("gridH", INT32_MIN, INT32_MAX, w.gridH);
@@ -1458,7 +1501,6 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
     INT_FIELD("metatiles2", 0, UINT32_MAX, w.metatiles2);
     INT_FIELD("split", INT32_MIN, INT32_MAX, w.split);
     INT_FIELD("tiles", 0, UINT32_MAX, w.tiles);
-    INT_FIELD("palette", 0, UINT32_MAX, w.palette);
 #undef INT_FIELD
     *out = w;
     return true;

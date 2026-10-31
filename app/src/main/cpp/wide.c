@@ -5,10 +5,23 @@
 #define MAX_CELLS 1024
 #define GOOD_MATCH 0.85f
 #define HIDE_AFTER_BAD 4
-#define SHOW_AFTER_GOOD 8
+#define SHOW_AFTER_GOOD 4
 #define SEAM_COLUMNS 8
 
+static bool layers_valid(const struct WideWorld* w) {
+    if (w->layerCount < 1 || w->layerCount > 2) return false;
+    for (int i = 0; i < w->layerCount; i++) {
+        const struct WideLayer* l = &w->layers[i];
+        if (l->gridW < 1 || l->gridW > MAX_CELLS || l->gridH < 1 || l->gridH > MAX_CELLS ||
+            l->stride < l->gridW || l->stride > MAX_CELLS) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool wide_world_valid(const struct WideWorld* w) {
+    if (w->layerCount != 0) return layers_valid(w);
     return w->gridW >= 1 && w->gridW <= MAX_CELLS && w->gridH >= 1 && w->gridH <= MAX_CELLS &&
            w->borderW >= 1 && w->borderW <= MAX_CELLS && w->borderH >= 1 && w->borderH <= MAX_CELLS &&
            w->split >= 0;
@@ -39,7 +52,45 @@ static int tile_index(const struct WideWorld* w, uint16_t entry, int tx, int ty,
     return (x & 1) ? b >> 4 : b & 0x0F;
 }
 
+/* The tile entry of layer [l] at world pixel ([wx], [wy]) and the pixel inside it; false outside the grid. */
+static bool layer_entry(const struct WideLayer* l, int32_t wx, int32_t wy, uint16_t* entry, int* tx, int* ty) {
+    int32_t cx = floor_div(wx, 16);
+    int32_t cy = floor_div(wy, 16);
+    if (cx < 0 || cx >= l->gridW || cy < 0 || cy >= l->gridH) return false;
+    int px = (int) (wx - cx * 16);
+    int py = (int) (wy - cy * 16);
+    uint32_t id = gbaduo_bus_read16(l->grid + ((uint32_t) cy * (uint32_t) l->stride + (uint32_t) cx) * 2u);
+    if (id >= 0x4000u && l->special != 0) id = gbaduo_bus_read16(l->special + (id - 0x4000u) * 2u);
+    id &= l->idMask;
+    *entry = gbaduo_bus_read16(l->metatiles + id * 8u + (uint32_t) ((py >> 3) * 2 + (px >> 3)) * 2u);
+    *tx = px & 7;
+    *ty = py & 7;
+    return true;
+}
+
+static uint32_t layered_pixel(const struct WideWorld* w, const uint32_t pal[256], int32_t wx, int32_t wy) {
+    bool inside = false;
+    for (int i = w->layerCount - 1; i >= 0; i--) {
+        const struct WideLayer* l = &w->layers[i];
+        uint16_t entry;
+        int tx, ty;
+        if (!layer_entry(l, wx, wy, &entry, &tx, &ty)) continue;
+        inside = true;
+        int x = (entry & 0x400) ? 7 - tx : tx;
+        int y = (entry & 0x800) ? 7 - ty : ty;
+        uint8_t b = gbaduo_bus_read8(l->tiles + (uint32_t) (entry & 0x3FF) * 32u + (uint32_t) y * 4u + (uint32_t) (x >> 1));
+        int index = (x & 1) ? b >> 4 : b & 0x0F;
+        if (index != 0) return pal[(entry >> 12) * 16 + index];
+    }
+    return inside ? pal[0] : 0;
+}
+
 uint32_t wide_pixel(const struct WideWorld* w, int32_t wx, int32_t wy) {
+    if (w->layerCount != 0) {
+        uint32_t pal[256];
+        for (int i = 0; i < 256; i++) pal[i] = wide_color(gbaduo_bus_read16(w->palette + (uint32_t) i * 2u));
+        return layered_pixel(w, pal, wx, wy);
+    }
     int32_t cx = floor_div(wx, 16);
     int32_t cy = floor_div(wy, 16);
     int px = (int) (wx - cx * 16);
@@ -130,8 +181,50 @@ static void span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int
     }
 }
 
+/* [n] (1..8) pixels of a layered world, inside one 8-pixel tile column: per layer, one set of bus reads. */
+static void layered_span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out) {
+    uint32_t rows[2] = {0, 0};
+    uint16_t entries[2] = {0, 0};
+    bool has[2] = {false, false};
+    bool inside = false;
+    int tx0 = 0;
+    for (int i = 0; i < w->layerCount; i++) {
+        const struct WideLayer* l = &w->layers[i];
+        int tx, ty;
+        if (!layer_entry(l, wx, wy, &entries[i], &tx, &ty)) continue;
+        has[i] = true;
+        inside = true;
+        tx0 = tx;
+        int y = (entries[i] & 0x800) ? 7 - ty : ty;
+        rows[i] = gbaduo_bus_read32(l->tiles + (uint32_t) (entries[i] & 0x3FF) * 32u + (uint32_t) y * 4u);
+    }
+    for (int k = 0; k < n; k++) {
+        uint32_t color = inside ? pal[0] : 0;
+        for (int i = w->layerCount - 1; i >= 0; i--) {
+            if (!has[i]) continue;
+            int index = row_index(rows[i], entries[i], tx0 + k);
+            if (index != 0) {
+                color = pal[(entries[i] >> 12) * 16 + index];
+                break;
+            }
+        }
+        out[k] = color;
+    }
+}
+
 /* [n] pixels of world row [wy] from [wx], any count. */
 static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out) {
+    if (w->layerCount != 0) {
+        while (n > 0) {
+            int inTile = 8 - (int) ((uint32_t) wx & 7u);
+            int m = n < inTile ? n : inTile;
+            layered_span(w, pal, wy, wx, m, out);
+            wx += m;
+            out += m;
+            n -= m;
+        }
+        return;
+    }
     while (n > 0) {
         int inTile = 8 - (int) ((uint32_t) wx & 7u);
         int m = n < inTile ? n : inTile;

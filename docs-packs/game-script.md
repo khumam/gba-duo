@@ -67,9 +67,26 @@ A metatile is 8 u16 tile entries: bottom layer TL, TR, BL, BR, then top layer TL
 A tile entry: bits 0-9 tile, 10 h-flip, 11 v-flip, 12-15 palette bank. A pixel is the top
 layer's if that is not colour 0, else the bottom layer's, else the backdrop.
 
+### Two layers (`layers`)
+
+A game whose map is two separate grids (e.g. The Minish Cap) returns `layers` instead of the single-grid
+fields above: `{ x, y, palette, layers = { bottom, top } }` (one or two tables, bottom first). Each
+layer has its own grid, its own metatile table and its own tile data:
+
+| Layer field | Meaning |
+|---|---|
+| `grid`, `stride`, `gridW`, `gridH` | u16 cells, row-major, `stride` cells a row, `gridW` x `gridH` of them in use |
+| `idMask` | metatile id = cell & `idMask` |
+| `special` (optional, 0) | a u16 table: a cell >= `0x4000` reads its id from `special[cell - 0x4000]` |
+| `metatiles` | 4 u16 tile entries (TL, TR, BL, BR) per id, 8 bytes each |
+| `tiles` | 4bpp tile data for this layer (its BG's character base) |
+
+The top layer's pixel wins unless it is colour 0, then the bottom layer's, else the backdrop
+(`palette` colour 0). Beyond the grids the margins are black. `x`, `y` are relative to the grids' origin.
+
 The app checks your answer against the game: the 16 columns on the frame's edges are predicted
 and compared with what the emulator drew. Below 85% for four frames in a row the margins hide,
-and they come back after eight good ones. So a wrong world looks like "no wide view", not like
+and they come back after four good ones. So a wrong world looks like "no wide view", not like
 garbage. NPCs and the player are not part of the world, so they don't appear in the margins.
 
 ### Turning Wide view on and off
@@ -88,7 +105,8 @@ pack has no `wide()`).
 }
 ```
 
-`pokemon-firered-companion/game.lua` is a worked example (FireRed 1.0): it reads the map the
+`zelda-the-minish-cap-companion/game.lua` is the two-layer example (camera and room origin from
+`gRoomControls`, layers from `gMapTop` / `gMapBottom`). `pokemon-firered-companion/game.lua` is a worked example (FireRed 1.0): it reads the map the
 game keeps in RAM (`gBackupMapLayout`) and the tilesets from the ROM layout. It follows the camera
 from the BG scroll registers (`mem.u16(0x04000014)`), anchored whenever the player stands still,
 and keeps following across a map connection: the game rebases the tile coordinates there (the
