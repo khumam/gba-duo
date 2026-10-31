@@ -69,8 +69,29 @@ object PackCatalog {
         )
     }
 
-    fun forGame(packs: List<CatalogPack>, gameCode: String): List<CatalogPack> =
-        packs.filter { pack -> pack.games.any { it.gameCode == gameCode } }
+    private fun normalize(code: String) = code.trim().uppercase()
+
+    fun forGame(packs: List<CatalogPack>, gameCode: String): List<CatalogPack> {
+        val wanted = normalize(gameCode)
+        if (wanted.isEmpty()) return emptyList()
+        return packs.filter { pack -> pack.games.any { normalize(it.gameCode) == wanted } }
+    }
+
+    /**
+     * Packs for another region or revision of the same game: GBA codes share their first
+     * three letters. GB/GBC codes (`DMG-`/`CGB-`) carry no game identity, so they never relate.
+     */
+    fun relatedTo(packs: List<CatalogPack>, gameCode: String): List<CatalogPack> {
+        val wanted = normalize(gameCode)
+        if (wanted.length != 4 || wanted.contains('-')) return emptyList()
+        val exact = forGame(packs, wanted).map { it.id }.toSet()
+        return packs.filter { pack ->
+            pack.id !in exact && pack.games.any {
+                val code = normalize(it.gameCode)
+                code.length == 4 && !code.contains('-') && code.take(3) == wanted.take(3)
+            }
+        }
+    }
 
     /** Compares dot-separated numbers; a missing or non-numeric segment counts as 0. */
     fun compareVersions(a: String, b: String): Int {
@@ -83,10 +104,13 @@ object PackCatalog {
         return 0
     }
 
-    fun status(pack: CatalogPack, installedVersion: String?, appVersion: String): CatalogStatus = when {
-        pack.minAppVersion != null && compareVersions(pack.minAppVersion, appVersion) > 0 -> CatalogStatus.NEEDS_NEWER_APP
+    fun status(pack: CatalogPack, installedVersion: String?, appVersion: String): CatalogStatus =
+        status(pack.version, pack.minAppVersion, installedVersion, appVersion)
+
+    fun status(version: String, minAppVersion: String?, installedVersion: String?, appVersion: String): CatalogStatus = when {
+        minAppVersion != null && compareVersions(minAppVersion, appVersion) > 0 -> CatalogStatus.NEEDS_NEWER_APP
         installedVersion == null -> CatalogStatus.NEW
-        compareVersions(pack.version, installedVersion) > 0 -> CatalogStatus.UPDATE
+        compareVersions(version, installedVersion) > 0 -> CatalogStatus.UPDATE
         else -> CatalogStatus.INSTALLED
     }
 }

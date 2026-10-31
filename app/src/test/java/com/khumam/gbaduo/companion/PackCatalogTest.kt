@@ -63,6 +63,21 @@ class PackCatalogTest {
     }
 
     @Test
+    fun forGameIgnoresCaseAndPadding() {
+        val packs = PackCatalog.parse(fixture)
+        assertEquals(listOf("pokemon-firered-companion"), PackCatalog.forGame(packs, " bpre ").map { it.id })
+        assertTrue(PackCatalog.forGame(packs, "").isEmpty())
+    }
+
+    @Test
+    fun relatedToMatchesOtherRegionsOfSameGame() {
+        val packs = PackCatalog.parse(fixture)
+        assertEquals(listOf("pokemon-firered-companion"), PackCatalog.relatedTo(packs, "BPRJ").map { it.id })
+        assertTrue(PackCatalog.relatedTo(packs, "BPRE").isEmpty())
+        assertTrue(PackCatalog.relatedTo(packs, "CGB-AZ8E").isEmpty())
+    }
+
+    @Test
     fun compareVersions() {
         assertTrue(PackCatalog.compareVersions("0.1.10", "0.1.8") > 0)
         assertEquals(0, PackCatalog.compareVersions("1.0", "1.0.0"))

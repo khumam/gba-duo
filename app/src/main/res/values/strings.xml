@@ -72,6 +72,9 @@
     <string name="pack_web_title">Companion packs</string>
     <string name="pack_web_loading">Loading packs…</string>
     <string name="pack_web_none">No packs for %s yet.</string>
+    <string name="pack_web_related">Other versions of this game:</string>
+    <string name="pack_web_browse_all">Browse all packs</string>
+    <string name="pack_web_all_title">All packs. Pick one that fits your game.</string>
     <string name="pack_web_offline">Could not reach the pack list. Check the connection.</string>
     <string name="pack_web_unsupported">The pack list needs a newer GBADuo.</string>
     <string name="pack_web_downloading">Downloading %s…</string>
@@ -94,6 +97,7 @@
     <string name="play">Play</string>
     <string name="add_rom_folder">Add ROM folder</string>
     <string name="tag_pack">Pack</string>
+    <string name="tag_pack_update">Pack update</string>
     <string name="position_of">%1$s / %2$s</string>
     <string name="hud_games">Games</string>
     <string name="hint_browse">Browse</string>

@@ -36,6 +36,7 @@ class CartridgeCarousel(
     var items: List<RomEntry> = emptyList()
         private set
     private var packCodes: Set<String> = emptySet()
+    private var packUpdateCodes: Set<String> = emptySet()
 
     /** The selected (centred) position, or -1 when there are no games. */
     var selected = -1
@@ -65,9 +66,10 @@ class CartridgeCarousel(
         })
     }
 
-    fun submit(entries: List<RomEntry>, packs: Set<String>, keepFileName: String?) {
+    fun submit(entries: List<RomEntry>, packs: Set<String>, packUpdates: Set<String>, keepFileName: String?) {
         items = entries
         packCodes = packs
+        packUpdateCodes = packUpdates
         adapter.notifyDataSetChanged()
         val target = entries.indexOfFirst { it.fileName == keepFileName }.takeIf { it >= 0 }
             ?: selected.coerceIn(0, (entries.size - 1).coerceAtLeast(0))
@@ -84,6 +86,8 @@ class CartridgeCarousel(
     fun release() = artwork.shutdown()
 
     fun hasPack(entry: RomEntry) = entry.gameCode in packCodes
+
+    fun hasPackUpdate(entry: RomEntry) = entry.gameCode in packUpdateCodes
 
     /** Moves the selection by [delta] (D-pad, shoulder buttons), clamped to the ends. */
     fun step(delta: Int) {

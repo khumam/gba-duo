@@ -88,17 +88,53 @@ class PackCatalogActivity : PixelPage() {
                 when (result) {
                     is Fetch.Failed -> message(failText(result), retry = true)
                     is Fetch.Ok -> {
-                        val packs = PackCatalog.forGame(result.value, gameCode)
-                            .sortedWith(compareByDescending<CatalogPack> { it.official }.thenBy { it.title })
-                        if (packs.isEmpty()) message(getString(R.string.pack_web_none, gameTitle.ifBlank { gameCode })) else showPacks(packs)
+                        val all = result.value
+                        val exact = PackCatalog.forGame(all, gameCode).sorted()
+                        if (exact.isNotEmpty()) showPacks(exact) else showFallback(all)
                     }
                 }
             }
         }
     }
 
+    private fun List<CatalogPack>.sorted() =
+        sortedWith(compareByDescending<CatalogPack> { it.official }.thenBy { it.title })
+
+    private fun addNote(text: String, error: Boolean = false) {
+        results.addView(note(text, top = 8).also { content.removeView(it) }.apply {
+            setTextColor(if (error) Pixel.CORAL else Pixel.ON_INK_SOFT)
+        })
+    }
+
+    /** No exact match: offer other versions of the same game, and a way to browse everything. */
+    private fun showFallback(all: List<CatalogPack>) {
+        results.removeAllViews()
+        addNote(getString(R.string.pack_web_none, gameTitle.ifBlank { gameCode }), error = true)
+        val related = PackCatalog.relatedTo(all, gameCode).sorted()
+        var first: View? = null
+        if (related.isNotEmpty()) {
+            addNote(getString(R.string.pack_web_related))
+            first = addCards(related)
+        }
+        if (all.isNotEmpty()) {
+            val browse = button(getString(R.string.pack_web_browse_all), Pixel.YELLOW) {
+                results.removeAllViews()
+                addNote(getString(R.string.pack_web_all_title))
+                addCards(all.sorted())?.requestFocus()
+            }
+            results.addView(browse, spaced(12, ViewGroup.LayoutParams.WRAP_CONTENT))
+            if (first == null) first = browse
+        }
+        first?.requestFocus()
+    }
+
     private fun showPacks(packs: List<CatalogPack>) {
         results.removeAllViews()
+        addCards(packs)?.requestFocus()
+    }
+
+    /** Appends one card per pack; returns the first card. */
+    private fun addCards(packs: List<CatalogPack>): View? {
         var first: View? = null
         for (pack in packs) {
             val status = PackCatalog.status(pack, packStore.byId(pack.id)?.version, BuildConfig.VERSION_NAME)
@@ -125,7 +161,7 @@ class PackCatalogActivity : PixelPage() {
             results.addView(card, spaced(12))
             if (first == null) first = card
         }
-        first?.requestFocus()
+        return first
     }
 
     private fun download(pack: CatalogPack) {
