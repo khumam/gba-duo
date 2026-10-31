@@ -23,8 +23,10 @@ GBADuo is a Game Boy Advance, Game Boy Color and Game Boy player for dual-screen
 Android handhelds. The game runs on the screen you open it on (usually the top
 one), and the other screen is a **companion**: a screen built from a pack that reads your game's memory as you
 play and shows what matters, like your party and bag in Pokémon FireRed or your
-rucksack and friendships in Harvest Moon. Packs are plain files (a layout, CSS and
-a Lua script), so anyone can build one for their favorite game.
+rucksack and friendships in Harvest Moon. Packs can also draw the game's own world:
+the live map in Metroid and Golden Sun, and a **Wide view** that fills the sides of
+the picture with more of the map. Packs are plain files (a layout, CSS and a Lua
+script), so anyone can build one for their favorite game.
 
 ## Devices
 
@@ -61,8 +63,10 @@ the old one; your saves stay.
 ### The companion (bottom screen)
 
 - **Packs per game** - tap **⋮** next to a game in your library to choose its
-  companion pack, or **Import pack…** to add one from a `.zip`. Each game remembers
-  its own pack.
+  companion pack. Each game remembers its own pack.
+- **Get packs in the app** - **⋮ > Companion pack > Get from the web…** lists the
+  packs for that game, installs the one you pick and flags updates. Or use
+  **Import pack…** to add one from a `.zip`.
 - **Live** - the pack's Lua script reads the game's memory several times a second,
   so the screen follows along as you play.
 - **Touch** - tabs, buttons and pages you can tap through; the controller keeps
@@ -70,6 +74,22 @@ the old one; your saves stay.
 - **Pages that open by themselves** - a pack can switch pages when something happens
   in the game, like FireRed's battle page opening when a battle starts and closing
   when it ends.
+- **Live maps** - packs can draw the game's map straight from memory: your explored
+  map in Metroid, the world in The Minish Cap, the area around you in Golden Sun.
+
+### Wide view
+
+The GBA picture is 240x160, so on a wide screen it leaves black bars. **Wide view**
+paints the game's world there instead, built from the game's own map and tiles, so it
+scrolls with you. Turn it on with the **WIDE** button on the companion screen (it is a
+per-game setting).
+
+- Works with Pokémon FireRed and LeafGreen (app 0.1.9), The Minish Cap (0.1.10) and
+  Golden Sun (0.1.11), using the matching packs.
+- It paints the map only. Characters and NPCs appear as they walk onto the real picture.
+- If the app's picture doesn't match what the game draws (another ROM version, a
+  screen fade), the margins hide themselves instead of showing garbage.
+- Tested on US ROMs and on the AYN Thor only.
 
 ### The player (top screen)
 
@@ -79,10 +99,13 @@ the old one; your saves stay.
   card, a synced folder), so backups and moving to another device are file copies.
 - **Fast-forward** - hold **R2**; 2x, 3x or 4x, picked in the menu.
 - **Shaders** - Off, GBA Color, LCD Grid, Scanlines and Scale2x.
-- **Swap A/B** - flips the A and B buttons if they feel the wrong way round.
+- **Tilt-shift** - a soft blur at the top and bottom of the picture (Off, Light, Strong).
+- **Screen options** - integer scaling, aspect ratio (Original, 4:3, 16:9, Stretch) and
+  pixel-perfect output.
+- **Performance overlay** - FPS, or FPS and CPU, over the game (Settings).
 
 Press **L2** or **BACK** in a game for the menu: resume, save state, load state,
-fast-forward speed, shader, swap A/B and quit.
+fast-forward speed, shader, tilt-shift, integer scaling and quit.
 
 ### Your saves
 
@@ -160,17 +183,25 @@ it again.
 ## Companion packs
 
 Packs live in their own repo,
-[gba-duo-companions](https://github.com/khumam/gba-duo-companions). Download a
-pack's `.zip` from its [releases](https://github.com/khumam/gba-duo-companions/releases)
-and add it with **⋮ > Import pack…**.
+[gba-duo-companions](https://github.com/khumam/gba-duo-companions). Install one from
+the app with **⋮ > Companion pack > Get from the web…**, or download a pack's `.zip`
+from its [releases](https://github.com/khumam/gba-duo-companions/releases) and add it
+with **⋮ > Import pack…**.
 
-| Game                                         | Pack                          | Shows                                                                                       |
-| -------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------- |
-| Pokémon FireRed (US)                         | `pokemon-firered-companion`   | Party, bag pockets, trainer card, and a battle page with both Pokémon's live stats          |
-| Harvest Moon: Friends of Mineral Town (EU/US) | `harvest-moon-fomt-companion` | Gold, date and time, stamina, held tool and rucksack, affection, Harvest Sprites' work      |
+| Game                                          | Pack                                   | Shows                                                                                              |
+| --------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Pokémon FireRed (US)                          | `pokemon-firered-companion` (+ `-v`, `-minimal`) | Town map, party, bag, Pokédex, trainer card and a battle page with both Pokémon's live stats; WIDE |
+| Pokémon LeafGreen (US)                        | `pokemon-leafgreen-companion` (+ `-v`, `-minimal`) | The same pages for LeafGreen; WIDE                                                              |
+| Metroid: Zero Mission                         | `metroid-zero-mission-companion`       | Explored map, suit and beams (tap to switch), area progress, bosses and tanks                      |
+| Metroid Fusion                                | `metroid-fusion-companion`             | Live map, upgrades, sector progress, bosses and your next objective                                |
+| The Legend of Zelda: The Minish Cap           | `zelda-the-minish-cap-companion`       | World map, items, Kinstones and quest progress; WIDE                                               |
+| The Legend of Zelda: Oracle of Ages           | `zelda-oracle-of-ages-companion`       | Era maps, seeds, all 64 rings, hearts and essences (early version)                                 |
+| Harvest Moon: Friends of Mineral Town (EU/US) | `harvest-moon-fomt-companion`          | Gold, date and time, stamina, held tool and rucksack, affection, Harvest Sprites' work             |
+| Golden Sun (US)                               | `golden-sun-companion`                 | Party, Djinn, Psynergy and an area map that follows your character; WIDE (early preview)           |
 
-Want a pack for another game? [Open an issue](https://github.com/khumam/gba-duo/issues),
-or make one.
+Pokémon FireRed and LeafGreen come in three looks each. The pack list has versions,
+game codes and per-pack notes. Want a pack for another game?
+[Open an issue](https://github.com/khumam/gba-duo/issues), or make one.
 
 ## Make your own pack
 
@@ -182,10 +213,15 @@ A pack is a folder with:
 - `main.lua` - an `update()` that reads the game's memory and returns the values the layout shows.
   Its `actions` run on taps; with the `memory-write` permission and the player's
   consent they can also change the game (see [Changing the game](docs-packs/companion-pages.md#changing-the-game)).
+  `gfx.layers` draws the game's live map from memory as an image.
+- `game.lua` (optional) - a script that runs against the game every frame. It describes
+  the game's world for **Wide view** and, with consent, can write memory
+  ([game script](docs-packs/game-script.md)).
 
 The guides are in [`docs-packs/`](docs-packs/):
-[styling the companion](docs-packs/companion-styling.md) and
-[pages and buttons](docs-packs/companion-pages.md), with examples in
+[styling the companion](docs-packs/companion-styling.md),
+[pages and buttons](docs-packs/companion-pages.md) and the
+[game script and Wide view](docs-packs/game-script.md), with examples in
 [`docs-packs/examples`](docs-packs/examples).
 
 <details>
@@ -246,7 +282,7 @@ GBADuo is free software under the [GNU GPL v3](LICENSE): you can share and chang
 it, and anything built from it must stay open source under the same license.
 
 GBADuo is a fan project, not affiliated with or endorsed by Nintendo, Game Freak,
-Creatures, The Pokémon Company or Marvelous. Pokémon, Harvest Moon and all related
-names are trademarks of their respective owners; Game Boy, Game Boy Color and Game
+Creatures, The Pokémon Company, Marvelous or Camelot. Pokémon, Harvest Moon, Metroid,
+The Legend of Zelda, Golden Sun and all related names are trademarks of their respective owners; Game Boy, Game Boy Color and Game
 Boy Advance are trademarks of Nintendo. AYN Thor belongs to its maker. No games, BIOS
 or game art are included: use your own legally dumped ROMs.
