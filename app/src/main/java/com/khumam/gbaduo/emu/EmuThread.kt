@@ -92,6 +92,10 @@ class EmuThread(
     /** Called on this thread as it ends, after the core is unloaded (its save written): every time, even after a failure. */
     @Volatile var onStopped: (() -> Unit)? = null
 
+    /** Frames the core has run since the game started, fast-forwarded ones included; read by the performance overlay. */
+    @Volatile var framesRun = 0L
+        private set
+
     private val saveFile = File(savePath)
     private var saveSeen = 0L to 0L
     private var framesSinceSaveCheck = 0
@@ -148,6 +152,7 @@ class EmuThread(
             applyWide()
             repeat(speed) {
                 NativeCore.runFrame(input.keys())
+                framesRun++
                 runGameFrame()
                 RetroAchievements.frame()
             }

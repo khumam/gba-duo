@@ -115,6 +115,8 @@
     <string name="aspect_summary">Shape of the game picture</string>
     <string name="tilt_title">Tilt-shift blur</string>
     <string name="tilt_summary">Blur the top and bottom of the picture</string>
+    <string name="perf_title">Performance overlay</string>
+    <string name="perf_summary">Show FPS and CPU over the game</string>
     <string name="scale_title">Integer scaling</string>
     <string name="scale_on">On: exact pixels, smaller picture</string>
     <string name="scale_off">Off: full size picture</string>

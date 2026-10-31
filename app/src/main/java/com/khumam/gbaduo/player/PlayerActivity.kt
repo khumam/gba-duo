@@ -28,6 +28,7 @@ import com.khumam.gbaduo.emu.ColorSettings
 import com.khumam.gbaduo.emu.EmuThread
 import com.khumam.gbaduo.emu.GameView
 import com.khumam.gbaduo.emu.InputMapper
+import com.khumam.gbaduo.emu.PerfOverlaySettings
 import com.khumam.gbaduo.emu.ScaleSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
@@ -59,6 +60,7 @@ class PlayerActivity : Activity() {
     private var resumed = false
     private var achievementPopups: AchievementPopups? = null
     private var saveMirror: SaveMirror? = null
+    private var perfOverlay: PerfOverlayView? = null
 
     /**
      * Whether this is Android's top resumed activity: the one on the top focused display,
@@ -140,6 +142,8 @@ class PlayerActivity : Activity() {
             emu.onStopped = { mirror.finish() }
         }
         emu.start()
+        perfOverlay = PerfOverlayView(findViewById(android.R.id.content) as android.widget.FrameLayout, PerfOverlaySettings.default(this)) { emu.framesRun }
+            .also { it.attach() }
 
         // The quick menu and companion screen talk to the core, so wait until the emu thread has loaded it.
         waitForLoadThenSetUp(gameView, header, crc32, storage)
@@ -365,6 +369,7 @@ class PlayerActivity : Activity() {
     override fun onDestroy() {
         achievementPopups?.detach()
         playerNotes?.remove()
+        perfOverlay?.detach()
         if (::emu.isInitialized) {
             emu.shutdown()
             emu.join(1000)

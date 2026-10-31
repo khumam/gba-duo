@@ -11,6 +11,8 @@ import com.khumam.gbaduo.emu.AspectRatio
 import com.khumam.gbaduo.emu.AspectSettings
 import com.khumam.gbaduo.emu.ColorCorrection
 import com.khumam.gbaduo.emu.ColorSettings
+import com.khumam.gbaduo.emu.PerfOverlay
+import com.khumam.gbaduo.emu.PerfOverlaySettings
 import com.khumam.gbaduo.emu.TiltShift
 import com.khumam.gbaduo.emu.TiltShiftSettings
 import com.khumam.gbaduo.emu.ScaleSettings
@@ -34,6 +36,7 @@ class SettingsActivity : PixelPage() {
     private lateinit var aspectSummary: TextView
     private lateinit var tiltSummary: TextView
     private lateinit var scaleSummary: TextView
+    private lateinit var perfSummary: TextView
 
     private val raListener: (RetroAchievements.State) -> Unit = { state ->
         raSummary.text = when (state) {
@@ -71,6 +74,8 @@ class SettingsActivity : PixelPage() {
             getString(R.string.tilt_title), getString(R.string.tilt_summary)) { chooseTilt() }.second
         scaleSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
             getString(R.string.scale_title), getString(R.string.scale_off)) { toggleScale() }.second
+        perfSummary = menuCard(R.drawable.ic_settings, Pixel.MINT,
+            getString(R.string.perf_title), getString(R.string.perf_summary)) { choosePerf() }.second
         scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
             getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
             startActivity(Intent(this, ScrapingActivity::class.java))
@@ -97,6 +102,7 @@ class SettingsActivity : PixelPage() {
         colorSummary.text = getString(R.string.shader_summary_current, ColorSettings.default(this).displayName)
         aspectSummary.text = getString(R.string.shader_summary_current, AspectSettings.default(this).displayName)
         tiltSummary.text = getString(R.string.shader_summary_current, TiltShiftSettings.default(this).displayName)
+        perfSummary.text = getString(R.string.shader_summary_current, PerfOverlaySettings.default(this).displayName)
         renderScale()
         val artCount = Artwork.store(this).count()
         scrapingSummary.text = if (artCount == 0) getString(R.string.scraping_summary)
@@ -141,6 +147,20 @@ class SettingsActivity : PixelPage() {
             .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(TiltShiftSettings.default(this))) { dialog, which ->
                 TiltShiftSettings.setDefault(this, options[which])
                 tiltSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** FPS and CPU readout over the game; the next game started uses it. */
+    private fun choosePerf() {
+        val options = PerfOverlay.entries
+        AlertDialog.Builder(this)
+            .setTitle(R.string.perf_title)
+            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(PerfOverlaySettings.default(this))) { dialog, which ->
+                PerfOverlaySettings.setDefault(this, options[which])
+                perfSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
                 dialog.dismiss()
             }
             .setNegativeButton(android.R.string.cancel, null)
