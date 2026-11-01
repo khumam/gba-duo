@@ -6,6 +6,7 @@ import com.khumam.gbaduo.companion.CompanionSnapshot
 import com.khumam.gbaduo.companion.LuaScript
 import com.khumam.gbaduo.companion.NativeCoreMemoryReader
 import com.khumam.gbaduo.companion.PackManifest
+import com.khumam.gbaduo.companion.WideMode
 import com.khumam.gbaduo.companion.WideState
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -61,8 +62,8 @@ class EmuThread(
         ASK,
     }
 
-    /** The player turned Wide view on for this game (it also needs the pack's game.lua to define `wide()`). */
-    @Volatile var wideEnabled = false
+    /** The Wide view mode the player chose for this game (it also needs the pack's game.lua to define `wide()`). */
+    @Volatile var wideMode = WideMode.OFF
 
     /** The active pack's game.lua defines `wide()`: Wide view can be turned on. Set on the emu thread. */
     @Volatile var wideAvailable = false
@@ -107,7 +108,9 @@ class EmuThread(
     private var gameScriptLoadedForPack: PackManifest? = null
     private var gameFrameHook = false
     private var gameWideHook = false
-    private var wideRequested = WideView.FRAME_WIDTH
+    private var wideRequested = WideView.OFF
+    private val wideFallback = WideFallback()
+    private var wideProbed = WideView.OFF
     private var gameErrorLogCountdown = 0
 
     @Volatile private var uiState: Map<String, Any?> = emptyMap()
@@ -239,7 +242,7 @@ class EmuThread(
         val interval = (60 / pack.tickHz).coerceAtLeast(1)
         if (due || framesSinceSnapshot >= interval) {
             framesSinceSnapshot = 0
-            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideEnabled, wideAvailable))
+            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideMode, wideAvailable))
             onSnapshot?.invoke(snapshot)
         }
     }
@@ -314,19 +317,31 @@ class EmuThread(
     }
 
     /**
-     * Between frames: the picture width the core should draw. Wide only while the player has it on and
-     * game.lua defines `wide()`; otherwise the game's own 240. A wide picture is its own shape, so while it
+     * Between frames: the picture size the core should draw. Wide only while the player has it on and
+     * game.lua defines `wide()` and there is a world to show ([WideFallback]); otherwise the game's own 240x160. A wide picture is its own shape, so while it
      * is on the aspect ratio setting steps aside (square pixels, whatever Settings says).
      */
     private fun applyWide() {
         syncGameScriptForPack(activePack)
         val (surfaceW, surfaceH) = gameView.surfaceSize
-        val wanted = WideView.wantedWidth(wideEnabled, gameWideHook, surfaceW, surfaceH, gameView.integerScaling)
+        val target = WideView.wantedSize(wideMode, gameWideHook, surfaceW, surfaceH, gameView.integerScaling)
+        if (target == WideView.OFF) {
+            wideFallback.reset()
+        } else {
+            wideFallback.step(NativeCore.wideShown(), NativeCore.wideCoverage(), NativeCore.wideMatch())
+        }
+        if (target != wideProbed) {
+            wideProbed = target
+            NativeCore.setWideProbe(if (target == WideView.OFF) 0 else target.width, if (target == WideView.OFF) 0 else target.height)
+        }
+        val wanted = if (wideFallback.active) WideView.OFF else target
+        gameView.setSizeZoom(target != WideView.OFF)
         if (wanted == wideRequested) return
         wideRequested = wanted
-        NativeCore.setWide(wanted)
+        NativeCore.setWide(wanted.width, wanted.height)
         gameView.setVideoSize(NativeCore.videoWidth(), NativeCore.videoHeight())
-        gameView.setAspectOverride(if (NativeCore.videoWidth() > WideView.FRAME_WIDTH) AspectRatio.ORIGINAL else null)
+        val wide = NativeCore.videoWidth() > WideView.FRAME_WIDTH || NativeCore.videoHeight() > WideView.FRAME_HEIGHT
+        gameView.setAspectOverride(if (wide) AspectRatio.ORIGINAL else null)
     }
 
     /** After each emulated frame: game.lua's `frame()`, which may change the game once the player has allowed it. */
@@ -340,8 +355,10 @@ class EmuThread(
         val mayWrite = GameScriptAccess.mayWrite(writeAccess)
         if (mayWrite) saveSafetyState()
         val width = NativeCore.videoWidth()
+        val height = NativeCore.videoHeight()
         val left = ((width - GBA_FRAME_WIDTH) / 2).coerceAtLeast(0)
-        if (!NativeCore.gameFrame(NativeCore.frameCounter(), width, left, mayWrite) && gameErrorLogCountdown-- <= 0) {
+        val top = ((height - GBA_FRAME_HEIGHT) / 2).coerceAtLeast(0)
+        if (!NativeCore.gameFrame(NativeCore.frameCounter(), width, height, left, top, mayWrite) && gameErrorLogCountdown-- <= 0) {
             gameErrorLogCountdown = GAME_ERROR_LOG_FRAMES
             Log.w(TAG, "game.lua frame(): ${NativeCore.lastGameError()}")
         }
@@ -385,5 +402,6 @@ class EmuThread(
         const val GAME_ERROR_LOG_FRAMES = 300
 
         const val GBA_FRAME_WIDTH = 240
+        const val GBA_FRAME_HEIGHT = 160
     }
 }

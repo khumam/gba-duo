@@ -65,18 +65,18 @@ bool gbaduo_game_has(const char* hook);
 bool gbaduo_game_enabled(void);
 
 /**
- * Calls frame({frame=, width=, left=}) with its per-frame budget. The write window is
+ * Calls frame({frame=, width=, height=, left=, top=}) with its per-frame budget. The write window is
  * open for this call only when [may_write]. False on an error or the budget (the reason
  * in gbaduo_game_last_error()); true when it ran, or the script has no frame().
  */
-bool gbaduo_game_frame(int64_t frameCounter, int width, int left, bool may_write);
+bool gbaduo_game_frame(int64_t frameCounter, int width, int height, int left, int top, bool may_write);
 
 /**
- * Calls wide({width=, left=, match=}) (read-only). True with [out] filled when it
+ * Calls wide({width=, height=, left=, top=, match=}) (read-only). True with [out] filled when it
  * returned a world; false for nil/false (no error) or an error, a wrong field or the
  * budget (the reason in gbaduo_game_last_error()).
  */
-bool gbaduo_game_wide(int width, int left, float match, struct WideWorld* out);
+bool gbaduo_game_wide(int width, int height, int left, int top, float match, struct WideWorld* out);
 
 /** For tests: a malloc'd copy of the ARGB8888 image for a "gfx:..." key, or NULL. */
 uint32_t* gbaduo_script_image(const char* key, int* width, int* height);

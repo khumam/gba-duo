@@ -28,8 +28,9 @@ All optional. The sandbox is the same as `main.lua`'s (`mem`, `gfx`, `lz77`, `lo
 | `wide(view)` | after each emulated frame, only while **Wide view** is on | describe the world for the wide margins. Read-only. |
 
 `view` is a table: `frame` (the frame counter, `frame()` only), `width` (the picture's width in
-pixels), `left` (columns before the game's own 240), and for `wide()` also `match`
-(0 to 1, how well last frame's world predicted the game's edge columns; handy while calibrating).
+pixels), `height` (the picture's height), `left` and `top` (columns before and rows above the game's
+own 240x160), and for `wide()` also `match` (0 to 1, how well last frame's world predicted the game's
+edge pixels; handy while calibrating).
 
 Each hook gets 100,000 Lua instructions and 2 ms per call. An error or an overrun skips that
 frame's call (`adb logcat -s GBADuoScript GBADuoCore EmuThread`); five in a row switch `game.lua`
@@ -46,8 +47,13 @@ What differs: at most **256 bytes per frame**, and only the first write is logge
 
 ## wide(view): painting more of the world
 
-Wide view draws the game's own 240x160 frame in the middle of a wider picture (up to 400 px, set
-from the screen) and paints the margins from what `wide()` describes. Return `nil` or `false`
+Wide view draws the game's own 240x160 frame in the middle of a bigger picture and paints the margins
+from what `wide()` describes. In **Wide** the picture is wider (up to 400 px, set from the screen) and
+the margins are the sides. In **XL** it also grows taller (up to 480x320, the screen's shape), so the
+frame sits in the middle at about two thirds size and the margins surround it: `view.top` rows above
+and below, `view.left` columns each side. `x`, `y` stay the world pixel of the *frame's* top-left, so a
+world that reads outside the frame needs nothing different for XL (it just gets asked for negative
+rows). Beyond the map the margins are black or your border, as before. Return `nil` or `false`
 for "no world right now" (battle, menu, unknown map): the margins stay black. Otherwise return a
 table, every field an integer (bus addresses are plain numbers):
 
@@ -85,8 +91,9 @@ bottom first). Each layer has its own grid, its own metatile table and its own t
 The top layer's pixel wins unless it is colour 0, then the bottom layer's, else the backdrop
 (`palette` colour 0). Beyond the grids the margins are black. `x`, `y` are relative to the grids' origin.
 
-The app checks your answer against the game: the 16 columns on the frame's edges are predicted
-and compared with what the emulator drew. Below 85% for four frames in a row the margins hide,
+The app checks your answer against the game: the 16 columns on the frame's edges (and, in XL, the 16 rows
+on its top and bottom edges) are predicted and compared with what the emulator drew (a colour within about 40 per channel counts as
+the same, so the game's own shadows and fades don't hide the margins). Below 85% for four frames in a row the margins hide,
 and they come back after four good ones. So a wrong world looks like "no wide view", not like
 garbage. NPCs and the player are not part of the world, so they don't appear in the margins.
 
@@ -94,8 +101,9 @@ garbage. NPCs and the player are not part of the world, so they don't appear in 
 
 Wide view is a per-game setting the **player** switches from the pack's companion screen, so give
 the layout a button. The app handles the reserved action `wideView` itself (your Lua is not
-involved): `"args"` is `"on"`, `"off"` or `"toggle"` (the default). Every snapshot carries the
-state as built-in values: `_wide` (1 or 0) and `_wideLabel` (`ON`, `OFF`, or `N/A` when the
+involved): `"args"` is `"on"` (wide), `"extra"` (XL), `"off"` or `"toggle"` (the default; steps off, wide,
+XL, off). Every snapshot carries the state as built-in values: `_wide` (1 for wide or XL, else 0),
+`_wideMode` (0 off, 1 wide, 2 XL) and `_wideLabel` (`ON`, `XL`, `OFF`, or `N/A` when the
 pack has no `wide()`).
 
 ```json

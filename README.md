@@ -52,9 +52,11 @@ plays there and the companion takes the other one.
 <details>
 <summary><strong>Updates</strong></summary>
 
-GBADuo doesn't check for updates. Download the newer APK from the
-[releases page](https://github.com/khumam/gba-duo/releases) and install it over
-the old one; your saves stay.
+Open **Settings > About > Check for updates**. If a newer release exists, tap
+**Download and install**; Android may ask you once to allow GBADuo to install
+apps. It installs over the old version, so your saves stay. GBADuo only checks
+when you tap the button. You can also grab the APK from the
+[releases page](https://github.com/khumam/gba-duo/releases) yourself.
 
 </details>
 
@@ -82,7 +84,8 @@ the old one; your saves stay.
 The GBA picture is 240x160, so on a wide screen it leaves black bars. **Wide view**
 paints the game's world there instead, built from the game's own map and tiles, so it
 scrolls with you. Turn it on with the **WIDE** button on the companion screen (it is a
-per-game setting).
+per-game setting). Tap it again for **XL**: the game shrinks to the middle of the screen and
+the world fills all four sides, top and bottom too, so the whole screen is map.
 
 - Works with Pokémon FireRed and LeafGreen (app 0.1.9), The Minish Cap (0.1.10) and
   Golden Sun (0.1.11), using the matching packs.

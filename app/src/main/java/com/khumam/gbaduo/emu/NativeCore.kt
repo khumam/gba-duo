@@ -26,14 +26,23 @@ object NativeCore {
     external fun videoWidth(): Int
 
     /**
-     * Wide view (GBA games only), between frames: draws the game's 240-wide frame in the middle of a
-     * picture [width] wide (even, clamped to 240..400; 240 = off) and returns the width now in effect.
-     * Call [videoWidth] and `GameView.setVideoSize` afterwards. The margins are painted from game.lua's
+     * Wide view (GBA games only), between frames: draws the game's 240x160 frame in the middle of a
+     * picture [width] x [height] (even, clamped to 240..480 and 160..320; 240x160 = off) and returns the width
+     * now in effect. Call [videoWidth], [videoHeight] and `GameView.setVideoSize` afterwards. The margins are painted from game.lua's
      * `wide()` each frame while it holds up; a game with no `wide()` just shows black margins.
      */
-    external fun setWide(width: Int): Int
+    external fun setWide(width: Int, height: Int): Int
 
-    /** Whether the last frame showed painted margins. */
+    /**
+     * Wide view wanted at [width] x [height] (0 x 0: not wanted): while the picture is the game's own 240x160 the
+     * core still asks game.lua whether there is a world to show, so [wideShown] and [wideCoverage] keep answering.
+     */
+    external fun setWideProbe(width: Int, height: Int)
+
+    /** The share (0..1) of the margin area that lies inside the game's map; low in a small room. */
+    external fun wideCoverage(): Float
+
+    /** Whether the last frame showed painted margins (or, at 240x160 with a probe set, would have). */
     external fun wideShown(): Boolean
 
     /** How well game.lua's world predicted the frame's edge columns last frame, 0..1 (for calibration). */
@@ -100,7 +109,7 @@ object NativeCore {
      * change the game during this call (the pack has the memory-write permission and the player
      * allowed it); writes are refused at every other time, in native code. False on an error.
      */
-    external fun gameFrame(frame: Long, width: Int, left: Int, mayWrite: Boolean): Boolean
+    external fun gameFrame(frame: Long, width: Int, height: Int, left: Int, top: Int, mayWrite: Boolean): Boolean
 
     /** Reason the last game.lua load or hook call failed, if any. */
     external fun lastGameError(): String?

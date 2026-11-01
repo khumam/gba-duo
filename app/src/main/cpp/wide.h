@@ -8,7 +8,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define WIDE_MAX_W 400
+#define WIDE_MAX_W 480
+#define WIDE_MAX_H 320
 #define WIDE_FRAME_W 240
 #define WIDE_FRAME_H 160
 #define WIDE_MAX_LAYERS 3
@@ -61,10 +62,11 @@ uint32_t wide_color(uint16_t bgr555);
 uint32_t wide_pixel(const struct WideWorld* w, int32_t wx, int32_t wy);
 
 /**
- * Fills the [left] columns before the frame and the [right] after it, rows 0..159, of a
- * buffer whose GBA frame starts at column [left]. An invalid world paints black.
+ * Fills everything around the frame in a buffer whose GBA frame starts at ([left], [top]): the [left]
+ * columns before it, the [right] after it, the [top] rows above and the [bottom] below. An invalid world
+ * paints black.
  */
-void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right);
+void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom);
 
 /**
  * A picture of the world: [width] x [height] ARGB8888 pixels (Android's order), each the world pixel at the
@@ -74,10 +76,19 @@ void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, 
 void wide_render(const struct WideWorld* w, uint32_t* out, int width, int height, int scale);
 
 /**
- * The share (0..1) of the 16 edge columns of the frame (GBA x 0..7 and 232..239) that the
- * world predicts exactly. An invalid world matches nothing.
+ * The share (0..1) of the frame's edge pixels that the world predicts exactly: the 16 edge columns (GBA x
+ * 0..7 and 232..239) and, with [rows], the 16 edge rows between them (y 0..7 and 152..159); the result is the
+ * lower of the two shares, the rows' with 0.2 of slack because the HUD sits there. The frame starts at
+ * ([left], [top]) in [buf]. An invalid world matches nothing.
  */
-float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride, int left);
+float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride, int left, int top, bool rows);
+
+/**
+ * The share (0..1) of the margin area of a [width] x [height] picture (everything but the 240x160 frame in its
+ * middle at ([left], [top])) that lies inside the world's map; 1 for a world whose border repeats forever, 0
+ * for an invalid one. Low means the margins would be mostly black (a small room).
+ */
+float wide_coverage(const struct WideWorld* w, int left, int top, int width, int height);
 
 /** Whether the margins show: hides after 4 bad frames in a row, shows after 4 good ones. */
 struct WideGate {

@@ -20,17 +20,24 @@
 
 #define AUDIO_SAMPLE_RATE 32768
 
+/* Frames the margins stay as last painted once the world stops matching, before they go black. */
+#define WIDE_FREEZE_FRAMES 30
+
 struct GbaDuoState {
     struct mCore* core;
     color_t* videoBuffer;
     size_t videoBufferBytes;
     unsigned videoWidth;
     unsigned videoHeight;
-    /* Wide view (GBA only): the frame is drawn [wideLeft] columns into rows [videoWidth] wide. */
+    /* Wide view (GBA only): the frame is drawn [wideLeft] columns and [wideTop] rows into a [videoWidth] x [videoHeight] picture. */
     unsigned wideLeft;
+    unsigned wideTop;
     struct WideGate wideGate;
     float wideMatch;
     bool wideBlank;           /* the margins are already zeroed */
+    unsigned wideHiddenFrames; /* frames in a row the gate kept the margins from being repainted */
+    float wideCoverage;       /* share of the margin area inside the map (see wide_coverage) */
+    unsigned wideProbeW, wideProbeH; /* at 240x160: the size Wide view would draw, for [probe_wide]; 0 = not wanted */
     int wideErrorLogCountdown;
     void* romBuffer;
     size_t romSize;
@@ -118,8 +125,9 @@ Java_com_khumam_gbaduo_emu_NativeCore_load(JNIEnv* env, jobject thiz, jbyteArray
     unsigned videoWidth = 0;
     unsigned videoHeight = 0;
     core->desiredVideoDimensions(core, &videoWidth, &videoHeight);
-    /* A GBA game's buffer has room for the widest wide view; the frame itself stays 240 wide until setWide. */
-    size_t bufferBytes = (size_t) (core->platform(core) == mPLATFORM_GBA ? WIDE_MAX_W : videoWidth) * videoHeight * sizeof(color_t);
+    /* A GBA game's buffer has room for the biggest wide view; the frame itself stays 240x160 until setWide. */
+    bool gba = core->platform(core) == mPLATFORM_GBA;
+    size_t bufferBytes = (size_t) (gba ? WIDE_MAX_W : videoWidth) * (gba ? WIDE_MAX_H : videoHeight) * sizeof(color_t);
     color_t* videoBuffer = calloc(1, bufferBytes);
     if (!videoBuffer) {
         mCoreConfigDeinit(&core->config);
@@ -165,25 +173,35 @@ Java_com_khumam_gbaduo_emu_NativeCore_load(JNIEnv* env, jobject thiz, jbyteArray
 /* ---- wide view: the margins beside the frame, from game.lua's wide() ---------- */
 
 static void blank_wide_margins(void) {
-    unsigned right = g_state.videoWidth - WIDE_FRAME_W - g_state.wideLeft;
+    unsigned width = g_state.videoWidth;
+    unsigned left = g_state.wideLeft;
+    unsigned top = g_state.wideTop;
+    unsigned right = width - WIDE_FRAME_W - left;
     for (unsigned row = 0; row < g_state.videoHeight; row++) {
-        color_t* line = g_state.videoBuffer + (size_t) row * g_state.videoWidth;
-        memset(line, 0, g_state.wideLeft * sizeof(color_t));
-        memset(line + g_state.wideLeft + WIDE_FRAME_W, 0, right * sizeof(color_t));
+        color_t* line = g_state.videoBuffer + (size_t) row * width;
+        if (row < top || row >= top + WIDE_FRAME_H) {
+            memset(line, 0, width * sizeof(color_t));
+        } else {
+            memset(line, 0, left * sizeof(color_t));
+            memset(line + left + WIDE_FRAME_W, 0, right * sizeof(color_t));
+        }
     }
     g_state.wideBlank = true;
 }
 
 /* After each emulated frame: ask game.lua for the world, check its prediction against the
- * edge columns mGBA just drew, and paint the margins only while it holds up. */
+ * edge pixels mGBA just drew, and paint the margins only while it holds up. */
 static void paint_wide_margins(void) {
     int width = (int) g_state.videoWidth;
+    int height = (int) g_state.videoHeight;
     int left = (int) g_state.wideLeft;
+    int top = (int) g_state.wideTop;
     int right = width - WIDE_FRAME_W - left;
+    int bottom = height - WIDE_FRAME_H - top;
     uint32_t* buf = (uint32_t*) g_state.videoBuffer;
 
     struct WideWorld world;
-    bool have = gbaduo_game_enabled() && gbaduo_game_wide(width, left, g_state.wideMatch, &world);
+    bool have = gbaduo_game_enabled() && gbaduo_game_wide(width, height, left, top, g_state.wideMatch, &world);
     if (!have) {
         const char* error = gbaduo_game_last_error();
         if (error[0] && g_state.wideErrorLogCountdown-- <= 0) {
@@ -191,24 +209,53 @@ static void paint_wide_margins(void) {
             LOGE("game.lua: %s", error);
         }
         g_state.wideMatch = 0.0f;
+        g_state.wideCoverage = 0.0f;
     } else {
-        g_state.wideMatch = wide_seam_match(&world, buf, width, left);
+        g_state.wideMatch = wide_seam_match(&world, buf, width, left, top, height > WIDE_FRAME_H);
+        g_state.wideCoverage = wide_coverage(&world, left, top, width, height);
     }
 
     if (!wide_gate_step(&g_state.wideGate, have, g_state.wideMatch)) {
-        if (!g_state.wideBlank) {
+        /* Keep the last painted margins for a moment instead of blanking them: the app is about to zoom back to
+         * the game's own picture (a menu, a small room) and the old margins zoom out of view with it. */
+        if (g_state.wideHiddenFrames++ >= WIDE_FREEZE_FRAMES && !g_state.wideBlank) {
             blank_wide_margins();
         }
         return;
     }
-    wide_paint(&world, buf, width, left, right);
-    for (unsigned row = 0; row < g_state.videoHeight; row++) {
+    g_state.wideHiddenFrames = 0;
+    wide_paint(&world, buf, width, left, right, top, bottom);
+    uint32_t alpha = buf[(size_t) top * (size_t) width + (size_t) left] & 0xFF000000u;
+    for (int row = 0; row < height; row++) {
         uint32_t* line = buf + (size_t) row * (size_t) width;
-        uint32_t alpha = line[left] & 0xFF000000u;
-        for (int c = 0; c < left; c++) line[c] |= alpha;
-        for (int c = left + WIDE_FRAME_W; c < width; c++) line[c] |= alpha;
+        if (row < top || row >= top + WIDE_FRAME_H) {
+            for (int c = 0; c < width; c++) line[c] |= alpha;
+        } else {
+            for (int c = 0; c < left; c++) line[c] |= alpha;
+            for (int c = left + WIDE_FRAME_W; c < width; c++) line[c] |= alpha;
+        }
     }
     g_state.wideBlank = false;
+}
+
+/* While the picture is the game's own 240x160 but Wide view is wanted: the same question as
+ * paint_wide_margins() asks, answered for the picture Wide view would draw, so the app can go back to it
+ * when a world is there again (a menu or a small room has none). Paints nothing. */
+static void probe_wide(void) {
+    int width = (int) g_state.wideProbeW;
+    int height = (int) g_state.wideProbeH;
+    int left = (width - WIDE_FRAME_W) / 2;
+    int top = (height - WIDE_FRAME_H) / 2;
+    struct WideWorld world;
+    bool have = gbaduo_game_enabled() && gbaduo_game_wide(width, height, left, top, g_state.wideMatch, &world);
+    if (have) {
+        g_state.wideMatch = wide_seam_match(&world, (const uint32_t*) g_state.videoBuffer, WIDE_FRAME_W, 0, 0, false);
+        g_state.wideCoverage = wide_coverage(&world, left, top, width, height);
+    } else {
+        g_state.wideMatch = 0.0f;
+        g_state.wideCoverage = 0.0f;
+    }
+    wide_gate_step(&g_state.wideGate, have, g_state.wideMatch);
 }
 
 JNIEXPORT void JNICALL
@@ -218,8 +265,10 @@ Java_com_khumam_gbaduo_emu_NativeCore_runFrame(JNIEnv* env, jobject thiz, jint k
     }
     g_state.core->setKeys(g_state.core, (uint32_t) keys);
     g_state.core->runFrame(g_state.core);
-    if (g_state.videoWidth > WIDE_FRAME_W) {
+    if (g_state.videoWidth > WIDE_FRAME_W || g_state.videoHeight > WIDE_FRAME_H) {
         paint_wide_margins();
+    } else if (g_state.wideProbeW > 0) {
+        probe_wide();
     }
 }
 
@@ -231,28 +280,54 @@ Java_com_khumam_gbaduo_emu_NativeCore_videoBuffer(JNIEnv* env, jobject thiz) {
     return (*env)->NewDirectByteBuffer(env, g_state.videoBuffer, (jlong) g_state.videoBufferBytes);
 }
 
-/* Between frames: the width of the picture the core draws into (GBA only; 240 = off). Returns
- * the width now in effect. The game's frame sits in the middle; the margins are painted
- * by paint_wide_margins(). */
+/* Between frames: the size of the picture the core draws into (GBA only; 240x160 = off). Returns
+ * the width now in effect (read the height with videoHeight). The game's frame sits in the middle; the
+ * margins are painted by paint_wide_margins(). */
 JNIEXPORT jint JNICALL
-Java_com_khumam_gbaduo_emu_NativeCore_setWide(JNIEnv* env, jobject thiz, jint width) {
+Java_com_khumam_gbaduo_emu_NativeCore_setWide(JNIEnv* env, jobject thiz, jint width, jint height) {
     if (!g_state.core || g_state.core->platform(g_state.core) != mPLATFORM_GBA) {
         return (jint) g_state.videoWidth;
     }
-    unsigned wanted = (unsigned) (width < WIDE_FRAME_W ? WIDE_FRAME_W : width > WIDE_MAX_W ? WIDE_MAX_W : width);
-    wanted &= ~1u;
-    if (wanted == g_state.videoWidth) {
-        return (jint) wanted;
+    unsigned wantedW = (unsigned) (width < WIDE_FRAME_W ? WIDE_FRAME_W : width > WIDE_MAX_W ? WIDE_MAX_W : width);
+    unsigned wantedH = (unsigned) (height < WIDE_FRAME_H ? WIDE_FRAME_H : height > WIDE_MAX_H ? WIDE_MAX_H : height);
+    wantedW &= ~1u;
+    wantedH &= ~1u;
+    if (wantedW == g_state.videoWidth && wantedH == g_state.videoHeight) {
+        return (jint) wantedW;
     }
-    unsigned left = (wanted - WIDE_FRAME_W) / 2;
-    g_state.core->setVideoBuffer(g_state.core, g_state.videoBuffer + left, wanted);
+    unsigned left = (wantedW - WIDE_FRAME_W) / 2;
+    unsigned top = (wantedH - WIDE_FRAME_H) / 2;
+    g_state.core->setVideoBuffer(g_state.core, g_state.videoBuffer + (size_t) top * wantedW + left, wantedW);
     memset(g_state.videoBuffer, 0, g_state.videoBufferBytes);
-    g_state.videoWidth = wanted;
+    g_state.videoWidth = wantedW;
+    g_state.videoHeight = wantedH;
     g_state.wideLeft = left;
+    g_state.wideTop = top;
     memset(&g_state.wideGate, 0, sizeof(g_state.wideGate));
     g_state.wideMatch = 0.0f;
+    g_state.wideCoverage = 0.0f;
     g_state.wideBlank = true;
-    return (jint) wanted;
+    g_state.wideHiddenFrames = 0;
+    return (jint) wantedW;
+}
+
+/* Between frames: the size Wide view would draw ([width] x [height]; 0 x 0 = Wide view not wanted), so that
+ * while the picture is the game's own 240x160 the core keeps asking game.lua whether there is a world to show. */
+JNIEXPORT void JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_setWideProbe(JNIEnv* env, jobject thiz, jint width, jint height) {
+    unsigned w = width > WIDE_FRAME_W ? (unsigned) width : 0u;
+    unsigned h = height >= WIDE_FRAME_H ? (unsigned) height : WIDE_FRAME_H;
+    if (w == g_state.wideProbeW && h == g_state.wideProbeH) return;
+    g_state.wideProbeW = w;
+    g_state.wideProbeH = w ? h : 0u;
+    memset(&g_state.wideGate, 0, sizeof(g_state.wideGate));
+    g_state.wideMatch = 0.0f;
+    g_state.wideCoverage = 0.0f;
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_wideCoverage(JNIEnv* env, jobject thiz) {
+    return (jfloat) g_state.wideCoverage;
 }
 
 JNIEXPORT jboolean JNICALL

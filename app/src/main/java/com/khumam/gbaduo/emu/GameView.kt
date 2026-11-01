@@ -9,6 +9,7 @@ import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import kotlin.math.roundToInt
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
@@ -16,6 +17,9 @@ private const val TAG = "GameView"
 
 /** Largest offscreen texture side for sharp scaling; anything bigger draws directly. */
 private const val MAX_PRESCALE_SIDE = 4096
+
+/** How long the game's frame takes to zoom between its two places when Wide view switches the picture's size. */
+private const val ZOOM_NANOS = 340_000_000L
 
 /** The picture height [TiltShift.maxRadius] is given for; the blur scales with the picture. */
 private const val TILT_REFERENCE_HEIGHT = 960f
@@ -31,7 +35,17 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
 
     /** Call before setting [frameBuffer]; the size of the core's video output in pixels. */
     fun setVideoSize(width: Int, height: Int) {
+        if (renderer.zoomTracking && renderer.videoSize != width to height) renderer.zoomRequested = true
         renderer.videoSize = width to height
+    }
+
+    /**
+     * Thread-safe: while [enabled], a change of the picture's size (Wide view switching to or from the game's own
+     * picture) zooms the game's frame from where it was to where it goes, easing in and out, instead of jumping.
+     */
+    fun setSizeZoom(enabled: Boolean) {
+        renderer.zoomTracking = enabled
+        if (!enabled) renderer.zoomRequested = false
     }
 
     init {
@@ -96,6 +110,29 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         @Volatile var aspectOverride: AspectRatio? = null
         @Volatile var tiltShift = TiltShift.OFF
         @Volatile var videoSize: Pair<Int, Int> = 240 to 160
+        @Volatile var zoomTracking = false
+        @Volatile var zoomRequested = false
+
+        // The zoom: the game frame's rectangle (x, y, width, height in GL window pixels) as last shown, and the
+        // animation from [zoomFrom] to wherever it should be now, drawn through an offscreen picture the size of the screen.
+        private var shownRect: FloatArray? = null
+        private var zoomFrom = FloatArray(4)
+        private var zoomStart = 0L
+        private var zooming = false
+        private var composeProgram = 0
+        private var composePositionHandle = 0
+        private var composeTexture = 0
+        private var composeFbo = 0
+        private var composeWidth = 0
+        private var composeHeight = 0
+
+        // The last screen shown while the picture was a Wide view one, kept to zoom out of when the game's own picture takes over.
+        private var snapTexture = 0
+        private var snapWidth = 0
+        private var snapHeight = 0
+        private var snapValid = false
+        private var lastWasWide = false
+        private var zoomingIn = false
 
         private var activeShader: ShaderPreset? = null
         private var program = 0
@@ -146,6 +183,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             applyShader(ShaderPreset.OFF)
             setUpPrescale()
             setUpTilt()
+            setUpCompose()
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -179,6 +217,14 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             val size = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspectOverride ?: aspect, integerScale)
             val x = (surfaceWidth - size.width) / 2
             val y = (surfaceHeight - size.height) / 2
+            val frameRect = frameRect(x, y, size, videoWidth, videoHeight)
+            val animated = zoomRect(frameRect)
+            val target = if (animated != null && sizeCompose()) composeFbo else 0
+            if (target != 0) {
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, target)
+                GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            }
             // A picture that isn't a whole-number multiple of the game would get rows and columns of uneven
             // width, and a linear shrink makes edges pop between sharp and soft as it scrolls. Draw it at a whole multiple
             // first and shrink that by exact area, so pixel edges stay crisp and move smoothly.
@@ -188,11 +234,179 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 drawPicture(tiltFbos[0], 0, 0, size, videoWidth, videoHeight)
                 val radius = tilt.maxRadius * size.height / TILT_REFERENCE_HEIGHT
                 tiltPass(tiltTextures[0], tiltFbos[1], 0, 0, size, 1f, 0f, radius, tilt.focus)
-                tiltPass(tiltTextures[1], 0, x, y, size, 0f, 1f, radius, tilt.focus)
+                tiltPass(tiltTextures[1], target, x, y, size, 0f, 1f, radius, tilt.focus)
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
             } else {
-                drawPicture(0, x, y, size, videoWidth, videoHeight)
+                drawPicture(target, x, y, size, videoWidth, videoHeight)
             }
+            if (target != 0 && animated != null) {
+                if (zoomingIn) drawSnapshotZoomed(animated)
+                composeZoomed(animated, frameRect, x, y, size)
+            }
+            shownRect = animated ?: frameRect
+            lastWasWide = pictureIsWide()
+            if (zoomTracking && lastWasWide) saveSnapshot()
+        }
+
+        private fun pictureIsWide(): Boolean {
+            val (w, h) = videoSize
+            return w > WideView.FRAME_WIDTH || h > WideView.FRAME_HEIGHT
+        }
+
+        /** The screen as it is now, kept (only while a Wide view picture is up) for a zoom back out of it. */
+        private fun saveSnapshot() {
+            if (snapTexture == 0 || surfaceWidth <= 0 || surfaceHeight <= 0) return
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, snapTexture)
+            if (snapWidth != surfaceWidth || snapHeight != surfaceHeight) {
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGB, surfaceWidth, surfaceHeight, 0,
+                    GLES20.GL_RGB, GLES20.GL_UNSIGNED_BYTE, null,
+                )
+                snapWidth = surfaceWidth
+                snapHeight = surfaceHeight
+            }
+            GLES20.glCopyTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, 0, 0, surfaceWidth, surfaceHeight)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            snapValid = true
+        }
+
+        /** The saved screen, moved and scaled so the frame it showed lands on [now]: the old margins zoom away with it. */
+        private fun drawSnapshotZoomed(now: FloatArray) {
+            val scaleX = now[2] / zoomFrom[2]
+            val scaleY = now[3] / zoomFrom[3]
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glViewport(
+                (now[0] - zoomFrom[0] * scaleX).roundToInt(), (now[1] - zoomFrom[1] * scaleY).roundToInt(),
+                (surfaceWidth * scaleX).roundToInt(), (surfaceHeight * scaleY).roundToInt(),
+            )
+            GLES20.glUseProgram(composeProgram)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, snapTexture)
+            drawQuad(composePositionHandle)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+        }
+
+        /** Where the game's own 240x160 frame sits on the screen: all of the picture, or the middle of a Wide view one. */
+        private fun frameRect(x: Int, y: Int, size: ViewportSize, videoWidth: Int, videoHeight: Int): FloatArray {
+            val fullW = size.width.toFloat()
+            val fullH = size.height.toFloat()
+            return floatArrayOf(
+                x + fullW * ((videoWidth - WideView.FRAME_WIDTH) / 2) / videoWidth,
+                y + fullH * ((videoHeight - WideView.FRAME_HEIGHT) / 2) / videoHeight,
+                fullW * WideView.FRAME_WIDTH / videoWidth,
+                fullH * WideView.FRAME_HEIGHT / videoHeight,
+            )
+        }
+
+        /** While a zoom runs: where the frame is now, easing from where it was to [to]; null when nothing is zooming. */
+        private fun zoomRect(to: FloatArray): FloatArray? {
+            val shown = shownRect
+            if (zoomRequested) {
+                zoomRequested = false
+                if (shown != null && zoomTracking && surfaceWidth > 0 && surfaceHeight > 0) {
+                    zoomFrom = shown.copyOf()
+                    zoomStart = System.nanoTime()
+                    zooming = true
+                    zoomingIn = lastWasWide && !pictureIsWide() && snapValid
+                }
+            }
+            if (!zooming) return null
+            val t = (System.nanoTime() - zoomStart).toFloat() / ZOOM_NANOS
+            if (t >= 1f) {
+                zooming = false
+                zoomingIn = false
+                return null
+            }
+            // Ease in and out (cubic): slow away from the old place, quick through the middle, slow into the new one.
+            val e = if (t < 0.5f) 4f * t * t * t else 1f - (-2f * t + 2f).let { it * it * it } / 2f
+            return FloatArray(4) { zoomFrom[it] + (to[it] - zoomFrom[it]) * e }
+        }
+
+        /**
+         * The finished picture (offscreen, the size of the screen) onto the screen, moved so its frame lands on [now].
+         * Only the picture's own rectangle ([x], [y], [size] in the offscreen picture) is drawn, so what is behind it shows around it.
+         */
+        private fun composeZoomed(now: FloatArray, final: FloatArray, x: Int, y: Int, size: ViewportSize) {
+            val scaleX = now[2] / final[2]
+            val scaleY = now[3] / final[3]
+            val originX = now[0] - final[0] * scaleX
+            val originY = now[1] - final[1] * scaleY
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glViewport(
+                originX.roundToInt(), originY.roundToInt(),
+                (surfaceWidth * scaleX).roundToInt(), (surfaceHeight * scaleY).roundToInt(),
+            )
+            GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+            GLES20.glScissor(
+                (originX + x * scaleX).roundToInt(), (originY + y * scaleY).roundToInt(),
+                (size.width * scaleX).roundToInt(), (size.height * scaleY).roundToInt(),
+            )
+            GLES20.glUseProgram(composeProgram)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, composeTexture)
+            drawQuad(composePositionHandle)
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+        }
+
+        /** Gives the offscreen picture the screen's size; false (no zoom) when the GPU won't render into it. */
+        private fun sizeCompose(): Boolean {
+            if (composeProgram == 0) return false
+            if (composeWidth == surfaceWidth && composeHeight == surfaceHeight) return true
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, composeTexture)
+            GLES20.glTexImage2D(
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, surfaceWidth, surfaceHeight, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+            )
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, composeFbo)
+            GLES20.glFramebufferTexture2D(
+                GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, composeTexture, 0,
+            )
+            val complete = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            if (!complete) {
+                Log.e(TAG, "Offscreen ${surfaceWidth}x$surfaceHeight not renderable, no zoom")
+                composeProgram = 0
+                return false
+            }
+            composeWidth = surfaceWidth
+            composeHeight = surfaceHeight
+            return true
+        }
+
+        private fun setUpCompose() {
+            composeWidth = 0
+            composeHeight = 0
+            zooming = false
+            composeProgram = runCatching { buildProgram("shaders/compose/vertex.glsl", "shaders/compose/fragment.glsl", "compose") }
+                .getOrElse { error ->
+                    Log.e(TAG, "Failed to build compose shader, no zoom", error)
+                    return
+                }
+            composePositionHandle = GLES20.glGetAttribLocation(composeProgram, "position")
+            GLES20.glUseProgram(composeProgram)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(composeProgram, "tex"), 0)
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0)
+            composeTexture = ids[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, composeTexture)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glGenFramebuffers(1, ids, 0)
+            composeFbo = ids[0]
+            GLES20.glGenTextures(1, ids, 0)
+            snapTexture = ids[0]
+            snapWidth = 0
+            snapHeight = 0
+            snapValid = false
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, snapTexture)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
         }
 
         /** The game picture, [size] big, with its corner at ([x], [y]) of framebuffer [fbo] (0: the screen). */

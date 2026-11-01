@@ -224,6 +224,17 @@
     <string name="remove_confirm">Sure? Press again</string>
     <string name="about_tagline">Play GBA, GBC and GB games with a companion screen on a dual-screen handheld.</string>
     <string name="about_disclaimer">Fan-made, not affiliated with Nintendo. Use your own legally dumped ROMs.</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_up_to_date">You have the latest version (%1$s).</string>
+    <string name="update_failed">Could not check for updates. Check the connection.</string>
+    <string name="update_available">Version %1$s is available.</string>
+    <string name="update_download">Download and install</string>
+    <string name="update_downloading">Downloading… %1$s</string>
+    <string name="update_download_failed">The download failed. Try again.</string>
+    <string name="update_permission">Allow GBADuo to install apps, then come back and tap Install.</string>
+    <string name="update_install">Install</string>
+    <string name="update_install_failed">Could not open the installer.</string>
     <string name="about_source">Source on GitHub</string>
     <string name="about_credits_title">Built with</string>
     <string name="about_credits">mGBA (MPL 2.0) emulates the games. Lua 5.4 (MIT) runs companion pack scripts. rcheevos (MIT) runs RetroAchievements. Fonts: Silkscreen and IBM Plex Mono (SIL Open Font License 1.1).</string>

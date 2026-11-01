@@ -154,7 +154,7 @@ static void paint_fills_only_margins(void) {
     enum { STRIDE = 280 };
     uint32_t* buf = malloc((size_t) STRIDE * 160 * sizeof(uint32_t));
     for (int i = 0; i < STRIDE * 160; i++) buf[i] = 0xDEADBEEFu;
-    wide_paint(&w, buf, STRIDE, 20, 20);
+    wide_paint(&w, buf, STRIDE, 20, 20, 0, 0);
     int untouched = 1, painted = 1;
     for (int row = 0; row < 160; row++) {
         for (int c = 20; c < 260; c++) if (buf[row * STRIDE + c] != 0xDEADBEEFu) untouched = 0;
@@ -195,7 +195,7 @@ static void paint_equals_pixelwise_reference(void) {
         w.x = origins[o][0];
         w.y = origins[o][1];
         for (int i = 0; i < STRIDE * 160; i++) buf[i] = 0xDEADBEEFu;
-        wide_paint(&w, buf, STRIDE, LEFT, RIGHT);
+        wide_paint(&w, buf, STRIDE, LEFT, RIGHT, 0, 0);
         for (int row = 0; row < 160; row++) {
             for (int c = 0; c < STRIDE; c++) {
                 if (c >= LEFT && c < LEFT + 240) continue;
@@ -216,7 +216,7 @@ static void paint_survives_garbage_addresses(void) {
     enum { STRIDE = 280 };
     uint32_t* buf = malloc((size_t) STRIDE * 160 * sizeof(uint32_t));
     for (int i = 0; i < STRIDE * 160; i++) buf[i] = 0xDEADBEEFu;
-    wide_paint(&w, buf, STRIDE, 20, 20);
+    wide_paint(&w, buf, STRIDE, 20, 20, 0, 0);
     CHECK(buf[0] == 0u);
     CHECK(buf[159 * STRIDE + 279] == 0u);
     CHECK(buf[100 * STRIDE + 100] == 0xDEADBEEFu);
@@ -231,10 +231,121 @@ static void seam_match_is_one_on_its_own_picture(void) {
     uint32_t* buf = calloc((size_t) STRIDE * 160, sizeof(uint32_t));
     for (int row = 0; row < 160; row++)
         for (int x = 0; x < 240; x++) buf[row * STRIDE + LEFT + x] = wide_pixel(&w, x, row);
-    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT) - 1.0f) < 1e-6f);
+    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT, 0, false) - 1.0f) < 1e-6f);
     for (int row = 0; row < 160; row++) buf[row * STRIDE + LEFT] ^= 0x00FFFFFFu;
-    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT) - (1.0f - 160.0f / 2560.0f)) < 1e-6f);
+    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT, 0, false) - (1.0f - 160.0f / 2560.0f)) < 1e-6f);
     free(buf);
+}
+
+/* Margins on all four sides: every pixel outside the frame is the world's, the frame itself is not touched. */
+static void paint_fills_all_four_sides(void) {
+    struct WideWorld w = fixture();
+    uint32_t seed = 777u;
+#define RND() rnd(&seed)
+    for (int i = 0; i < 48 * 32; i++) poke8(TILES + (uint32_t) i, (uint8_t) RND());
+    for (int i = 0; i < 256; i++) poke16(PALETTE + (uint32_t) i * 2, (uint16_t) (RND() & 0x7FFF));
+    for (int m = 0; m < 8; m++)
+        for (int q = 0; q < 8; q++) poke16(METATILES + (uint32_t) m * 16 + (uint32_t) q * 2, (uint16_t) ((RND() % 48) | ((RND() % 4) << 12)));
+    for (int c = 0; c < 6; c++) poke16(GRID + (uint32_t) c * 2, (uint16_t) (RND() % 8));
+    for (int c = 0; c < 4; c++) poke16(BORDER + (uint32_t) c * 2, (uint16_t) (RND() % 8));
+    enum { STRIDE = 300, HEIGHT = 230, LEFT = 30, RIGHT = 30, TOP = 35, BOTTOM = 35 };
+    uint32_t* buf = malloc((size_t) STRIDE * HEIGHT * sizeof(uint32_t));
+    static const int32_t origins[][2] = {{0, 0}, {-5, 3}, {45, -31}};
+    int same = 1, untouched = 1;
+    for (unsigned o = 0; o < sizeof(origins) / sizeof(origins[0]); o++) {
+        w.x = origins[o][0];
+        w.y = origins[o][1];
+        for (int i = 0; i < STRIDE * HEIGHT; i++) buf[i] = 0xDEADBEEFu;
+        wide_paint(&w, buf, STRIDE, LEFT, RIGHT, TOP, BOTTOM);
+        for (int row = 0; row < HEIGHT; row++) {
+            for (int c = 0; c < STRIDE; c++) {
+                bool inFrame = row >= TOP && row < TOP + 160 && c >= LEFT && c < LEFT + 240;
+                uint32_t got = buf[row * STRIDE + c];
+                if (inFrame) {
+                    if (got != 0xDEADBEEFu) untouched = 0;
+                } else if (got != wide_pixel(&w, w.x + c - LEFT, w.y + row - TOP)) {
+                    same = 0;
+                }
+            }
+        }
+    }
+    CHECK(same);
+    CHECK(untouched);
+    free(buf);
+#undef RND
+}
+
+/* With the edge rows on, the seam check reads the frame at (left, top) and counts the top and bottom strips too, with slack. */
+static void seam_match_counts_the_edge_rows(void) {
+    struct WideWorld w = fixture();
+    for (int c = 0; c < 6; c++) poke16(GRID + (uint32_t) c * 2, (uint16_t) (c % 3 + 1));
+    for (int n = 1; n <= 3; n++) marker_metatile(METATILES + (uint32_t) n * 16, n);
+    enum { STRIDE = 300, HEIGHT = 230, LEFT = 30, TOP = 35 };
+    uint32_t* buf = calloc((size_t) STRIDE * HEIGHT, sizeof(uint32_t));
+    for (int row = 0; row < 160; row++)
+        for (int x = 0; x < 240; x++) buf[(TOP + row) * STRIDE + LEFT + x] = wide_pixel(&w, x, row);
+    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT, TOP, true) - 1.0f) < 1e-6f);
+    /* A little HUD on the top edge is forgiven (the rows have slack)... */
+    for (int x = 100; x < 108; x++) buf[TOP * STRIDE + LEFT + x] ^= 0x00FFFFFFu;
+    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT, TOP, true) - 1.0f) < 1e-6f);
+    /* ...but a wrong top and bottom (all 16 edge rows) is not: row share 0, so 0.2 with the slack. */
+    for (int row = 0; row < 160; row++) {
+        if (row >= 8 && row < 152) continue;
+        for (int x = 8; x < 232; x++) buf[(TOP + row) * STRIDE + LEFT + x] ^= 0x00FFFFFFu;
+    }
+    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT, TOP, true) - 0.2f) < 5e-3f);
+    /* Without the rows flag the same spoil is invisible. */
+    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT, TOP, false) - 1.0f) < 1e-6f);
+    free(buf);
+}
+
+/* A blend the world doesn't describe (a cloud shadow darkens the picture a little) still counts as predicted; a different colour does not. */
+static void seam_match_tolerates_a_tint(void) {
+    struct WideWorld w = fixture();
+    for (int c = 0; c < 6; c++) poke16(GRID + (uint32_t) c * 2, (uint16_t) (c % 3 + 1));
+    for (int n = 1; n <= 3; n++) marker_metatile(METATILES + (uint32_t) n * 16, n);
+    enum { STRIDE = 280, LEFT = 20 };
+    uint32_t* buf = calloc((size_t) STRIDE * 160, sizeof(uint32_t));
+    for (int row = 0; row < 160; row++)
+        for (int x = 0; x < 240; x++) buf[row * STRIDE + LEFT + x] = wide_pixel(&w, x, row);
+    for (int row = 0; row < 160; row++) {
+        for (int x = 0; x < 240; x++) {
+            uint32_t c = buf[row * STRIDE + LEFT + x];
+            uint32_t r = (c & 0xFF) > 30 ? (c & 0xFF) - 30 : 0;
+            uint32_t g = ((c >> 8) & 0xFF) > 30 ? ((c >> 8) & 0xFF) - 30 : 0;
+            uint32_t b = ((c >> 16) & 0xFF) > 30 ? ((c >> 16) & 0xFF) - 30 : 0;
+            buf[row * STRIDE + LEFT + x] = (c & 0xFF000000u) | b << 16 | g << 8 | r;
+        }
+    }
+    CHECK(fabsf(wide_seam_match(&w, buf, STRIDE, LEFT, 0, false) - 1.0f) < 1e-6f);
+    for (int row = 0; row < 160; row++) buf[row * STRIDE + LEFT] ^= 0x00FFFFFFu;
+    CHECK(wide_seam_match(&w, buf, STRIDE, LEFT, 0, false) < 1.0f);
+    free(buf);
+}
+
+/* The share of the margins that is map: a layered world is as big as its grids, a single-grid world's border repeats forever. */
+static void coverage_is_the_share_of_margin_inside_the_map(void) {
+    struct WideWorld w = fixture();
+    CHECK(wide_coverage(&w, 80, 40, 400, 240) == 1.0f);
+    struct WideWorld l;
+    memset(&l, 0, sizeof(l));
+    l.layerCount = 1;
+    l.layers[0].gridW = 15;       /* 240 px */
+    l.layers[0].gridH = 10;       /* 160 px: the frame is the whole room */
+    l.layers[0].stride = 15;
+    l.layers[0].cellBytes = 2;
+    CHECK(wide_coverage(&l, 80, 40, 400, 240) == 0.0f);
+    l.layers[0].gridW = 25;       /* 400 x 160 px, the frame at the left of it */
+    l.layers[0].stride = 25;
+    float c = wide_coverage(&l, 80, 40, 400, 240);
+    /* the map (400x160, the frame at its left edge) fills part of the margin: the strip to the right of the frame and nothing above or below */
+    CHECK(c > 0.0f && c < 1.0f);
+    l.layers[0].gridW = 64;
+    l.layers[0].gridH = 64;
+    l.layers[0].stride = 64;
+    l.x = 400;
+    l.y = 400;                    /* the frame deep inside a big room: the picture is all map */
+    CHECK(wide_coverage(&l, 80, 40, 400, 240) == 1.0f);
 }
 
 static void hysteresis_hides_after_four_bad_frames(void) {
@@ -299,12 +410,12 @@ static void layered_world_top_over_bottom_and_black_outside(void) {
     CHECK(wide_pixel(&w, -1, 0) == 0u);                  /* outside the grids: black */
     CHECK(wide_pixel(&w, 0, 32) == 0u);
     uint32_t buf[400 * 160];
-    wide_paint(&w, buf, 400, 80, 80);
+    wide_paint(&w, buf, 400, 80, 80, 0, 0);
     CHECK(buf[0 * 400 + 80 + 240 + 0] == 0u);            /* right margin of row 0: black, nothing there */
     for (int row = 0; row < 3; row++) CHECK(buf[(size_t) row * 400 + 79] == 0u);
     struct WideWorld shifted = w;
     shifted.x = 80;                                       /* world x 0 is the left margin's last column + 1 */
-    wide_paint(&shifted, buf, 400, 80, 0);
+    wide_paint(&shifted, buf, 400, 80, 0, 0, 0);
     CHECK(buf[0] == wide_pixel(&shifted, 0, 0));
     w.layerCount = WIDE_MAX_LAYERS + 1;
     CHECK(!wide_world_valid(&w));
@@ -342,7 +453,7 @@ static void three_layers_of_u32_cells(void) {
     CHECK(wide_pixel(&w, 32, 0) == 0u);                  /* outside the grids: black */
     uint32_t buf[400 * 160];
     w.x = 80;                                            /* world x 0 is the left margin's first column */
-    wide_paint(&w, buf, 400, 80, 0);
+    wide_paint(&w, buf, 400, 80, 0, 0, 0);
     CHECK(buf[0] == wide_pixel(&w, 0, 0) && buf[16] == wide_pixel(&w, 16, 0)); /* the painted row reads the same u32 cells */
 }
 
@@ -360,6 +471,10 @@ int main(void) {
     paint_equals_pixelwise_reference();
     paint_survives_garbage_addresses();
     seam_match_is_one_on_its_own_picture();
+    paint_fills_all_four_sides();
+    seam_match_counts_the_edge_rows();
+    seam_match_tolerates_a_tint();
+    coverage_is_the_share_of_margin_inside_the_map();
     hysteresis_hides_after_four_bad_frames();
     hysteresis_shows_after_four_good_frames();
     no_world_hides_at_once();

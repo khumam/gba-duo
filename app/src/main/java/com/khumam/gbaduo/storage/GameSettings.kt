@@ -41,6 +41,7 @@ object GameSettingsKeys {
     /** Wide view (a wider picture painted from the pack's game.lua): `on`, or absent for off. */
     const val WIDE = "wide"
     const val WIDE_ON = "on"
+    const val WIDE_EXTRA = "extra"
 
     /** Artwork lock: absent = scraping may change it, `none` = player removed it, `picked` = player chose it. */
     const val ARTWORK = "artwork"

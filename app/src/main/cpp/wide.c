@@ -7,6 +7,11 @@
 #define HIDE_AFTER_BAD 4
 #define SHOW_AFTER_GOOD 4
 #define SEAM_COLUMNS 8
+/* The edge rows hold the game's HUD (hearts, items, counters), which is no part of the world: they count with this much slack. */
+#define ROW_SLACK 0.2f
+/* The game blends effects over its layers (cloud shadows, fades) that the world does not describe, which only darkens or tints:
+ * a pixel counts as predicted when each colour channel is within this much of the world's. */
+#define SEAM_TOLERANCE 40
 
 static bool layers_valid(const struct WideWorld* w) {
     if (w->layerCount < 1 || w->layerCount > WIDE_MAX_LAYERS) return false;
@@ -30,6 +35,14 @@ bool wide_world_valid(const struct WideWorld* w) {
 uint32_t wide_color(uint16_t v) {
     uint32_t c = (uint32_t) (v & 0x1F) << 3 | (uint32_t) ((v >> 5) & 0x1F) << 11 | (uint32_t) ((v >> 10) & 0x1F) << 19;
     return c | ((c >> 5) & 0x070707u);
+}
+
+static bool close_enough(uint32_t drawn, uint32_t wanted) {
+    for (int shift = 0; shift < 24; shift += 8) {
+        int diff = (int) ((drawn >> shift) & 0xFF) - (int) ((wanted >> shift) & 0xFF);
+        if (diff > SEAM_TOLERANCE || diff < -SEAM_TOLERANCE) return false;
+    }
+    return true;
 }
 
 static int32_t floor_div(int32_t a, int32_t b) {
@@ -241,20 +254,30 @@ static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy,
     }
 }
 
-void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right) {
+void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom) {
     bool valid = wide_world_valid(w);
     uint32_t pal[256];
     if (valid) load_palette(w, pal);
-    for (int row = 0; row < WIDE_FRAME_H; row++) {
+    int total = WIDE_FRAME_W + left + right;
+    for (int row = 0; row < top + WIDE_FRAME_H + bottom; row++) {
         uint32_t* line = buf + (size_t) row * (size_t) stride;
+        bool inFrame = row >= top && row < top + WIDE_FRAME_H;
         if (!valid) {
-            for (int c = 0; c < left; c++) line[c] = 0;
-            for (int c = left + WIDE_FRAME_W; c < left + WIDE_FRAME_W + right; c++) line[c] = 0;
+            if (inFrame) {
+                for (int c = 0; c < left; c++) line[c] = 0;
+                for (int c = left + WIDE_FRAME_W; c < total; c++) line[c] = 0;
+            } else {
+                for (int c = 0; c < total; c++) line[c] = 0;
+            }
             continue;
         }
-        int32_t wy = w->y + row;
-        wide_row(w, pal, wy, w->x - left, left, line);
-        wide_row(w, pal, wy, w->x + WIDE_FRAME_W, right, line + left + WIDE_FRAME_W);
+        int32_t wy = w->y + (row - top);
+        if (inFrame) {
+            wide_row(w, pal, wy, w->x - left, left, line);
+            wide_row(w, pal, wy, w->x + WIDE_FRAME_W, right, line + left + WIDE_FRAME_W);
+        } else {
+            wide_row(w, pal, wy, w->x - left, total, line);
+        }
     }
 }
 
@@ -277,25 +300,66 @@ void wide_render(const struct WideWorld* w, uint32_t* out, int width, int height
     }
 }
 
-float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride, int left) {
+float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride, int left, int top, bool rows) {
     if (!wide_world_valid(w)) return 0.0f;
     uint32_t pal[256];
     load_palette(w, pal);
     int same = 0;
-    uint32_t want[SEAM_COLUMNS];
+    int checked = 0;
+    uint32_t want[WIDE_FRAME_W];
     for (int row = 0; row < WIDE_FRAME_H; row++) {
-        const uint32_t* line = buf + (size_t) row * (size_t) stride + left;
+        const uint32_t* line = buf + (size_t) (top + row) * (size_t) stride + left;
         int32_t wy = w->y + row;
         wide_row(w, pal, wy, w->x, SEAM_COLUMNS, want);
         for (int k = 0; k < SEAM_COLUMNS; k++) {
-            if ((line[k] & 0x00FFFFFFu) == (want[k] & 0x00FFFFFFu)) same++;
+            if (close_enough(line[k], want[k])) same++;
         }
         wide_row(w, pal, wy, w->x + WIDE_FRAME_W - SEAM_COLUMNS, SEAM_COLUMNS, want);
         for (int k = 0; k < SEAM_COLUMNS; k++) {
-            if ((line[WIDE_FRAME_W - SEAM_COLUMNS + k] & 0x00FFFFFFu) == (want[k] & 0x00FFFFFFu)) same++;
+            if (close_enough(line[WIDE_FRAME_W - SEAM_COLUMNS + k], want[k])) same++;
         }
+        checked += 2 * SEAM_COLUMNS;
     }
-    return (float) same / (float) (WIDE_FRAME_H * 2 * SEAM_COLUMNS);
+    float share = (float) same / (float) checked;
+    if (rows) {
+        same = 0;
+        checked = 0;
+        /* The edge rows between the edge columns (those corners are counted above). */
+        int span = WIDE_FRAME_W - 2 * SEAM_COLUMNS;
+        for (int k = 0; k < 2 * SEAM_COLUMNS; k++) {
+            int row = k < SEAM_COLUMNS ? k : WIDE_FRAME_H - 2 * SEAM_COLUMNS + k;
+            const uint32_t* line = buf + (size_t) (top + row) * (size_t) stride + left + SEAM_COLUMNS;
+            wide_row(w, pal, w->y + row, w->x + SEAM_COLUMNS, span, want);
+            for (int c = 0; c < span; c++) {
+                if (close_enough(line[c], want[c])) same++;
+            }
+            checked += span;
+        }
+        float rowShare = (float) same / (float) checked + ROW_SLACK;
+        if (rowShare < share) share = rowShare;
+    }
+    return share;
+}
+
+static int64_t overlap(int64_t ax, int64_t ay, int64_t aw, int64_t ah, int64_t bx, int64_t by, int64_t bw, int64_t bh) {
+    int64_t w = (ax + aw < bx + bw ? ax + aw : bx + bw) - (ax > bx ? ax : bx);
+    int64_t h = (ay + ah < by + bh ? ay + ah : by + bh) - (ay > by ? ay : by);
+    return w > 0 && h > 0 ? w * h : 0;
+}
+
+float wide_coverage(const struct WideWorld* w, int left, int top, int width, int height) {
+    if (!wide_world_valid(w)) return 0.0f;
+    int64_t margin = (int64_t) width * height - (int64_t) WIDE_FRAME_W * WIDE_FRAME_H;
+    if (w->layerCount == 0 || margin <= 0) return 1.0f;
+    int64_t mapW = 0, mapH = 0;
+    for (int i = 0; i < w->layerCount; i++) {
+        if ((int64_t) w->layers[i].gridW * 16 > mapW) mapW = (int64_t) w->layers[i].gridW * 16;
+        if ((int64_t) w->layers[i].gridH * 16 > mapH) mapH = (int64_t) w->layers[i].gridH * 16;
+    }
+    int64_t inPicture = overlap(0, 0, mapW, mapH, (int64_t) w->x - left, (int64_t) w->y - top, width, height);
+    int64_t inFrame = overlap(0, 0, mapW, mapH, w->x, w->y, WIDE_FRAME_W, WIDE_FRAME_H);
+    float share = (float) (inPicture - inFrame) / (float) margin;
+    return share < 0.0f ? 0.0f : share > 1.0f ? 1.0f : share;
 }
 
 bool wide_gate_step(struct WideGate* g, bool haveWorld, float match) {

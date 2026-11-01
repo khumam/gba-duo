@@ -44,12 +44,24 @@ class WideControlTest {
     }
 
     @Test
-    fun toggleOnOffAndTheDefault() {
-        assertTrue(WideControl.next(current = false, args = listOf("toggle")))
-        assertFalse(WideControl.next(current = true, args = listOf("toggle")))
-        assertTrue(WideControl.next(current = false, args = emptyList()))   // no argument: toggle
-        assertTrue(WideControl.next(current = true, args = listOf("on")))
-        assertFalse(WideControl.next(current = true, args = listOf("off")))
-        assertTrue(WideControl.next(current = false, args = listOf("garbage")) == true) // unknown word: toggle
+    fun extraWideShowsAsExtraAndKeepsWideOn() {
+        val extra = snapshot(WideState(WideMode.EXTRA, available = true))
+        assertEquals(1L, extra["_wide"])
+        assertEquals(2L, extra["_wideMode"])
+        assertEquals("XL", extra["_wideLabel"])
+        assertEquals(1L, snapshot(WideState(WideMode.WIDE, available = true))["_wideMode"])
+        assertEquals(0L, snapshot(WideState(WideMode.EXTRA, available = false))["_wideMode"])
+    }
+
+    @Test
+    fun namedModesAndTheToggleCycle() {
+        assertEquals(WideMode.WIDE, WideControl.next(WideMode.OFF, listOf("on")))
+        assertEquals(WideMode.OFF, WideControl.next(WideMode.EXTRA, listOf("off")))
+        assertEquals(WideMode.EXTRA, WideMode.OFF.let { WideControl.next(it, listOf("extra")) })
+        assertEquals(WideMode.WIDE, WideControl.next(WideMode.OFF, listOf("toggle")))
+        assertEquals(WideMode.EXTRA, WideControl.next(WideMode.WIDE, listOf("toggle")))
+        assertEquals(WideMode.OFF, WideControl.next(WideMode.EXTRA, listOf("toggle")))
+        assertEquals(WideMode.WIDE, WideControl.next(WideMode.OFF, emptyList()))      // no argument: toggle
+        assertEquals(WideMode.WIDE, WideControl.next(WideMode.OFF, listOf("garbage"))) // unknown word: toggle
     }
 }

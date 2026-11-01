@@ -1425,23 +1425,27 @@ static void hook_failed(int hook, const char* what, const char* err) {
     }
 }
 
-static void push_view(lua_State* L, lua_Integer frame, int width, int left, bool withMatch, float match) {
-    lua_createtable(L, 0, 4);
+static void push_view(lua_State* L, lua_Integer frame, int width, int height, int left, int top, bool withMatch, float match) {
+    lua_createtable(L, 0, 6);
     if (frame >= 0) {
         lua_pushinteger(L, frame);
         lua_setfield(L, -2, "frame");
     }
     lua_pushinteger(L, width);
     lua_setfield(L, -2, "width");
+    lua_pushinteger(L, height);
+    lua_setfield(L, -2, "height");
     lua_pushinteger(L, left);
     lua_setfield(L, -2, "left");
+    lua_pushinteger(L, top);
+    lua_setfield(L, -2, "top");
     if (withMatch) {
         lua_pushnumber(L, (lua_Number) match);
         lua_setfield(L, -2, "match");
     }
 }
 
-bool gbaduo_game_frame(int64_t frameCounter, int width, int left, bool may_write) {
+bool gbaduo_game_frame(int64_t frameCounter, int width, int height, int left, int top, bool may_write) {
     activate(SCRIPT_GAME);
     if (!g_script.L || g_script.disabled) return false;
     lua_State* L = g_script.L;
@@ -1450,7 +1454,7 @@ bool gbaduo_game_frame(int64_t frameCounter, int width, int left, bool may_write
         lua_pop(L, 1);
         return true;
     }
-    push_view(L, (lua_Integer) frameCounter, width, left, false, 0.0f);
+    push_view(L, (lua_Integer) frameCounter, width, height, left, top, false, 0.0f);
     start_budget(INSTRUCTION_BUDGET_PER_FRAME, TIME_BUDGET_PER_FRAME_MS);
     g_script.writeWindow = may_write;
     g_script.tapBytesLeft = SCRIPT_WRITE_MAX_PER_FRAME;
@@ -1576,7 +1580,7 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
     return true;
 }
 
-bool gbaduo_game_wide(int width, int left, float match, struct WideWorld* out) {
+bool gbaduo_game_wide(int width, int height, int left, int top, float match, struct WideWorld* out) {
     activate(SCRIPT_GAME);
     if (!g_script.L || g_script.disabled) return false;
     lua_State* L = g_script.L;
@@ -1585,7 +1589,7 @@ bool gbaduo_game_wide(int width, int left, float match, struct WideWorld* out) {
         lua_pop(L, 1);
         return false;
     }
-    push_view(L, -1, width, left, true, match);
+    push_view(L, -1, width, height, left, top, true, match);
     start_budget(INSTRUCTION_BUDGET_PER_FRAME, TIME_BUDGET_PER_FRAME_MS);
     g_script.writeWindow = false;
     g_script.tapBytesLeft = 0;
@@ -1950,8 +1954,8 @@ Java_com_khumam_gbaduo_emu_NativeCore_gameHas(JNIEnv* env, jobject thiz, jstring
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_khumam_gbaduo_emu_NativeCore_gameFrame(JNIEnv* env, jobject thiz, jlong frame, jint width, jint left, jboolean mayWrite) {
-    return gbaduo_game_frame((int64_t) frame, width, left, mayWrite == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+Java_com_khumam_gbaduo_emu_NativeCore_gameFrame(JNIEnv* env, jobject thiz, jlong frame, jint width, jint height, jint left, jint top, jboolean mayWrite) {
+    return gbaduo_game_frame((int64_t) frame, width, height, left, top, mayWrite == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
