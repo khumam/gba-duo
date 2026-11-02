@@ -26,7 +26,10 @@ import com.khumam.gbaduo.companion.PackDownloader
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.companion.PackUpdates
 import com.khumam.gbaduo.library.artwork.UrlHttp
+import com.khumam.gbaduo.library.artwork.ArtworkLoader
 import com.khumam.gbaduo.library.ui.CartridgeCarousel
+import com.khumam.gbaduo.library.ui.CartridgeView
+import com.khumam.gbaduo.library.ui.GameList
 import com.khumam.gbaduo.library.ui.DialogBoxDrawable
 import com.khumam.gbaduo.library.ui.Fonts
 import com.khumam.gbaduo.library.ui.GraphPaperDrawable
@@ -57,8 +60,16 @@ class LibraryActivity : Activity() {
     private lateinit var carousel: CartridgeCarousel
 
     private lateinit var recycler: RecyclerView
+    private lateinit var gameList: GameList
+    private lateinit var shelfFrame: View
+    private lateinit var split: View
+    private lateinit var splitCart: CartridgeView
+    private lateinit var splitTitle: OutlineText
+    private val splitArtwork by lazy { ArtworkLoader(this) }
     private lateinit var pointer: TextView
     private lateinit var hud: TextView
+    private lateinit var filterButton: PixelButton
+    private lateinit var viewButton: PixelButton
     private lateinit var empty: LinearLayout
     private lateinit var emptyTitle: TextView
     private lateinit var emptyText: TextView
@@ -77,6 +88,12 @@ class LibraryActivity : Activity() {
     private val packStore by lazy { PackStore(packsDir) }
     private val prefs by lazy { getSharedPreferences("library", MODE_PRIVATE) }
     private val packUpdates by lazy { PackUpdates(getSharedPreferences("pack_updates", MODE_PRIVATE)) }
+    /** Every game found; the carousel shows [filter] of them. `null` filter is all games. */
+    private var allEntries: List<RomEntry> = emptyList()
+    private var packCodes: Set<String> = emptySet()
+    private var packUpdateCodes: Set<String> = emptySet()
+    private var filter: Platform? = null
+    private var splitMode = false
     private var pickPackFor: GameStorage? = null
 
     /** Folder scans and ROM hashing are blocking SAF I/O; one background thread keeps them ordered. */
@@ -105,6 +122,18 @@ class LibraryActivity : Activity() {
         styleViews()
 
         carousel = CartridgeCarousel(recycler, onSelected = ::showSelected, onPlay = { play() })
+        filter = Platform.byId(prefs.getString(KEY_FILTER, null))
+        splitMode = prefs.getBoolean(KEY_SPLIT, false)
+        gameList = GameList(findViewById(R.id.game_list), onTap = { position ->
+            if (position == carousel.selected) play() else carousel.step(position - carousel.selected)
+        })
+        renderFilter()
+        renderViewMode()
+        findViewById<PixelButton>(R.id.split_play).setOnClickListener { play() }
+        findViewById<PixelButton>(R.id.split_pack).setOnClickListener { selectedEntry()?.let(::showCompanionMenu) }
+        findViewById<PixelButton>(R.id.split_settings).setOnClickListener { selectedEntry()?.let(::openGameSettings) }
+        filterButton.setOnClickListener { cycleFilter(1) }
+        viewButton.setOnClickListener { toggleView() }
 
         findViewById<PixelButton>(R.id.open_settings).setOnClickListener { openSettings() }
         findViewById<PixelButton>(R.id.play).setOnClickListener { play() }
@@ -115,8 +144,14 @@ class LibraryActivity : Activity() {
 
     private fun bindViews() {
         recycler = findViewById(R.id.carousel)
+        shelfFrame = findViewById(R.id.shelf_frame)
+        split = findViewById(R.id.split)
+        splitCart = findViewById(R.id.split_cart)
+        splitTitle = findViewById(R.id.split_title)
         pointer = findViewById(R.id.pointer)
         hud = findViewById(R.id.hud)
+        filterButton = findViewById(R.id.filter_button)
+        viewButton = findViewById(R.id.view_button)
         empty = findViewById(R.id.empty)
         emptyTitle = findViewById(R.id.empty_title)
         emptyText = findViewById(R.id.empty_text)
@@ -190,6 +225,31 @@ class LibraryActivity : Activity() {
             textSize = 13f
             minHeight = Pixel.dp(this@LibraryActivity, 44f).toInt()
         }
+        listOf(filterButton, viewButton).forEach {
+            it.style(Pixel.CREAM)
+            it.textSize = if (compact) 12f else 13f
+            it.minHeight = Pixel.dp(this, 44f).toInt()
+            if (compact) {
+                it.setPadding(Pixel.dp(this, 8f).toInt(), it.paddingTop, Pixel.dp(this, 8f).toInt(), it.paddingBottom)
+                (it.layoutParams as LinearLayout.LayoutParams).marginEnd = Pixel.dp(this, 8f).toInt()
+            }
+        }
+        splitTitle.apply {
+            centered = true
+            setTextSizeSp(if (compact) 14f else 18f)
+            shadowPx = Pixel.dp(this@LibraryActivity, 2f)
+            minTextSizePx = 10f * resources.displayMetrics.scaledDensity
+        }
+        findViewById<View>(R.id.game_list_box).background = PixelBoxDrawable(this, Pixel.CREAM, shadowDp = 4f, borderDp = 3f)
+        // Inside the box's border (3dp) and its hard shadow (4dp, right and bottom).
+        Pixel.dp(this, 3f).toInt().let { edge -> Pixel.dp(this, 7f).toInt().let { far -> findViewById<View>(R.id.game_list_box).setPadding(edge, edge, far, far) } }
+        listOf(R.id.split_play to Pixel.YELLOW, R.id.split_pack to Pixel.CREAM, R.id.split_settings to Pixel.CREAM).forEach { (id, fill) ->
+            findViewById<PixelButton>(id).apply {
+                style(fill)
+                textSize = if (compact) 11f else 13f
+                minHeight = Pixel.dp(this@LibraryActivity, 40f).toInt()
+            }
+        }
         findViewById<PixelButton>(R.id.play).style(Pixel.YELLOW)
         findViewById<PixelButton>(R.id.pack_button).style(Pixel.CREAM)
         findViewById<PixelButton>(R.id.game_settings_button).style(Pixel.CREAM)
@@ -232,6 +292,7 @@ class LibraryActivity : Activity() {
     override fun onResume() {
         super.onResume()
         carousel.reloadArtwork()
+        splitArtwork.refresh()
         refresh()
         checkPackUpdates()
         if (motion) blink.postDelayed(blinkStep, BLINK_MS)
@@ -245,6 +306,7 @@ class LibraryActivity : Activity() {
 
     override fun onDestroy() {
         carousel.release()
+        splitArtwork.shutdown()
         io.shutdownNow()
         super.onDestroy()
     }
@@ -253,6 +315,11 @@ class LibraryActivity : Activity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> if (splitMode) carousel.step(-1) else return super.onKeyDown(keyCode, event)
+            KeyEvent.KEYCODE_DPAD_DOWN -> if (splitMode) carousel.step(1) else return super.onKeyDown(keyCode, event)
+            KeyEvent.KEYCODE_BUTTON_L2 -> if (event.repeatCount == 0) cycleFilter(-1)
+            KeyEvent.KEYCODE_BUTTON_R2 -> if (event.repeatCount == 0) cycleFilter(1)
+            KeyEvent.KEYCODE_BUTTON_SELECT -> if (event.repeatCount == 0) toggleView()
             KeyEvent.KEYCODE_DPAD_LEFT -> carousel.step(-1)
             KeyEvent.KEYCODE_DPAD_RIGHT -> carousel.step(1)
             KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_PAGE_UP -> carousel.step(-JUMP)
@@ -287,7 +354,54 @@ class LibraryActivity : Activity() {
         tagPack.text = getString(if (carousel.hasPackUpdate(entry)) R.string.tag_pack_update else R.string.tag_pack)
         tagPack.visibility = if (carousel.hasPack(entry)) View.VISIBLE else View.GONE
         fileName.text = entry.fileName
+        gameList.select(index)
+        splitCart.apply {
+            title = gameTitle.text.toString()
+            gameCode = entry.gameCode
+            platform = entry.platform
+            hasPack = carousel.hasPack(entry)
+            selectedCart = true
+        }
+        splitArtwork.bind(splitCart, entry)
+        splitTitle.text = gameTitle.text
         position.text = getString(R.string.position_of, pad(index + 1), pad(carousel.items.size))
+    }
+
+    // ---- filter and view --------------------------------------------------------------
+
+    private fun cycleFilter(direction: Int) {
+        if (allEntries.isEmpty()) return
+        val available = allEntries.map { it.platform }.toSet()
+        val next = PlatformFilter.cycle(filter, available, direction)
+        if (next == filter) return
+        filter = next
+        prefs.edit().putString(KEY_FILTER, next?.id).apply()
+        renderFilter()
+        showFiltered(keep = selectedEntry()?.fileName)
+    }
+
+    /** Puts [filter]'s games on the shelf, keeping [keep] selected if it's among them, else the first game. */
+    private fun showFiltered(keep: String?) {
+        val shown = PlatformFilter.apply(allEntries, filter)
+        val target = shown.firstOrNull { it.fileName == keep } ?: shown.firstOrNull()
+        gameList.submit(shown)
+        carousel.submit(shown, packCodes, packUpdateCodes, keepFileName = target?.fileName)
+    }
+
+    private fun toggleView() {
+        splitMode = !splitMode
+        prefs.edit().putBoolean(KEY_SPLIT, splitMode).apply()
+        renderViewMode()
+        if (carousel.items.isNotEmpty()) showShelf()
+    }
+
+    private fun renderFilter() {
+        filterButton.text = filter?.label ?: getString(R.string.filter_all)
+    }
+
+    private fun renderViewMode() {
+        // The button names what a press switches to.
+        viewButton.text = getString(if (splitMode) R.string.view_shelf else R.string.view_list)
     }
 
     private fun play() {
@@ -321,7 +435,12 @@ class LibraryActivity : Activity() {
         }) { result ->
             if (generation != refreshGeneration) return@background // a newer refresh superseded this one
             val (entries, codes, updateCodes) = result.getOrDefault(Triple(emptyList<RomEntry>(), emptySet(), emptySet()))
-            carousel.submit(entries, codes, updateCodes, keepFileName = prefs.getString(KEY_LAST_SELECTED, null))
+            allEntries = entries
+            packCodes = codes
+            packUpdateCodes = updateCodes
+            val valid = PlatformFilter.valid(filter, entries.map { it.platform }.toSet())
+            if (valid != filter) { filter = valid; renderFilter() }
+            showFiltered(keep = selectedEntry()?.fileName ?: prefs.getString(KEY_LAST_SELECTED, null))
             updateHud(entries)
             when {
                 entries.isNotEmpty() -> showShelf()
@@ -339,8 +458,11 @@ class LibraryActivity : Activity() {
         empty.visibility = View.GONE
         recycler.visibility = View.VISIBLE
         pointer.visibility = View.VISIBLE
-        info.visibility = View.VISIBLE
-        actions.visibility = View.VISIBLE
+        // The split view replaces the shelf, the selected game's info and its buttons.
+        split.visibility = if (splitMode) View.VISIBLE else View.GONE
+        shelfFrame.visibility = if (splitMode) View.GONE else View.VISIBLE
+        info.visibility = if (splitMode) View.GONE else View.VISIBLE
+        actions.visibility = if (splitMode) View.GONE else View.VISIBLE
         renderHints(hasGames = true)
     }
 
@@ -349,6 +471,8 @@ class LibraryActivity : Activity() {
         emptyText.text = text
         emptyAction.visibility = if (action) View.VISIBLE else View.GONE
         empty.visibility = View.VISIBLE
+        split.visibility = View.GONE
+        shelfFrame.visibility = View.VISIBLE
         recycler.visibility = View.INVISIBLE
         pointer.visibility = View.INVISIBLE
         // Gone, not invisible: the box gets the whole middle of the screen.
@@ -366,7 +490,8 @@ class LibraryActivity : Activity() {
             sb.color(label, Pixel.ON_INK_SOFT).append(' ').color(pad(value), Pixel.ON_INK)
         }
         cell(getString(R.string.hud_games), entries.size)
-        if (compact) { hud.text = sb; return }
+        // The filter and view buttons share the top bar, so per-platform counts need a wide screen.
+        if (resources.configuration.screenWidthDp < WIDE_HUD_DP) { hud.text = sb; return }
         for (p in Platform.entries) {
             val n = entries.count { it.platform == p }
             if (n > 0) cell(p.label, n)
@@ -378,7 +503,7 @@ class LibraryActivity : Activity() {
     private fun renderHints(hasGames: Boolean, canAddFolder: Boolean = false) {
         val sb = SpannableStringBuilder()
         fun hint(key: String, label: String) {
-            if (sb.isNotEmpty()) sb.append("     ")
+            if (sb.isNotEmpty()) sb.append("   ")
             sb.color(key, Pixel.YELLOW).append(' ').color(label, Pixel.ON_INK_SOFT)
         }
         if (hasGames) {
@@ -386,6 +511,8 @@ class LibraryActivity : Activity() {
             hint("A", getString(R.string.play))
             hint("Y", getString(R.string.hint_pack))
             if (!compact) hint("X", getString(R.string.hint_game_settings))
+            hint("L2 R2", getString(R.string.hint_filter))
+            if (!compact) hint("SELECT", getString(R.string.hint_view))
             if (!compact) hint("L R", getString(R.string.hint_jump))
         } else if (canAddFolder) {
             hint("A", getString(R.string.add_rom_folder))
@@ -551,8 +678,11 @@ class LibraryActivity : Activity() {
         private const val REQUEST_PICK_PACK = 2
         private const val REQUEST_WEB_PACK = 3
         private const val KEY_LAST_SELECTED = "last_selected"
+        private const val KEY_FILTER = "filter"
+        private const val KEY_SPLIT = "view_split"
         private const val JUMP = 5
         private const val BLINK_MS = 530L
         private const val COMPACT_WIDTH_DP = 700
+        private const val WIDE_HUD_DP = 1000
     }
 }

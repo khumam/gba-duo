@@ -121,6 +121,11 @@
     <string name="scale_on">On: exact pixels, smaller picture</string>
     <string name="scale_off">Off: full size picture</string>
     <string name="shader_follow_default">Default (%1$s)</string>
+    <string name="filter_all">All</string>
+    <string name="view_list">List</string>
+    <string name="view_shelf">Shelf</string>
+    <string name="hint_filter">Filter</string>
+    <string name="hint_view">View</string>
     <string name="hint_jump">Jump 5</string>
     <string name="empty_scanning_title">Loading cartridges</string>
     <string name="empty_no_folder_title">Insert cartridge</string>

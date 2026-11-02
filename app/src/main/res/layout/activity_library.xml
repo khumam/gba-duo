@@ -43,6 +43,20 @@
                 tools:text="GAMES 012" />
 
             <com.khumam.gbaduo.library.ui.PixelButton
+                android:id="@+id/filter_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp"
+                android:text="@string/filter_all" />
+
+            <com.khumam.gbaduo.library.ui.PixelButton
+                android:id="@+id/view_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp"
+                android:text="@string/view_list" />
+
+            <com.khumam.gbaduo.library.ui.PixelButton
                 android:id="@+id/open_settings"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -51,6 +65,7 @@
 
         <!-- The carousel, with the selection pointer and the empty / scanning box. -->
         <FrameLayout
+            android:id="@+id/shelf_frame"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
@@ -105,6 +120,76 @@
                     android:text="@string/add_rom_folder" />
             </LinearLayout>
         </FrameLayout>
+
+        <!-- The split view: the selected cartridge and its buttons (1) beside a plain list (2). -->
+        <LinearLayout
+            android:id="@+id/split"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:paddingHorizontal="28dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <com.khumam.gbaduo.library.ui.CartridgeView
+                    android:id="@+id/split_cart"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <com.khumam.gbaduo.library.ui.OutlineText
+                    android:id="@+id/split_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp" />
+
+                <com.khumam.gbaduo.library.ui.PixelButton
+                    android:id="@+id/split_play"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/play" />
+
+                <com.khumam.gbaduo.library.ui.PixelButton
+                    android:id="@+id/split_pack"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/companion_pack" />
+
+                <com.khumam.gbaduo.library.ui.PixelButton
+                    android:id="@+id/split_settings"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/game_settings" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/game_list_box"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="24dp"
+                android:layout_marginEnd="4dp"
+                android:layout_marginBottom="4dp"
+                android:layout_weight="2">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/game_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:overScrollMode="never" />
+            </FrameLayout>
+        </LinearLayout>
 
         <!-- The selected game. -->
         <LinearLayout
