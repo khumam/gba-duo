@@ -17,6 +17,7 @@ class QuickMenu(
     initialShader: ShaderPreset,
     initialTilt: TiltShift,
     initialIntegerScaling: Boolean,
+    private val hardcore: Boolean,
     private val onSetFfSpeed: (Int) -> Unit,
     private val onSetShader: (ShaderPreset) -> Unit,
     private val onSetTiltShift: (TiltShift) -> Unit,
@@ -34,30 +35,22 @@ class QuickMenu(
 
     fun show() {
         emu.paused = true
-        val items = listOf(
-            context.getString(R.string.resume),
-            context.getString(R.string.save_state),
-            context.getString(R.string.load_state),
-            context.getString(R.string.ff_speed, ffSpeed),
-            context.getString(R.string.shader_label, shader.displayName),
-            context.getString(R.string.tilt_label, tilt.displayName),
-            context.getString(if (integerScaling) R.string.scale_label_on else R.string.scale_label_off),
-            context.getString(R.string.quit),
-        ).toTypedArray()
+        // Hardcore mode leaves out save state, load state and fast-forward.
+        val entries = buildList<Pair<String, () -> Unit>> {
+            add(context.getString(R.string.resume) to { emu.paused = false })
+            if (!hardcore) {
+                add(context.getString(R.string.save_state) to { showSlotPicker(save = true) })
+                add(context.getString(R.string.load_state) to { showSlotPicker(save = false) })
+                add(context.getString(R.string.ff_speed, ffSpeed) to ::cycleFfSpeed)
+            }
+            add(context.getString(R.string.shader_label, shader.displayName) to ::cycleShader)
+            add(context.getString(R.string.tilt_label, tilt.displayName) to ::cycleTiltShift)
+            add(context.getString(if (integerScaling) R.string.scale_label_on else R.string.scale_label_off) to ::toggleIntegerScaling)
+            add(context.getString(R.string.quit) to onQuit)
+        }
 
         dialog = AlertDialog.Builder(context)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> emu.paused = false
-                    1 -> showSlotPicker(save = true)
-                    2 -> showSlotPicker(save = false)
-                    3 -> cycleFfSpeed()
-                    4 -> cycleShader()
-                    5 -> cycleTiltShift()
-                    6 -> toggleIntegerScaling()
-                    7 -> onQuit()
-                }
-            }
+            .setItems(entries.map { it.first }.toTypedArray()) { _, which -> entries[which].second() }
             .setOnCancelListener { emu.paused = false }
             .show()
     }

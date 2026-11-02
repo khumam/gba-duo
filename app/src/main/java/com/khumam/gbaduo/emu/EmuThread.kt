@@ -27,6 +27,9 @@ class EmuThread(
     @Volatile var paused = false
     @Volatile var ffMultiplier = 2
 
+    /** Hardcore mode: no fast-forward, no save or load states, no writes to the game. Set before [start]. */
+    @Volatile var hardcore = false
+
     private val frameNanos = (1_000_000_000.0 / 59.7275).toLong()
 
     /** Only until the core has its own copy: a whole ROM (up to 32 MB) shouldn't be held twice. */
@@ -150,7 +153,7 @@ class EmuThread(
             servicePendingStateRequest()
 
             val fastForward = input.fastForward()
-            val speed = if (fastForward) ffMultiplier.coerceAtLeast(2) else 1
+            val speed = if (fastForward && !hardcore) ffMultiplier.coerceAtLeast(2) else 1
 
             applyWide()
             repeat(speed) {
@@ -214,8 +217,9 @@ class EmuThread(
                     uiStateChanged = false
                     LuaScript.setUi(uiState)
                 }
+                val access = GameScriptAccess.effective(writeAccess, hardcore)
                 while (true) {
-                    if (writeAccess == WriteAccess.ASK) {
+                    if (access == WriteAccess.ASK) {
                         // The pack may write: nothing runs until the player has answered.
                         if (pendingCalls.isNotEmpty() && !consentAsked) {
                             consentAsked = true
@@ -224,7 +228,7 @@ class EmuThread(
                         break
                     }
                     val (name, args) = pendingCalls.poll() ?: break
-                    val mayWrite = writeAccess == WriteAccess.ALLOWED
+                    val mayWrite = GameScriptAccess.mayWrite(access)
                     if (mayWrite) saveSafetyState()
                     val result = LuaScript.call(name, args, mayWrite)
                     if (result != null) {
@@ -348,11 +352,12 @@ class EmuThread(
     private fun runGameFrame() {
         syncGameScriptForPack(activePack)
         if (!gameFrameHook) return
-        if (GameScriptAccess.needsConsent(writeAccess, hasFrameHook = true, alreadyAsked = consentAsked)) {
+        val access = GameScriptAccess.effective(writeAccess, hardcore)
+        if (GameScriptAccess.needsConsent(access, hasFrameHook = true, alreadyAsked = consentAsked)) {
             consentAsked = true
             onWriteConsentNeeded?.invoke()
         }
-        val mayWrite = GameScriptAccess.mayWrite(writeAccess)
+        val mayWrite = GameScriptAccess.mayWrite(access)
         if (mayWrite) saveSafetyState()
         val width = NativeCore.videoWidth()
         val height = NativeCore.videoHeight()
@@ -381,6 +386,10 @@ class EmuThread(
 
     private fun servicePendingStateRequest() {
         val request = pendingSaveState.getAndSet(null) ?: return
+        if (hardcore) { // the menus and hotkeys already refuse; this is the backstop
+            request.onDone?.invoke(false)
+            return
+        }
         val (path, save) = request.path to request.save
         val ok = if (save) NativeCore.saveState(path) else NativeCore.loadState(path)
         lastStateResult = ok

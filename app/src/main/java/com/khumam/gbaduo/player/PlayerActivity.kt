@@ -12,6 +12,7 @@ import android.view.View
 import android.widget.Toast
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.achievements.AchievementPopups
+import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.WideControl
 import com.khumam.gbaduo.companion.WideMode
@@ -50,6 +51,9 @@ import java.io.File
 class PlayerActivity : Activity() {
 
     private lateinit var input: InputMapper
+
+    /** Read once as the game starts; see [HardcoreMode]. */
+    private val hardcore by lazy { HardcoreMode.enabled(this) }
     private lateinit var emu: EmuThread
     private lateinit var audioOut: AudioOut
     private var quickMenu: QuickMenu? = null
@@ -136,6 +140,7 @@ class PlayerActivity : Activity() {
         gameView.setAspectRatio(AspectSettings.default(this))
         gameView.setTiltShift(TiltShiftSettings.default(this))
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
+        emu.hardcore = hardcore
         emu.wideMode = when (storage.settings.getString(GameSettingsKeys.WIDE)) {
             GameSettingsKeys.WIDE_ON -> WideMode.WIDE
             GameSettingsKeys.WIDE_EXTRA -> WideMode.EXTRA
@@ -184,6 +189,7 @@ class PlayerActivity : Activity() {
                         initialShader = savedShader,
                         initialTilt = TiltShiftSettings.default(this@PlayerActivity),
                         initialIntegerScaling = ScaleSettings.integer(this@PlayerActivity),
+                        hardcore = hardcore,
                         onSetFfSpeed = { emu.ffMultiplier = it },
                         onSetShader = { savedShader = it; storage.settings.put(GameSettingsKeys.SHADER, it.id); gameView.setShader(it) },
                         onSetTiltShift = { TiltShiftSettings.setDefault(this@PlayerActivity, it); gameView.setTiltShift(it) },
@@ -192,7 +198,7 @@ class PlayerActivity : Activity() {
                     )
                     val notes = PlayerNotes(findViewById(android.R.id.content) as android.widget.FrameLayout).also { playerNotes = it }
                     hotkeys = HotkeyActions(
-                        activity = this@PlayerActivity, emu = emu, states = SaveStates(storage), storage = storage,
+                        activity = this@PlayerActivity, emu = emu, states = SaveStates(storage), storage = storage, hardcore = hardcore,
                         quickMenu = quickMenu!!, notes = notes, onQuit = { finish() },
                     )
                     setUpCompanion(header, crc32, storage)
@@ -255,7 +261,7 @@ class PlayerActivity : Activity() {
      * for this game; [EmuThread.WriteAccess.ASK] when they haven't been asked yet.
      */
     private fun writeAccessFor(manifest: PackManifest, storage: GameStorage, fingerprint: String): EmuThread.WriteAccess = when {
-        !manifest.canWriteMemory || !CompanionSettings.allowWrites(this) -> EmuThread.WriteAccess.NONE
+        hardcore || !manifest.canWriteMemory || !CompanionSettings.allowWrites(this) -> EmuThread.WriteAccess.NONE
         else -> when (storage.writeConsent(manifest.id, fingerprint)) {
             true -> EmuThread.WriteAccess.ALLOWED
             false -> EmuThread.WriteAccess.NONE

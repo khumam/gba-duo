@@ -15,6 +15,16 @@ class GameScriptAccessTest {
     }
 
     @Test
+    fun hardcoreClosesEveryWrite() {
+        for (access in WriteAccess.values()) {
+            val effective = GameScriptAccess.effective(access, hardcore = true)
+            assertFalse(GameScriptAccess.mayWrite(effective))
+            assertFalse(GameScriptAccess.needsConsent(effective, hasFrameHook = true, alreadyAsked = false))
+        }
+        assertTrue(GameScriptAccess.mayWrite(GameScriptAccess.effective(WriteAccess.ALLOWED, hardcore = false)))
+    }
+
+    @Test
     fun asksOnceWhenAFrameHookWaitsOnAnUndecidedPack() {
         assertTrue(GameScriptAccess.needsConsent(WriteAccess.ASK, hasFrameHook = true, alreadyAsked = false))
         assertFalse(GameScriptAccess.needsConsent(WriteAccess.ASK, hasFrameHook = true, alreadyAsked = true))

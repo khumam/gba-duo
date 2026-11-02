@@ -17,6 +17,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.PackInstaller
 import com.khumam.gbaduo.companion.PackManifest
@@ -602,10 +603,15 @@ class LibraryActivity : Activity() {
 
     private fun showCompanionDialog(entry: RomEntry, storage: GameStorage, matches: List<PackManifest>) {
         val assignedId = storage.packId
+        val hardcore = HardcoreMode.enabled(this)
         val labels = mutableListOf(getString(R.string.no_pack))
         labels += matches.map { pack ->
             val name = if (pack.id == assignedId) "✓ ${pack.name}" else pack.name
-            if (pack.canWriteMemory) "$name · ${getString(R.string.pack_modifies_game)}" else name
+            when {
+                pack.canWriteMemory && hardcore -> "$name · ${getString(R.string.pack_read_only_hardcore)}"
+                pack.canWriteMemory -> "$name · ${getString(R.string.pack_modifies_game)}"
+                else -> name
+            }
         }
         labels += getString(R.string.import_pack)
         labels += getString(R.string.pack_web_get)

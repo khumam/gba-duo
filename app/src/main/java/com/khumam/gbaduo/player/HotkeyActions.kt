@@ -17,6 +17,7 @@ class HotkeyActions(
     private val emu: EmuThread,
     private val states: SaveStates,
     private val storage: GameStorage,
+    private val hardcore: Boolean,
     private val quickMenu: QuickMenu,
     private val notes: PlayerNotes,
     private val onQuit: () -> Unit,
@@ -25,12 +26,19 @@ class HotkeyActions(
     fun perform(action: HotkeyAction) {
         when (action) {
             HotkeyAction.QUICK_MENU -> quickMenu.show()
+            HotkeyAction.QUICK_SAVE, HotkeyAction.QUICK_LOAD, HotkeyAction.NEXT_SLOT, HotkeyAction.PREV_SLOT ->
+                if (hardcore) activity.runOnUiThread { notes.show(activity.getString(R.string.hardcore_blocked)) } else stateAction(action)
+            HotkeyAction.EXIT -> confirmExit()
+            HotkeyAction.FAST_FORWARD -> Unit // handled by the InputMapper
+        }
+    }
+
+    private fun stateAction(action: HotkeyAction) {
+        when (action) {
             HotkeyAction.QUICK_SAVE -> quickSave()
             HotkeyAction.QUICK_LOAD -> quickLoad()
             HotkeyAction.NEXT_SLOT -> moveSlot(+1)
-            HotkeyAction.PREV_SLOT -> moveSlot(-1)
-            HotkeyAction.EXIT -> confirmExit()
-            HotkeyAction.FAST_FORWARD -> Unit // handled by the InputMapper
+            else -> moveSlot(-1)
         }
     }
 

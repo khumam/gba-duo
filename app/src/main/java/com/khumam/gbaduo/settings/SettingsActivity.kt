@@ -4,7 +4,9 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.widget.TextView
+import android.widget.Toast
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.CompanionSettings
 import com.khumam.gbaduo.emu.AspectRatio
@@ -192,11 +194,19 @@ class SettingsActivity : PixelPage() {
     }
 
     private fun renderWrites() {
-        writesSummary.text = getString(if (CompanionSettings.allowWrites(this)) R.string.pack_writes_on else R.string.pack_writes_off)
+        writesSummary.text = getString(when {
+            HardcoreMode.enabled(this) -> R.string.pack_writes_hardcore
+            CompanionSettings.allowWrites(this) -> R.string.pack_writes_on
+            else -> R.string.pack_writes_off
+        })
     }
 
     /** Off -> on asks first; on -> off is immediate. */
     private fun toggleWrites() {
+        if (HardcoreMode.enabled(this)) {
+            Toast.makeText(this, R.string.pack_writes_hardcore, Toast.LENGTH_SHORT).show()
+            return
+        }
         if (CompanionSettings.allowWrites(this)) {
             CompanionSettings.setAllowWrites(this, false)
             renderWrites()

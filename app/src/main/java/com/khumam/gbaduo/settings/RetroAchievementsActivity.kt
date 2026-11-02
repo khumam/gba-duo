@@ -9,6 +9,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.library.ui.Fonts
 import com.khumam.gbaduo.library.ui.Pixel
@@ -28,6 +29,8 @@ class RetroAchievementsActivity : PixelPage() {
     private lateinit var password: EditText
     private lateinit var login: PixelButton
     private lateinit var logout: PixelButton
+
+    private lateinit var hardcoreSummary: TextView
 
     private val listener: (RetroAchievements.State) -> Unit = { render(it) }
 
@@ -64,8 +67,10 @@ class RetroAchievementsActivity : PixelPage() {
         }
         content.addView(status, spaced(14))
 
-        content.addView(label(getString(R.string.ra_title)), spaced(28))
-        note(getString(R.string.ra_softcore), top = 6)
+        hardcoreSummary = menuCard(R.drawable.ic_trophy, Pixel.CORAL, getString(R.string.hardcore_title), "") { toggleHardcore() }.second
+        renderHardcore()
+        note(getString(R.string.hardcore_rules), top = 6)
+        note(getString(R.string.ra_softcore), top = 8)
         note(getString(R.string.ra_privacy), top = 8)
 
         username.setText(RetroAchievements.storedUsername.orEmpty())
@@ -79,6 +84,16 @@ class RetroAchievementsActivity : PixelPage() {
     override fun onStop() {
         RetroAchievements.removeStateListener(listener)
         super.onStop()
+    }
+
+    private fun renderHardcore() {
+        hardcoreSummary.text = getString(if (HardcoreMode.enabled(this)) R.string.hardcore_on else R.string.hardcore_off)
+    }
+
+    /** Takes effect for the next game started; a game in progress keeps what it began with. */
+    private fun toggleHardcore() {
+        HardcoreMode.setEnabled(this, !HardcoreMode.enabled(this))
+        renderHardcore()
     }
 
     private fun section() = LinearLayout(this).apply {

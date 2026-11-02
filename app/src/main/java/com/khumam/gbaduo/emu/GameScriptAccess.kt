@@ -9,6 +9,9 @@ import com.khumam.gbaduo.emu.EmuThread.WriteAccess
  */
 object GameScriptAccess {
 
+    /** Hardcore mode closes every write, whatever the pack asked for or the player answered. */
+    fun effective(access: WriteAccess, hardcore: Boolean): WriteAccess = if (hardcore) WriteAccess.NONE else access
+
     fun mayWrite(access: WriteAccess): Boolean = access == WriteAccess.ALLOWED
 
     /** The player is asked (once) only when a `frame()` hook is waiting on an undecided pack. */
