@@ -158,9 +158,9 @@ class EmuThread(
                 framesRun++
                 runGameFrame()
                 RetroAchievements.frame()
+                audioOut.pump(speed)
             }
             gameView.postFrame()
-            audioOut.pump(mute = speed != 1)
 
             serviceCompanion(activePack)
             checkSaveFile()

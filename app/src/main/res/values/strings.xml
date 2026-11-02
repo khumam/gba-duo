@@ -236,6 +236,8 @@
     <string name="update_install">Install</string>
     <string name="update_install_failed">Could not open the installer.</string>
     <string name="about_source">Source on GitHub</string>
+    <string name="about_support">Support on Ko-fi</string>
+    <string name="kofi_url">https://ko-fi.com/khumam</string>
     <string name="about_credits_title">Built with</string>
     <string name="about_credits">mGBA (MPL 2.0) emulates the games. Lua 5.4 (MIT) runs companion pack scripts. rcheevos (MIT) runs RetroAchievements. Fonts: Silkscreen and IBM Plex Mono (SIL Open Font License 1.1).</string>
     <string name="ra_points_label">Points</string>

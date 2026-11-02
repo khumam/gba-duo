@@ -51,6 +51,11 @@ class AboutActivity : PixelPage() {
         }
         content.addView(source, spaced(12, ViewGroup.LayoutParams.WRAP_CONTENT))
 
+        val support = button(getString(R.string.about_support), Pixel.YELLOW) {
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.kofi_url)))) }
+        }
+        content.addView(support, spaced(12, ViewGroup.LayoutParams.WRAP_CONTENT))
+
         content.addView(label(getString(R.string.about_credits_title)), spaced(28))
         note(getString(R.string.about_credits), top = 6)
         focusFirst(updateArea.getChildAt(0) ?: source)

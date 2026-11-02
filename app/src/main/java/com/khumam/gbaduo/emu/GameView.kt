@@ -54,8 +54,30 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         renderMode = RENDERMODE_WHEN_DIRTY
     }
 
-    /** Call from the emu thread after each frame; schedules a redraw on the GL thread. */
+    // The last finished frame, copied out of the core's buffer: the core starts drawing the next frame into
+    // [frameBuffer] while the GL thread may still be (or, after a setting change, again) uploading, which tore the picture.
+    private val frameLock = Any()
+    private var shown: ByteBuffer? = null
+    private var shownWidth = 0
+    private var shownHeight = 0
+
+    /** Call from the emu thread after each frame; keeps a copy of it and schedules a redraw on the GL thread. */
     fun postFrame() {
+        val source = frameBuffer
+        val (width, height) = renderer.videoSize
+        val bytes = width * height * 4
+        if (source != null && bytes > 0 && bytes <= source.capacity()) {
+            synchronized(frameLock) {
+                val copy = shown?.takeIf { it.capacity() >= bytes }
+                    ?: ByteBuffer.allocateDirect(source.capacity()).order(ByteOrder.nativeOrder()).also { shown = it }
+                val view = source.duplicate().apply { clear(); limit(bytes) }
+                copy.clear()
+                copy.put(view)
+                copy.clear()
+                shownWidth = width
+                shownHeight = height
+            }
+        }
         requestRender()
     }
 
@@ -112,6 +134,10 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         @Volatile var videoSize: Pair<Int, Int> = 240 to 160
         @Volatile var zoomTracking = false
         @Volatile var zoomRequested = false
+
+        // Size of the frame onDrawFrame last uploaded (GL thread only).
+        private var frameWidth = 0
+        private var frameHeight = 0
 
         // The zoom: the game frame's rectangle (x, y, width, height in GL window pixels) as last shown, and the
         // animation from [zoomFrom] to wherever it should be now, drawn through an offscreen picture the size of the screen.
@@ -203,16 +229,23 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 applyShader(wanted)
             }
 
-            val buffer = frameBuffer ?: return
-            val (videoWidth, videoHeight) = videoSize
+            var videoWidth: Int
+            var videoHeight: Int
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
-            buffer.rewind()
-            GLES20.glTexImage2D(
-                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, videoWidth, videoHeight, 0,
-                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
-            )
+            synchronized(frameLock) {
+                val buffer = shown ?: return
+                videoWidth = shownWidth
+                videoHeight = shownHeight
+                if (videoWidth <= 0 || videoHeight <= 0) return
+                buffer.clear()
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, videoWidth, videoHeight, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
+                )
+            }
+            frameWidth = videoWidth
+            frameHeight = videoHeight
 
             val size = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspectOverride ?: aspect, integerScale)
             val x = (surfaceWidth - size.width) / 2
@@ -249,8 +282,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         }
 
         private fun pictureIsWide(): Boolean {
-            val (w, h) = videoSize
-            return w > WideView.FRAME_WIDTH || h > WideView.FRAME_HEIGHT
+            return frameWidth > WideView.FRAME_WIDTH || frameHeight > WideView.FRAME_HEIGHT
         }
 
         /** The screen as it is now, kept (only while a Wide view picture is up) for a zoom back out of it. */
