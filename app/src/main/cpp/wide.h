@@ -13,6 +13,30 @@
 #define WIDE_FRAME_W 240
 #define WIDE_FRAME_H 160
 #define WIDE_MAX_LAYERS 3
+#define WIDE_MAX_MARKERS 64
+
+/** What a margin marker stands for (also the colour it is drawn in). */
+enum {
+    WIDE_MARKER_NPC = 1,
+    WIDE_MARKER_TRAINER = 2,
+    WIDE_MARKER_ITEM = 3,
+    WIDE_MARKER_WARP = 4,
+    WIDE_MARKER_KIND_COUNT = 5
+};
+
+/**
+ * A small icon at a world pixel, drawn in the margins only (the game draws its own sprites inside the frame).
+ * Without [tiles] it is a diamond of [kind]'s colour centred on (x, y). With [tiles] it is a sprite instead:
+ * [w] x [h] pixels (multiples of 8, 8..64) of 4bpp tiles in the GBA's 1D order (a row of tiles after a row),
+ * colours from [palette] (16 BGR555, index 0 clear), (x, y) its top-left, mirrored when [hflip].
+ */
+struct WideMarker {
+    int32_t x, y;               /* world pixel of the icon's centre, or of a sprite's top-left */
+    int kind;                   /* WIDE_MARKER_* */
+    uint32_t tiles, palette;    /* bus addresses of a sprite's tile data and palette; tiles 0: a diamond */
+    int w, h;                   /* a sprite's size in pixels */
+    int hflip;                  /* 1: a sprite mirrored left to right */
+};
 
 /**
  * One background layer of a layered world (e.g. The Minish Cap, Golden Sun): its own grid, 2x2-tile metatiles
@@ -52,6 +76,8 @@ struct WideWorld {
     uint32_t palette;           /* 16 banks x 16 BGR555 */
     int layerCount;             /* 0: the single grid above; 1..3: [layers] instead, bottom first (the rest above is ignored) */
     struct WideLayer layers[WIDE_MAX_LAYERS]; /* the top layer wins where its pixel is not colour 0; outside the grids it is black */
+    int markerCount;            /* 0..WIDE_MAX_MARKERS */
+    struct WideMarker markers[WIDE_MAX_MARKERS]; /* painted by wide_paint over the margins, never over the frame */
 };
 
 /** True when the world's sizes are in range (1..1024 cells each way, split >= 0). */

@@ -1543,6 +1543,55 @@ static bool read_layers(lua_State* L, struct WideWorld* w) {
     return true;
 }
 
+/* The optional `markers` list ({ x =, y =, kind = } each) of the world table on top of the stack into [w]. */
+static bool read_markers(lua_State* L, struct WideWorld* w) {
+    lua_getfield(L, -1, "markers");
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return true;
+    }
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        set_error("field 'markers' must be a list");
+        return false;
+    }
+    int n = (int) lua_rawlen(L, -1);
+    if (n > WIDE_MAX_MARKERS) {
+        lua_pop(L, 1);
+        set_error("field 'markers' holds at most 64 entries");
+        return false;
+    }
+    for (int i = 0; i < n; i++) {
+        lua_rawgeti(L, -1, i + 1);
+        lua_Integer x, y, kind, tiles = 0, palette = 0, mw = 0, mh = 0, flip = 0;
+        bool ok = lua_istable(L, -1) && world_field(L, "x", INT32_MIN, INT32_MAX, &x) &&
+                  world_field(L, "y", INT32_MIN, INT32_MAX, &y) && world_field(L, "kind", 1, WIDE_MARKER_KIND_COUNT - 1, &kind) &&
+                  world_field_or(L, "tiles", 0, UINT32_MAX, 0, &tiles) && world_field_or(L, "palette", 0, UINT32_MAX, 0, &palette) &&
+                  world_field_or(L, "w", 0, 64, 0, &mw) && world_field_or(L, "h", 0, 64, 0, &mh) && world_field_or(L, "hflip", 0, 1, 0, &flip);
+        if (ok && tiles != 0 && (palette == 0 || mw < 8 || mh < 8 || (mw & 7) || (mh & 7))) {
+            set_error("a marker with 'tiles' needs 'palette' and 'w', 'h' (multiples of 8, 8 to 64)");
+            ok = false;
+        }
+        lua_pop(L, 1);
+        if (!ok) {
+            lua_pop(L, 1);
+            if (!g_script.lastError[0]) set_error("field 'markers' needs { x, y, kind } tables");
+            return false;
+        }
+        w->markers[i].x = (int32_t) x;
+        w->markers[i].y = (int32_t) y;
+        w->markers[i].kind = (int) kind;
+        w->markers[i].tiles = (uint32_t) tiles;
+        w->markers[i].palette = (uint32_t) palette;
+        w->markers[i].w = (int) mw;
+        w->markers[i].h = (int) mh;
+        w->markers[i].hflip = (int) flip;
+    }
+    w->markerCount = n;
+    lua_pop(L, 1);
+    return true;
+}
+
 /* The world table on top of the stack into [out]; false (error set) for a bad field. */
 static bool read_world(lua_State* L, struct WideWorld* out) {
     lua_Integer v;
@@ -1552,6 +1601,7 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
     INT_FIELD("x", INT32_MIN, INT32_MAX, w.x);
     INT_FIELD("y", INT32_MIN, INT32_MAX, w.y);
     INT_FIELD("palette", 0, UINT32_MAX, w.palette);
+    if (!read_markers(L, &w)) return false;
     lua_getfield(L, -1, "layers");
     if (lua_istable(L, -1)) {
         bool ok = read_layers(L, &w);

@@ -262,6 +262,67 @@ static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy,
 
 static void blank_beyond_overscan(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom);
 
+/* Marker colours (BGR555), by kind: white, red, yellow, cyan. */
+static const uint16_t MARKER_COLOR[WIDE_MARKER_KIND_COUNT] = { 0, 0x7FFF, 0x001F, 0x03FF, 0x7FE0 };
+#define MARKER_OUTLINE 0x0842 /* near black */
+#define MARKER_RADIUS 4       /* a diamond 7 px across inside a 1 px outline */
+
+static bool marker_in_frame(int px, int py, int left, int top) {
+    return px >= left && px < left + WIDE_FRAME_W && py >= top && py < top + WIDE_FRAME_H;
+}
+
+/* A sprite marker: its tiles read from the bus, drawn only outside the frame and inside the picture. */
+static void paint_sprite_marker(const struct WideMarker* m, const struct WideWorld* w, uint32_t* buf, int stride,
+                                int left, int top, int pictureW, int pictureH) {
+    if (m->w < 8 || m->h < 8 || m->w > 64 || m->h > 64 || (m->w & 7) || (m->h & 7)) return;
+    int64_t ox = (int64_t) left + ((int64_t) m->x - w->x);
+    int64_t oy = (int64_t) top + ((int64_t) m->y - w->y);
+    if (ox + m->w <= 0 || oy + m->h <= 0 || ox >= pictureW || oy >= pictureH) return;
+    uint32_t pal[16];
+    for (int i = 1; i < 16; i++) pal[i] = wide_color(gbaduo_bus_read16(m->palette + (uint32_t) i * 2u));
+    int tilesPerRow = m->w / 8;
+    for (int sy = 0; sy < m->h; sy++) {
+        int py = (int) oy + sy;
+        if (py < 0 || py >= pictureH) continue;
+        for (int sx = 0; sx < m->w; sx++) {
+            int px = (int) ox + sx;
+            if (px < 0 || px >= pictureW || marker_in_frame(px, py, left, top)) continue;
+            int tx = m->hflip ? m->w - 1 - sx : sx;
+            uint32_t tile = (uint32_t) ((sy >> 3) * tilesPerRow + (tx >> 3));
+            uint8_t b = gbaduo_bus_read8(m->tiles + tile * 32u + (uint32_t) (sy & 7) * 4u + (uint32_t) ((tx & 7) >> 1));
+            int index = (tx & 1) ? b >> 4 : b & 0x0F;
+            if (index == 0) continue;
+            buf[(size_t) py * (size_t) stride + (size_t) px] = pal[index];
+        }
+    }
+}
+
+static void paint_markers(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom) {
+    int pictureW = left + WIDE_FRAME_W + right, pictureH = top + WIDE_FRAME_H + bottom;
+    int n = w->markerCount < 0 ? 0 : w->markerCount > WIDE_MAX_MARKERS ? WIDE_MAX_MARKERS : w->markerCount;
+    for (int i = 0; i < n; i++) {
+        if (w->markers[i].tiles != 0) {
+            paint_sprite_marker(&w->markers[i], w, buf, stride, left, top, pictureW, pictureH);
+            continue;
+        }
+        int kind = w->markers[i].kind;
+        if (kind < 1 || kind >= WIDE_MARKER_KIND_COUNT) continue;
+        int64_t cx = (int64_t) left + ((int64_t) w->markers[i].x - w->x);
+        int64_t cy = (int64_t) top + ((int64_t) w->markers[i].y - w->y);
+        if (cx < -MARKER_RADIUS - 1 || cy < -MARKER_RADIUS - 1 || cx > pictureW + MARKER_RADIUS || cy > pictureH + MARKER_RADIUS) continue;
+        uint32_t fill = wide_color(MARKER_COLOR[kind]), edge = wide_color(MARKER_OUTLINE);
+        for (int dy = -MARKER_RADIUS; dy <= MARKER_RADIUS; dy++) {
+            for (int dx = -MARKER_RADIUS; dx <= MARKER_RADIUS; dx++) {
+                int dist = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy); /* a diamond */
+                if (dist > MARKER_RADIUS) continue;
+                int px = (int) cx + dx, py = (int) cy + dy;
+                if (px < 0 || py < 0 || px >= pictureW || py >= pictureH || marker_in_frame(px, py, left, top)) continue;
+                buf[(size_t) py * (size_t) stride + (size_t) px] = dist == MARKER_RADIUS ? edge : fill;
+            }
+        }
+    }
+}
+
 void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom) {
     bool valid = wide_world_valid(w);
     uint32_t pal[256];
@@ -288,6 +349,7 @@ void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, 
         }
     }
     blank_beyond_overscan(w, buf, stride, left, right, top, bottom);
+    if (valid) paint_markers(w, buf, stride, left, right, top, bottom);
 }
 
 void wide_render(const struct WideWorld* w, uint32_t* out, int width, int height, int scale) {

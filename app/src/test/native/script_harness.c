@@ -717,6 +717,38 @@ static void wide_returns_world(void) {
     gbaduo_game_unload();
 }
 
+static void wide_markers_are_read_and_checked(void) {
+    struct WideWorld w;
+    const char* base = "x = 0, y = 0, grid = 0, gridW = 1, gridH = 1, idMask = 0, border = 0, borderW = 1, borderH = 1,\n"
+                       "  metatiles = 0, metatiles2 = 0, split = 0, tiles = 0, palette = 0";
+    char src[512];
+    memset(&w, 0, sizeof(w));
+    snprintf(src, sizeof(src), "function wide() return { %s, markers = { { x = -20, y = 33, kind = 2 }, { x = 5, y = 6, kind = 4 } } } end\n", base);
+    gload(src);
+    CHECK(gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    CHECK(w.markerCount == 2 && w.markers[0].x == -20 && w.markers[0].y == 33 && w.markers[0].kind == 2 && w.markers[1].kind == 4);
+    snprintf(src, sizeof(src), "function wide() return { %s } end\n", base);
+    gload(src);
+    CHECK(gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w) && w.markerCount == 0); /* optional */
+    snprintf(src, sizeof(src), "function wide() return { %s, markers = { { x = 3, y = 4, kind = 1, tiles = 0x08001000, palette = 0x08002000, w = 16, h = 32, hflip = 1 } } } end\n", base);
+    gload(src);
+    CHECK(gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    CHECK(w.markers[0].tiles == 0x08001000u && w.markers[0].palette == 0x08002000u && w.markers[0].w == 16 && w.markers[0].h == 32 && w.markers[0].hflip == 1);
+    snprintf(src, sizeof(src), "function wide() return { %s, markers = { { x = 3, y = 4, kind = 1, tiles = 0x08001000, w = 16, h = 32 } } } end\n", base);
+    gload(src);
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));                       /* a sprite needs a palette */
+    CHECK(strstr(gbaduo_game_last_error(), "palette") != NULL);
+    snprintf(src, sizeof(src), "function wide() return { %s, markers = { { x = 1, y = 2, kind = 9 } } } end\n", base);
+    gload(src);
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));                       /* an unknown kind is an error */
+    CHECK(strstr(gbaduo_game_last_error(), "kind") != NULL);
+    snprintf(src, sizeof(src), "function wide() local m = {} for i = 1, 65 do m[i] = { x = i, y = i, kind = 1 } end return { %s, markers = m } end\n", base);
+    gload(src);
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));                       /* at most 64 */
+    CHECK(strstr(gbaduo_game_last_error(), "markers") != NULL);
+    gbaduo_game_unload();
+}
+
 static void wide_nil_is_hidden_not_error(void) {
     struct WideWorld w;
     gload("function wide() return nil end\n");
@@ -807,6 +839,7 @@ int main(void) {
     frame_writes_need_the_window();
     frame_write_cap();
     wide_returns_world();
+    wide_markers_are_read_and_checked();
     wide_nil_is_hidden_not_error();
     wide_missing_field_is_error();
     frame_error_skips_and_keeps_running();

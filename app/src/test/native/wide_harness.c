@@ -614,6 +614,87 @@ static void three_layers_of_u32_cells(void) {
 }
 
 
+/* Markers: drawn in the margins, never over the game's frame, clipped to the picture. */
+static void markers_paint_only_outside_the_frame(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    poke16(PALETTE, 0x7C00);
+    solid_tile(1, 0);
+    for (int i = 0; i < 4; i++) { poke16(METATILES + 8 + (uint32_t) i * 2, 1); poke16(METATILES + (uint32_t) i * 2, 1); }
+    for (int i = 0; i < 64; i++) poke16(GRID + (uint32_t) i * 2, 0);
+    struct WideWorld w = {
+        .x = 0, .y = 0, .grid = GRID, .gridW = 8, .gridH = 8, .idMask = 0x3FF,
+        .border = BORDER, .borderW = 1, .borderH = 1, .undefinedId = -1,
+        .metatiles = METATILES, .metatiles2 = METATILES2, .split = 512, .tiles = TILES, .palette = PALETTE,
+    };
+    poke16(BORDER, 0);
+    enum { STR = 400, LEFT = 80, TOP = 0 };
+    static uint32_t buf[STR * 160];
+    wide_paint(&w, buf, STR, LEFT, 80, TOP, 0);
+    uint32_t plain = buf[10 * STR + 20];
+    w.markerCount = 3;
+    w.markers[0] = (struct WideMarker){ .x = -40, .y = 50, .kind = WIDE_MARKER_TRAINER }; /* in the left margin */
+    w.markers[1] = (struct WideMarker){ .x = 100, .y = 80, .kind = WIDE_MARKER_NPC };     /* inside the frame: hidden */
+    w.markers[2] = (struct WideMarker){ .x = -2, .y = 50, .kind = WIDE_MARKER_WARP };      /* straddles the frame's left edge */
+    for (int i = 0; i < STR * 160; i++) buf[i] = 0xDEADBEEFu;
+    wide_paint(&w, buf, STR, LEFT, 80, TOP, 0);
+    CHECK(buf[50 * STR + (LEFT - 40)] == wide_color(0x001F));                         /* the trainer's centre is red */
+    CHECK(buf[50 * STR + (LEFT - 40) + 4] == wide_color(0x0842));                      /* its outline */
+    CHECK(buf[50 * STR + (LEFT - 40) + 6] == plain);                                  /* beyond the icon: the world */
+    CHECK(buf[80 * STR + LEFT + 100] == 0xDEADBEEFu);                                 /* the frame is the core's: untouched */
+    CHECK(buf[50 * STR + (LEFT - 2)] == wide_color(0x7FE0));                           /* the warp's left half is in the margin */
+    CHECK(buf[50 * STR + (LEFT - 2) + 2] == 0xDEADBEEFu);                              /* its right half is over the frame: not drawn */
+    w.markers[0] = (struct WideMarker){ .x = -100000, .y = 50, .kind = WIDE_MARKER_ITEM }; /* far off the picture */
+    w.markers[1].kind = 99;                                                            /* unknown kind: skipped */
+    wide_paint(&w, buf, STR, LEFT, 80, TOP, 0);
+    CHECK(buf[50 * STR + 0] == plain);
+}
+
+/* A sprite marker: tiles in 1D order, index 0 clear, mirrored by hflip, never over the frame. */
+static void sprite_markers_draw_their_tiles(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    enum { SPR = 0x02008000u, SPRPAL = 0x02009000u, STR = 400, LEFT = 80 };
+    poke16(PALETTE, 0x7C00);
+    solid_tile(1, 0);
+    for (int i = 0; i < 4; i++) { poke16(METATILES + 8 + (uint32_t) i * 2, 1); poke16(METATILES + (uint32_t) i * 2, 1); }
+    for (int i = 0; i < 64; i++) poke16(GRID + (uint32_t) i * 2, 0);
+    poke16(BORDER, 0);
+    poke16(SPRPAL + 2, 0x001F);                            /* index 1 red */
+    poke16(SPRPAL + 4, 0x03E0);                            /* index 2 green */
+    /* A 16x16 sprite = 4 tiles (TL, TR, BL, BR). TL: pixel (0,0) index 1, (1,0) index 2; the rest clear. */
+    poke8(SPR, 0x21);
+    for (int i = 1; i < 128; i++) poke8(SPR + (uint32_t) i, 0);
+    poke8(SPR + 32, 0x01);                                 /* TR: pixel (0,0) of the right half (sprite x 8) index 1 */
+    struct WideWorld w = {
+        .x = 0, .y = 0, .grid = GRID, .gridW = 8, .gridH = 8, .idMask = 0x3FF,
+        .border = BORDER, .borderW = 1, .borderH = 1, .undefinedId = -1,
+        .metatiles = METATILES, .metatiles2 = METATILES2, .split = 512, .tiles = TILES, .palette = PALETTE,
+    };
+    static uint32_t buf[STR * 160];
+    wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
+    uint32_t plain = buf[100 * STR + 20];
+    w.markerCount = 1;
+    w.markers[0] = (struct WideMarker){ .x = -60, .y = 100, .kind = 1, .tiles = SPR, .palette = SPRPAL, .w = 16, .h = 16 };
+    wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
+    int ox = LEFT - 60, oy = 100;
+    CHECK(buf[oy * STR + ox] == wide_color(0x001F));        /* index 1 */
+    CHECK(buf[oy * STR + ox + 1] == wide_color(0x03E0));    /* index 2 */
+    CHECK(buf[oy * STR + ox + 2] == plain);                 /* index 0: the world shows through */
+    CHECK(buf[oy * STR + ox + 8] == wide_color(0x001F));    /* the second tile of the row */
+    w.markers[0].hflip = 1;
+    wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
+    CHECK(buf[oy * STR + ox + 15] == wide_color(0x001F));   /* mirrored: sprite x 0 is now the right edge */
+    CHECK(buf[oy * STR + ox + 14] == wide_color(0x03E0));
+    CHECK(buf[oy * STR + ox + 7] == wide_color(0x001F));    /* sprite x 8 lands at 7 */
+    w.markers[0].hflip = 0;
+    w.markers[0].x = -8;                                    /* half over the frame (x 0 is the frame's left edge) */
+    for (int i = 0; i < STR * 160; i++) buf[i] = 0xDEADBEEFu;
+    wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
+    CHECK(buf[oy * STR + (LEFT - 8) + 0] == wide_color(0x001F));
+    CHECK(buf[oy * STR + (LEFT - 8) + 8] == 0xDEADBEEFu);   /* the part over the frame is left alone */
+    w.markers[0].w = 12;                                    /* not a multiple of 8: skipped */
+    wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
+}
+
 int main(void) {
     color_matches_mgba();
     pixel_reads_bottom_then_top_then_backdrop();
@@ -625,6 +706,8 @@ int main(void) {
     layered_world_top_over_bottom_and_black_outside();
     three_layers_of_u32_cells();
     paint_fills_only_margins();
+    markers_paint_only_outside_the_frame();
+    sprite_markers_draw_their_tiles();
     paint_equals_pixelwise_reference();
     paint_survives_garbage_addresses();
     seam_match_is_one_on_its_own_picture();
