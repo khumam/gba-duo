@@ -758,7 +758,8 @@ static bool read_world(lua_State* L, struct WideWorld* out);
 /*
  * gfx.layers{ x, y, width, height, scale, palette, layers = {...} } -> "gfx:..." key.
  *
- * A picture of a game's live map, the same description wide() returns (see game-script.md): the
+ * A picture of a game's live map, the same description wide() returns (see game-script.md), either a
+ * single grid (the Gen 3 Pokemon overworld) or `layers`: the
  * layers' grids are read from emulated memory now, so the picture follows the game. It shows
  * [width] x [height] px (at most 512 each), each the world pixel at the centre of a [scale] x [scale] block (scale 1..8,
  * default 1), the first block's top-left at world ([x], [y]). Outside the grids it is transparent.
@@ -787,8 +788,8 @@ static int l_gfx_layers(lua_State* L) {
     lua_pushvalue(L, 1);
     bool ok = read_world(L, &world);
     lua_pop(L, 1);
-    if (!ok || world.layerCount == 0) {
-        return luaL_error(L, "gfx.layers: %s", ok ? "field 'layers' is required" : g_script.lastError);
+    if (!ok) {
+        return luaL_error(L, "gfx.layers: %s", g_script.lastError);
     }
     if (!wide_world_valid(&world)) {
         return luaL_error(L, "gfx.layers: the layers' grid sizes are out of range");

@@ -241,7 +241,8 @@ local sword = gfx.sprite{
   },
 }
 
--- A live map: the layers a game.lua wide() would return (see game-script.md), read from
+-- A live map: the world a game.lua wide() would return (see game-script.md: one grid, as in the
+-- Pokemon games, or `layers`), read from
 -- emulated memory now, so the picture follows the game. At most 512 x 512 px; `scale`
 -- (1 to 8, default 1) is how many map pixels one picture pixel stands for. Outside the
 -- grids it is transparent. The same map gives the same key, so calling it every tick is fine.
