@@ -44,6 +44,7 @@ struct WideWorld {
     int borderShift;            /* the block index of cell c is (c - borderShift) mod size (the game's own origin) */
     int undefinedId;            /* a grid cell with this metatile id is outside the map: use the border (-1: none) */
     int finite;                 /* 1: the defined cells (not undefinedId) are the whole world, as a layered world's grids are: the view stops at their edge (see wide_clamp_frame) and the margins are black outside them, not the repeating border */
+    int overscan;               /* with finite 0: > 0 limits the repeating border to this many px beyond the defined cells; the wide picture stops scrolling there (see wide_clamp_frame) and what is farther out is black. 0: unlimited */
     uint32_t metatiles;         /* ids below split: metatiles + id * 16 */
     uint32_t metatiles2;        /* the rest: metatiles2 + (id - split) * 16 */
     int split;

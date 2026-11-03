@@ -1573,6 +1573,8 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
     w.undefinedId = (int) v;
     if (!world_field_or(L, "finite", 0, 1, 0, &v)) return false;
     w.finite = (int) v;
+    if (!world_field_or(L, "overscan", 0, 1024, 0, &v)) return false;
+    w.overscan = (int) v;
     INT_FIELD("metatiles", 0, UINT32_MAX, w.metatiles);
     INT_FIELD("metatiles2", 0, UINT32_MAX, w.metatiles2);
     INT_FIELD("split", INT32_MIN, INT32_MAX, w.split);

@@ -66,6 +66,7 @@ table, every field an integer (bus addresses are plain numbers):
 | `borderShift` (optional, 0) | the block index of cell `c` is `(c - borderShift) mod size` |
 | `undefinedId` (optional, none) | a cell with this id is outside the map: use the border |
 | `finite` (optional, 0) | `1`: the grid is the whole world, like a layered world's: near its edge the wide picture stops scrolling and the game's frame moves toward the edge, so the margins never run past the grid, and what is outside it is black, not the border (a grid smaller than the picture stays still, the empty part split evenly). `0`: the border repeats forever |
+| `overscan` (optional, 0) | with `finite` 0: `> 0` limits the repeating border to this many px beyond the defined cells. The wide picture stops scrolling there and the game's frame moves toward the edge; farther out is black. `0`: the border repeats without limit |
 | `metatiles`, `metatiles2`, `split` | ids below `split` read from `metatiles`, the rest from `metatiles2` (16 bytes each) |
 | `tiles` | 4bpp tile data, 32 bytes a tile (normally VRAM `0x06000000`) |
 | `palette` | 16 banks of 16 BGR555 colours (normally `0x05000000`) |

@@ -260,6 +260,8 @@ static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy,
     }
 }
 
+static void blank_beyond_overscan(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom);
+
 void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom) {
     bool valid = wide_world_valid(w);
     uint32_t pal[256];
@@ -285,6 +287,7 @@ void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, 
             wide_row(w, pal, wy, w->x - left, total, line, true);
         }
     }
+    blank_beyond_overscan(w, buf, stride, left, right, top, bottom);
 }
 
 void wide_render(const struct WideWorld* w, uint32_t* out, int width, int height, int scale) {
@@ -356,9 +359,9 @@ struct WideBounds {
 
 #define MAX_SCANNED_CELLS 65536
 
-static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
+static bool defined_bounds(const struct WideWorld* w, struct WideBounds* b) {
     if (w->layerCount == 0) {
-        if (!w->finite) return false;
+        if (!w->finite && w->overscan <= 0) return false;
         b->x0 = 0;
         b->y0 = 0;
         b->x1 = (int64_t) w->gridW * 16;
@@ -382,6 +385,20 @@ static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
         b->y1 = (maxY + 1) * 16;
         return true;
     }
+    return false; /* not reached for a single grid */
+}
+
+static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
+    if (w->layerCount == 0) {
+        if (!defined_bounds(w, b)) return false;
+        if (!w->finite) { /* the border shows only [overscan] px past the defined cells */
+            b->x0 -= w->overscan;
+            b->y0 -= w->overscan;
+            b->x1 += w->overscan;
+            b->y1 += w->overscan;
+        }
+        return true;
+    }
     b->x0 = 0;
     b->y0 = 0;
     b->x1 = 0;
@@ -391,6 +408,24 @@ static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
         if ((int64_t) w->layers[i].gridH * 16 > b->y1) b->y1 = (int64_t) w->layers[i].gridH * 16;
     }
     return true;
+}
+
+/* A single grid with an [overscan]: the margin is black past the defined cells' rectangle grown by it. */
+static void blank_beyond_overscan(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom) {
+    struct WideBounds m;
+    if (w->layerCount != 0 || w->finite || w->overscan <= 0 || !world_bounds(w, &m)) return;
+    int total = left + WIDE_FRAME_W + right;
+    for (int row = 0; row < top + WIDE_FRAME_H + bottom; row++) {
+        int64_t wy = (int64_t) w->y + (row - top);
+        bool rowOut = wy < m.y0 || wy >= m.y1;
+        bool inFrameRows = row >= top && row < top + WIDE_FRAME_H;
+        uint32_t* line = buf + (size_t) row * (size_t) stride;
+        for (int col = 0; col < total; col++) {
+            if (inFrameRows && col >= left && col < left + WIDE_FRAME_W) continue;
+            int64_t wx = (int64_t) w->x + (col - left);
+            if (rowOut || wx < m.x0 || wx >= m.x1) line[col] = 0;
+        }
+    }
 }
 
 static int64_t overlap(int64_t ax, int64_t ay, int64_t aw, int64_t ah, int64_t bx, int64_t by, int64_t bw, int64_t bh) {

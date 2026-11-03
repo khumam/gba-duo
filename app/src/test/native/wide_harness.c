@@ -440,6 +440,35 @@ static void finite_grid_is_black_outside_but_the_seam_still_sees_the_border(void
     CHECK(buf[48 * 400 + 0] != 0u);                        /* infinite: the border */
 }
 
+static void overscan_limits_the_repeating_border(void) {
+    struct WideWorld w = fixture();
+    marker_metatile(METATILES + 3 * 16, 3);
+    poke16(BORDER, 3);
+    w.gridW = 64;                 /* 1024 x 640 px; the cells read as metatile 0, not undefined */
+    w.gridH = 40;
+    w.borderW = 1;
+    w.borderH = 1;
+    w.overscan = 32;
+    int left, top;
+    w.x = 0; w.y = 0;
+    left = 80; top = 40;
+    wide_clamp_frame(&w, 400, 240, &left, &top);          /* picture may reach 32 px past the map: frame moves toward the edge */
+    CHECK(left == 32 && top == 32);
+    CHECK(wide_coverage(&w, 80, 40, 400, 240) < 1.0f);
+    w.overscan = 0;
+    left = 80; top = 40;
+    wide_clamp_frame(&w, 400, 240, &left, &top);          /* unlimited: not clamped */
+    CHECK(left == 80 && top == 40);
+    w.overscan = 32;
+    static uint32_t buf[400 * 240];
+    for (int i = 0; i < 400 * 240; i++) buf[i] = 0xDEADBEEFu;
+    wide_paint(&w, buf, 400, 80, 80, 40, 40);             /* world x -80..-1 on the left: past 32 px it is black */
+    CHECK(buf[48 * 400 + 0] == 0u);                       /* x -80 */
+    CHECK(buf[48 * 400 + 47] == 0u);                      /* x -33 */
+    CHECK(buf[48 * 400 + 48] == marker(3));               /* x -32: border */
+    CHECK(buf[0] == 0u);
+}
+
 static void finite_world_is_black_where_cells_are_undefined(void) {
     struct WideWorld w = fixture();
     for (int c = 0; c < 6; c++) poke16(GRID + (uint32_t) c * 2, 1);
@@ -606,6 +635,7 @@ int main(void) {
     clamp_frame_keeps_the_picture_inside_the_map();
     finite_grid_clamps_like_a_layered_world();
     finite_grid_is_black_outside_but_the_seam_still_sees_the_border();
+    overscan_limits_the_repeating_border();
     finite_world_is_black_where_cells_are_undefined();
     hysteresis_hides_after_four_bad_frames();
     hysteresis_shows_after_four_good_frames();
