@@ -29,7 +29,8 @@ struct GbaDuoState {
     size_t videoBufferBytes;
     unsigned videoWidth;
     unsigned videoHeight;
-    /* Wide view (GBA only): the frame is drawn [wideLeft] columns and [wideTop] rows into a [videoWidth] x [videoHeight] picture. */
+    /* Wide view (GBA only): the frame sits [wideLeft] columns and [wideTop] rows into a [videoWidth] x [videoHeight] picture
+     * (the middle, unless a map edge is near: see wide_clamp_frame). */
     unsigned wideLeft;
     unsigned wideTop;
     struct WideGate wideGate;
@@ -44,6 +45,9 @@ struct GbaDuoState {
 };
 
 static struct GbaDuoState g_state;
+
+/* While the picture is bigger than the game's frame, mGBA draws the frame here and paint_wide_margins() puts it into the picture. */
+static color_t g_wideStage[WIDE_FRAME_W * WIDE_FRAME_H];
 
 /** The loaded ROM's bytes (for achievements.c's RetroAchievements hash); NULL when none. */
 const void* gbaduo_rom(size_t* size) {
@@ -189,19 +193,31 @@ static void blank_wide_margins(void) {
     g_state.wideBlank = true;
 }
 
+/* The frame mGBA drew (in the staging buffer) into the picture at ([left], [top]). */
+static void place_frame(int left, int top) {
+    int width = (int) g_state.videoWidth;
+    for (int row = 0; row < WIDE_FRAME_H; row++) {
+        memcpy(g_state.videoBuffer + (size_t) (top + row) * (size_t) width + (size_t) left,
+               g_wideStage + (size_t) row * WIDE_FRAME_W, WIDE_FRAME_W * sizeof(color_t));
+    }
+}
+
 /* After each emulated frame: ask game.lua for the world, check its prediction against the
- * edge pixels mGBA just drew, and paint the margins only while it holds up. */
+ * edge pixels mGBA just drew (in the staging buffer), then put the frame into the picture and paint
+ * the margins around it, only while the world holds up. The frame sits in the middle unless a map edge
+ * is near: wide_clamp_frame() then moves it toward the edge, so the picture stays inside the map. */
 static void paint_wide_margins(void) {
     int width = (int) g_state.videoWidth;
     int height = (int) g_state.videoHeight;
     int left = (int) g_state.wideLeft;
     int top = (int) g_state.wideTop;
-    int right = width - WIDE_FRAME_W - left;
-    int bottom = height - WIDE_FRAME_H - top;
     uint32_t* buf = (uint32_t*) g_state.videoBuffer;
+    const uint32_t* frame = (const uint32_t*) g_wideStage;
 
     struct WideWorld world;
     bool have = gbaduo_game_enabled() && gbaduo_game_wide(width, height, left, top, g_state.wideMatch, &world);
+    int newLeft = (width - WIDE_FRAME_W) / 2;
+    int newTop = (height - WIDE_FRAME_H) / 2;
     if (!have) {
         const char* error = gbaduo_game_last_error();
         if (error[0] && g_state.wideErrorLogCountdown-- <= 0) {
@@ -211,21 +227,29 @@ static void paint_wide_margins(void) {
         g_state.wideMatch = 0.0f;
         g_state.wideCoverage = 0.0f;
     } else {
-        g_state.wideMatch = wide_seam_match(&world, buf, width, left, top, height > WIDE_FRAME_H);
-        g_state.wideCoverage = wide_coverage(&world, left, top, width, height);
+        g_state.wideMatch = wide_seam_match(&world, frame, WIDE_FRAME_W, 0, 0, height > WIDE_FRAME_H);
+        wide_clamp_frame(&world, width, height, &newLeft, &newTop);
+        g_state.wideCoverage = wide_coverage(&world, newLeft, newTop, width, height);
     }
 
     if (!wide_gate_step(&g_state.wideGate, have, g_state.wideMatch)) {
         /* Keep the last painted margins for a moment instead of blanking them: the app is about to zoom back to
-         * the game's own picture (a menu, a small room) and the old margins zoom out of view with it. */
+         * the game's own picture (a menu, a small room) and the old margins zoom out of view with it. The frame
+         * stays where those margins have it. */
+        place_frame(left, top);
         if (g_state.wideHiddenFrames++ >= WIDE_FREEZE_FRAMES && !g_state.wideBlank) {
             blank_wide_margins();
         }
         return;
     }
     g_state.wideHiddenFrames = 0;
-    wide_paint(&world, buf, width, left, right, top, bottom);
-    uint32_t alpha = buf[(size_t) top * (size_t) width + (size_t) left] & 0xFF000000u;
+    left = newLeft;
+    top = newTop;
+    g_state.wideLeft = (unsigned) left;
+    g_state.wideTop = (unsigned) top;
+    place_frame(left, top);
+    wide_paint(&world, buf, width, left, width - WIDE_FRAME_W - left, top, height - WIDE_FRAME_H - top);
+    uint32_t alpha = frame[0] & 0xFF000000u;
     for (int row = 0; row < height; row++) {
         uint32_t* line = buf + (size_t) row * (size_t) width;
         if (row < top || row >= top + WIDE_FRAME_H) {
@@ -297,7 +321,11 @@ Java_com_khumam_gbaduo_emu_NativeCore_setWide(JNIEnv* env, jobject thiz, jint wi
     }
     unsigned left = (wantedW - WIDE_FRAME_W) / 2;
     unsigned top = (wantedH - WIDE_FRAME_H) / 2;
-    g_state.core->setVideoBuffer(g_state.core, g_state.videoBuffer + (size_t) top * wantedW + left, wantedW);
+    if (wantedW > WIDE_FRAME_W || wantedH > WIDE_FRAME_H) {
+        g_state.core->setVideoBuffer(g_state.core, g_wideStage, WIDE_FRAME_W);
+    } else {
+        g_state.core->setVideoBuffer(g_state.core, g_state.videoBuffer, wantedW);
+    }
     memset(g_state.videoBuffer, 0, g_state.videoBufferBytes);
     g_state.videoWidth = wantedW;
     g_state.videoHeight = wantedH;

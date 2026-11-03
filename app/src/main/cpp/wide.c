@@ -120,6 +120,7 @@ uint32_t wide_pixel(const struct WideWorld* w, int32_t wx, int32_t wy) {
         uint16_t cell = gbaduo_bus_read16(w->grid + ((uint32_t) cy * (uint32_t) w->gridW + (uint32_t) cx) * 2u);
         id = cell & w->idMask;
     }
+    if (w->finite && (id < 0 || id == w->undefinedId)) return 0; /* outside a finite world there is nothing */
     if (id < 0 || id == w->undefinedId) {
         int32_t bx = floor_mod(cx - w->borderShift, w->borderW);
         int32_t by = floor_mod(cy - w->borderShift, w->borderH);
@@ -162,7 +163,8 @@ static int row_index(uint32_t row, uint16_t entry, int tx) {
 }
 
 /* The colours of [n] (1..8) pixels of world row [wy] from [wx], all inside one 8-pixel tile column. */
-static void span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out) {
+/* With [bounded], a finite world is black outside its defined cells; without, the border repeats there (what the game itself draws). */
+static void span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out, bool bounded) {
     int32_t cx = floor_div(wx, 16);
     int32_t cy = floor_div(wy, 16);
     int px = (int) (wx - cx * 16);
@@ -171,6 +173,10 @@ static void span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int
     int id = -1;
     if (cx >= 0 && cx < w->gridW && cy >= 0 && cy < w->gridH) {
         id = gbaduo_bus_read16(w->grid + ((uint32_t) cy * (uint32_t) w->gridW + (uint32_t) cx) * 2u) & w->idMask;
+    }
+    if (bounded && w->finite && (id < 0 || id == w->undefinedId)) {
+        for (int i = 0; i < n; i++) out[i] = 0;
+        return;
     }
     if (id < 0 || id == w->undefinedId) {
         int32_t bx = floor_mod(cx - w->borderShift, w->borderW);
@@ -232,7 +238,7 @@ static void layered_span(const struct WideWorld* w, const uint32_t* pal, int32_t
 }
 
 /* [n] pixels of world row [wy] from [wx], any count. */
-static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out) {
+static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out, bool bounded) {
     if (w->layerCount != 0) {
         while (n > 0) {
             int inTile = 8 - (int) ((uint32_t) wx & 7u);
@@ -247,7 +253,7 @@ static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy,
     while (n > 0) {
         int inTile = 8 - (int) ((uint32_t) wx & 7u);
         int m = n < inTile ? n : inTile;
-        span(w, pal, wy, wx, m, out);
+        span(w, pal, wy, wx, m, out, bounded);
         wx += m;
         out += m;
         n -= m;
@@ -273,10 +279,10 @@ void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, 
         }
         int32_t wy = w->y + (row - top);
         if (inFrame) {
-            wide_row(w, pal, wy, w->x - left, left, line);
-            wide_row(w, pal, wy, w->x + WIDE_FRAME_W, right, line + left + WIDE_FRAME_W);
+            wide_row(w, pal, wy, w->x - left, left, line, true);
+            wide_row(w, pal, wy, w->x + WIDE_FRAME_W, right, line + left + WIDE_FRAME_W, true);
         } else {
-            wide_row(w, pal, wy, w->x - left, total, line);
+            wide_row(w, pal, wy, w->x - left, total, line, true);
         }
     }
 }
@@ -292,7 +298,7 @@ void wide_render(const struct WideWorld* w, uint32_t* out, int width, int height
         int32_t wy = w->y + row * scale + scale / 2;
         for (int col = 0; col < width; col++) {
             uint32_t c;
-            wide_row(w, pal, wy, w->x + col * scale + scale / 2, 1, &c);
+            wide_row(w, pal, wy, w->x + col * scale + scale / 2, 1, &c, true);
             /* wide_color is 0x00BBGGRR; black is 0 too, so a black pixel reads as outside: fine for a map */
             out[(size_t) row * (size_t) width + (size_t) col] =
                 c == 0 ? 0u : 0xFF000000u | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF);
@@ -310,11 +316,11 @@ float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride
     for (int row = 0; row < WIDE_FRAME_H; row++) {
         const uint32_t* line = buf + (size_t) (top + row) * (size_t) stride + left;
         int32_t wy = w->y + row;
-        wide_row(w, pal, wy, w->x, SEAM_COLUMNS, want);
+        wide_row(w, pal, wy, w->x, SEAM_COLUMNS, want, false);
         for (int k = 0; k < SEAM_COLUMNS; k++) {
             if (close_enough(line[k], want[k])) same++;
         }
-        wide_row(w, pal, wy, w->x + WIDE_FRAME_W - SEAM_COLUMNS, SEAM_COLUMNS, want);
+        wide_row(w, pal, wy, w->x + WIDE_FRAME_W - SEAM_COLUMNS, SEAM_COLUMNS, want, false);
         for (int k = 0; k < SEAM_COLUMNS; k++) {
             if (close_enough(line[WIDE_FRAME_W - SEAM_COLUMNS + k], want[k])) same++;
         }
@@ -329,7 +335,7 @@ float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride
         for (int k = 0; k < 2 * SEAM_COLUMNS; k++) {
             int row = k < SEAM_COLUMNS ? k : WIDE_FRAME_H - 2 * SEAM_COLUMNS + k;
             const uint32_t* line = buf + (size_t) (top + row) * (size_t) stride + left + SEAM_COLUMNS;
-            wide_row(w, pal, w->y + row, w->x + SEAM_COLUMNS, span, want);
+            wide_row(w, pal, w->y + row, w->x + SEAM_COLUMNS, span, want, false);
             for (int c = 0; c < span; c++) {
                 if (close_enough(line[c], want[c])) same++;
             }
@@ -341,6 +347,52 @@ float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride
     return share;
 }
 
+/* The area in pixels of the world's map when the view is to stay inside it: a layered world's biggest grid, or the defined
+ * cells of a finite single grid (the rest is the game's padding of border tiles, which a finite world does not draw);
+ * false for a world whose border repeats forever. */
+struct WideBounds {
+    int64_t x0, y0, x1, y1;
+};
+
+#define MAX_SCANNED_CELLS 65536
+
+static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
+    if (w->layerCount == 0) {
+        if (!w->finite) return false;
+        b->x0 = 0;
+        b->y0 = 0;
+        b->x1 = (int64_t) w->gridW * 16;
+        b->y1 = (int64_t) w->gridH * 16;
+        if (w->undefinedId < 0 || (int64_t) w->gridW * w->gridH > MAX_SCANNED_CELLS) return true;
+        int64_t minX = w->gridW, minY = w->gridH, maxX = -1, maxY = -1;
+        for (int cy = 0; cy < w->gridH; cy++) {
+            for (int cx = 0; cx < w->gridW; cx++) {
+                int id = gbaduo_bus_read16(w->grid + ((uint32_t) cy * (uint32_t) w->gridW + (uint32_t) cx) * 2u) & w->idMask;
+                if (id == w->undefinedId) continue;
+                if (cx < minX) minX = cx;
+                if (cx > maxX) maxX = cx;
+                if (cy < minY) minY = cy;
+                if (cy > maxY) maxY = cy;
+            }
+        }
+        if (maxX < 0) return true; /* nothing defined: keep the whole grid */
+        b->x0 = minX * 16;
+        b->y0 = minY * 16;
+        b->x1 = (maxX + 1) * 16;
+        b->y1 = (maxY + 1) * 16;
+        return true;
+    }
+    b->x0 = 0;
+    b->y0 = 0;
+    b->x1 = 0;
+    b->y1 = 0;
+    for (int i = 0; i < w->layerCount; i++) {
+        if ((int64_t) w->layers[i].gridW * 16 > b->x1) b->x1 = (int64_t) w->layers[i].gridW * 16;
+        if ((int64_t) w->layers[i].gridH * 16 > b->y1) b->y1 = (int64_t) w->layers[i].gridH * 16;
+    }
+    return true;
+}
+
 static int64_t overlap(int64_t ax, int64_t ay, int64_t aw, int64_t ah, int64_t bx, int64_t by, int64_t bw, int64_t bh) {
     int64_t w = (ax + aw < bx + bw ? ax + aw : bx + bw) - (ax > bx ? ax : bx);
     int64_t h = (ay + ah < by + bh ? ay + ah : by + bh) - (ay > by ? ay : by);
@@ -350,16 +402,36 @@ static int64_t overlap(int64_t ax, int64_t ay, int64_t aw, int64_t ah, int64_t b
 float wide_coverage(const struct WideWorld* w, int left, int top, int width, int height) {
     if (!wide_world_valid(w)) return 0.0f;
     int64_t margin = (int64_t) width * height - (int64_t) WIDE_FRAME_W * WIDE_FRAME_H;
-    if (w->layerCount == 0 || margin <= 0) return 1.0f;
-    int64_t mapW = 0, mapH = 0;
-    for (int i = 0; i < w->layerCount; i++) {
-        if ((int64_t) w->layers[i].gridW * 16 > mapW) mapW = (int64_t) w->layers[i].gridW * 16;
-        if ((int64_t) w->layers[i].gridH * 16 > mapH) mapH = (int64_t) w->layers[i].gridH * 16;
-    }
-    int64_t inPicture = overlap(0, 0, mapW, mapH, (int64_t) w->x - left, (int64_t) w->y - top, width, height);
-    int64_t inFrame = overlap(0, 0, mapW, mapH, w->x, w->y, WIDE_FRAME_W, WIDE_FRAME_H);
+    struct WideBounds m;
+    if (margin <= 0 || !world_bounds(w, &m)) return 1.0f;
+    int64_t inPicture = overlap(m.x0, m.y0, m.x1 - m.x0, m.y1 - m.y0, (int64_t) w->x - left, (int64_t) w->y - top, width, height);
+    int64_t inFrame = overlap(m.x0, m.y0, m.x1 - m.x0, m.y1 - m.y0, w->x, w->y, WIDE_FRAME_W, WIDE_FRAME_H);
     float share = (float) (inPicture - inFrame) / (float) margin;
     return share < 0.0f ? 0.0f : share > 1.0f ? 1.0f : share;
+}
+
+static int clamp_int(int64_t v, int64_t lo, int64_t hi) {
+    return (int) (v < lo ? lo : v > hi ? hi : v);
+}
+
+/* One axis of wide_clamp_frame: the frame's [pos] in the picture, its world position [at], the picture's [size] and the map's [lo]..[hi]. */
+static int clamp_axis(int pos, int64_t at, int size, int frame, int64_t lo, int64_t hi) {
+    int64_t origin;
+    if (hi - lo < size) {
+        origin = lo + (hi - lo - size) / 2; /* the map cannot fill the picture: it stays put, the black splits evenly */
+    } else {
+        origin = at - pos;
+        if (origin < lo) origin = lo;
+        if (origin > hi - size) origin = hi - size;
+    }
+    return clamp_int(at - origin, 0, size - frame);
+}
+
+void wide_clamp_frame(const struct WideWorld* w, int width, int height, int* left, int* top) {
+    struct WideBounds m;
+    if (!wide_world_valid(w) || !world_bounds(w, &m)) return;
+    *left = clamp_axis(*left, w->x, width, WIDE_FRAME_W, m.x0, m.x1);
+    *top = clamp_axis(*top, w->y, height, WIDE_FRAME_H, m.y0, m.y1);
 }
 
 bool wide_gate_step(struct WideGate* g, bool haveWorld, float match) {

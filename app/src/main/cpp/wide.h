@@ -43,6 +43,7 @@ struct WideWorld {
     int borderW, borderH;
     int borderShift;            /* the block index of cell c is (c - borderShift) mod size (the game's own origin) */
     int undefinedId;            /* a grid cell with this metatile id is outside the map: use the border (-1: none) */
+    int finite;                 /* 1: the defined cells (not undefinedId) are the whole world, as a layered world's grids are: the view stops at their edge (see wide_clamp_frame) and the margins are black outside them, not the repeating border */
     uint32_t metatiles;         /* ids below split: metatiles + id * 16 */
     uint32_t metatiles2;        /* the rest: metatiles2 + (id - split) * 16 */
     int split;
@@ -89,6 +90,14 @@ float wide_seam_match(const struct WideWorld* w, const uint32_t* buf, int stride
  * for an invalid one. Low means the margins would be mostly black (a small room).
  */
 float wide_coverage(const struct WideWorld* w, int left, int top, int width, int height);
+
+/**
+ * Slides the frame inside a [width] x [height] picture so the picture never reaches past the map. [left] and [top] come
+ * in as where the frame sits when centred and go out as where it sits instead: near a map edge the picture stops scrolling
+ * and the frame moves toward that edge (the game's own camera stops there too), so the margins there show the map's
+ * inside, not black. An axis the map is too small to fill keeps the picture still on the map, the black split evenly; a world whose border repeats forever (not `finite`) is left as it is.
+ */
+void wide_clamp_frame(const struct WideWorld* w, int width, int height, int* left, int* top);
 
 /** Whether the margins show: hides after 4 bad frames in a row, shows after 4 good ones. */
 struct WideGate {

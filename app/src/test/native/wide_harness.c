@@ -348,6 +348,133 @@ static void coverage_is_the_share_of_margin_inside_the_map(void) {
     CHECK(wide_coverage(&l, 80, 40, 400, 240) == 1.0f);
 }
 
+static void clamp_frame_keeps_the_picture_inside_the_map(void) {
+    struct WideWorld l;
+    memset(&l, 0, sizeof(l));
+    l.layerCount = 1;
+    l.layers[0].gridW = 64;       /* 1024 x 640 px */
+    l.layers[0].gridH = 40;
+    l.layers[0].stride = 64;
+    l.layers[0].cellBytes = 2;
+    int left, top;
+    /* deep inside: the frame stays centred in a 400x240 picture */
+    l.x = 400; l.y = 200;
+    left = 80; top = 40;
+    wide_clamp_frame(&l, 400, 240, &left, &top);
+    CHECK(left == 80 && top == 40);
+    /* the game's camera at the map's top-left corner: the frame sits in the picture's corner */
+    l.x = 0; l.y = 0;
+    left = 80; top = 40;
+    wide_clamp_frame(&l, 400, 240, &left, &top);
+    CHECK(left == 0 && top == 0);
+    /* 30 px from the left edge: the picture is stuck at the map's 0, the frame 30 px in */
+    l.x = 30; l.y = 200;
+    left = 80; top = 40;
+    wide_clamp_frame(&l, 400, 240, &left, &top);
+    CHECK(left == 30 && top == 40);
+    /* the bottom-right corner: the frame at the picture's bottom-right */
+    l.x = 1024 - 240; l.y = 640 - 160;
+    left = 80; top = 40;
+    wide_clamp_frame(&l, 400, 240, &left, &top);
+    CHECK(left == 160 && top == 80);
+    /* a map narrower than the picture stays put: the frame moves with the game's camera inside it, the black splits evenly */
+    l.layers[0].gridW = 20;       /* 320 px */
+    l.layers[0].stride = 20;
+    l.x = 0; l.y = 0;
+    left = 80; top = 40;
+    wide_clamp_frame(&l, 400, 240, &left, &top);
+    CHECK(left == 40 && top == 0);
+    /* a border-repeating world is never clamped */
+    struct WideWorld w = fixture();
+    left = 80; top = 40;
+    wide_clamp_frame(&w, 400, 240, &left, &top);
+    CHECK(left == 80 && top == 40);
+}
+
+static void finite_grid_clamps_like_a_layered_world(void) {
+    struct WideWorld w;
+    memset(&w, 0, sizeof(w));
+    w.gridW = 64;                 /* 1024 x 640 px */
+    w.gridH = 40;
+    w.borderW = 1;
+    w.borderH = 1;
+    w.finite = 1;
+    int left, top;
+    w.x = 0; w.y = 0;
+    left = 80; top = 40;
+    wide_clamp_frame(&w, 400, 240, &left, &top);
+    CHECK(left == 0 && top == 0);
+    w.x = -50; w.y = 200;         /* the game's own frame already shows border past the grid: it still sits in the picture */
+    left = 80; top = 40;
+    wide_clamp_frame(&w, 400, 240, &left, &top);
+    CHECK(left == 0 && top == 40);
+    w.finite = 0;
+    w.x = 0; w.y = 0;
+    left = 80; top = 40;
+    wide_clamp_frame(&w, 400, 240, &left, &top);
+    CHECK(left == 80 && top == 40);
+    CHECK(wide_coverage(&w, 80, 40, 400, 240) == 1.0f);
+    w.finite = 1;
+    CHECK(wide_coverage(&w, 80, 40, 400, 240) < 1.0f);
+}
+
+static void finite_grid_is_black_outside_but_the_seam_still_sees_the_border(void) {
+    struct WideWorld w = fixture();
+    for (int c = 0; c < 6; c++) poke16(GRID + (uint32_t) c * 2, 1);
+    for (int n = 1; n <= 6; n++) marker_metatile(METATILES + (uint32_t) n * 16, n);
+    poke16(BORDER + 0, 3); poke16(BORDER + 2, 4); poke16(BORDER + 4, 5); poke16(BORDER + 6, 6);
+    CHECK(wide_pixel(&w, -1, -1) == marker(6));            /* the border repeats */
+    w.finite = 1;
+    CHECK(wide_pixel(&w, -1, -1) == 0u);                   /* nothing outside a finite grid */
+    CHECK(wide_pixel(&w, 0, 0) == marker(1));              /* inside is untouched */
+    static uint32_t buf[400 * 240];
+    for (int i = 0; i < 400 * 240; i++) buf[i] = 0xDEADBEEFu;
+    w.x = -4; w.y = 0;
+    wide_paint(&w, buf, 400, 80, 80, 40, 40);              /* the frame at (80, 40): the margins hold world x -84..-5 and 236..315 */
+    CHECK(buf[48 * 400 + 0] == 0u);                        /* left of the grid: black */
+    CHECK(buf[48 * 400 + 79] == 0u);
+    CHECK(buf[48 * 400 + 399] == 0u);                      /* right of it too */
+    CHECK(buf[0] == 0u);                                   /* above it too */
+    w.finite = 0;
+    wide_paint(&w, buf, 400, 80, 80, 40, 40);
+    CHECK(buf[48 * 400 + 0] != 0u);                        /* infinite: the border */
+}
+
+static void finite_world_is_black_where_cells_are_undefined(void) {
+    struct WideWorld w = fixture();
+    for (int c = 0; c < 6; c++) poke16(GRID + (uint32_t) c * 2, 1);
+    poke16(GRID + 0 * 2, 0x3FF);                           /* cell (0,0) undefined: padding */
+    for (int n = 1; n <= 6; n++) marker_metatile(METATILES + (uint32_t) n * 16, n);
+    poke16(BORDER + 0, 3); poke16(BORDER + 2, 4); poke16(BORDER + 4, 5); poke16(BORDER + 6, 6);
+    w.undefinedId = 0x3FF;
+    CHECK(wide_pixel(&w, 0, 0) == marker(3));              /* the game draws the border there */
+    w.finite = 1;
+    CHECK(wide_pixel(&w, 0, 0) == 0u);
+    CHECK(wide_pixel(&w, 16, 0) == marker(1));
+    /* the bounds are the defined cells (here the grid's 3x2: a map of 48x32 px, narrower than the picture, so it stays put) */
+    w.x = 16; w.y = 0;
+    int left = 80, top = 40;
+    wide_clamp_frame(&w, 400, 240, &left, &top);
+    CHECK(left == 160);
+    CHECK(wide_coverage(&w, 80, 40, 400, 240) < 0.1f);
+    /* a column of padding on the left is not part of the map: with 4 columns the view starts at the second one */
+    struct WideWorld p = fixture();
+    p.gridW = 64; p.gridH = 40;
+    p.undefinedId = 0x3FF;
+    p.finite = 1;
+    for (int cy = 0; cy < 40; cy++)
+        for (int cx = 0; cx < 64; cx++) poke16(GRID + ((uint32_t) cy * 64 + (uint32_t) cx) * 2, cx < 7 ? 0x3FF : 1);
+    p.x = 7 * 16 - 100;                                    /* the frame hangs 100 px into the padding */
+    p.y = 200;
+    left = 80; top = 40;
+    wide_clamp_frame(&p, 400, 240, &left, &top);
+    CHECK(left == 0);                                      /* flush against the picture's left edge: no margin into the padding */
+    p.x = 7 * 16 + 300;
+    left = 80; top = 40;
+    wide_clamp_frame(&p, 400, 240, &left, &top);
+    CHECK(left == 80);
+}
+
 static void hysteresis_hides_after_four_bad_frames(void) {
     struct WideGate g = {0};
     for (int i = 0; i < 8; i++) wide_gate_step(&g, true, 0.95f);
@@ -457,6 +584,7 @@ static void three_layers_of_u32_cells(void) {
     CHECK(buf[0] == wide_pixel(&w, 0, 0) && buf[16] == wide_pixel(&w, 16, 0)); /* the painted row reads the same u32 cells */
 }
 
+
 int main(void) {
     color_matches_mgba();
     pixel_reads_bottom_then_top_then_backdrop();
@@ -475,6 +603,10 @@ int main(void) {
     seam_match_counts_the_edge_rows();
     seam_match_tolerates_a_tint();
     coverage_is_the_share_of_margin_inside_the_map();
+    clamp_frame_keeps_the_picture_inside_the_map();
+    finite_grid_clamps_like_a_layered_world();
+    finite_grid_is_black_outside_but_the_seam_still_sees_the_border();
+    finite_world_is_black_where_cells_are_undefined();
     hysteresis_hides_after_four_bad_frames();
     hysteresis_shows_after_four_good_frames();
     no_world_hides_at_once();
