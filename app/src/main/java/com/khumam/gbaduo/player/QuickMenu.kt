@@ -17,17 +17,20 @@ class QuickMenu(
     initialShader: ShaderPreset,
     initialTilt: TiltShift,
     initialIntegerScaling: Boolean,
+    initialAmbient: Boolean,
     private val hardcore: Boolean,
     private val onSetFfSpeed: (Int) -> Unit,
     private val onSetShader: (ShaderPreset) -> Unit,
     private val onSetTiltShift: (TiltShift) -> Unit,
     private val onSetIntegerScaling: (Boolean) -> Unit,
+    private val onSetAmbient: (Boolean) -> Unit,
     private val onQuit: () -> Unit,
 ) {
     private var ffSpeed = 2
     private var shader = initialShader
     private var tilt = initialTilt
     private var integerScaling = initialIntegerScaling
+    private var ambient = initialAmbient
     private var dialog: AlertDialog? = null
 
     /** True while the menu (or its slot picker) is open; it has input focus then. */
@@ -45,6 +48,7 @@ class QuickMenu(
             }
             add(context.getString(R.string.shader_label, shader.displayName) to ::cycleShader)
             add(context.getString(R.string.tilt_label, tilt.displayName) to ::cycleTiltShift)
+            add(context.getString(if (ambient) R.string.ambient_label_on else R.string.ambient_label_off) to ::toggleAmbient)
             add(context.getString(if (integerScaling) R.string.scale_label_on else R.string.scale_label_off) to ::toggleIntegerScaling)
             add(context.getString(R.string.quit) to onQuit)
         }
@@ -71,6 +75,12 @@ class QuickMenu(
         val all = TiltShift.entries
         tilt = all[(all.indexOf(tilt) + 1) % all.size]
         onSetTiltShift(tilt)
+        emu.paused = false
+    }
+
+    private fun toggleAmbient() {
+        ambient = !ambient
+        onSetAmbient(ambient)
         emu.paused = false
     }
 

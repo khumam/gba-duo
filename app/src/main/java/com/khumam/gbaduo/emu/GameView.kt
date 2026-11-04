@@ -124,9 +124,16 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         requestRender()
     }
 
+    /** The richer, warmer colour grade on the plain picture. Thread-safe; read by the GL thread on the next frame. */
+    fun setAmbient(on: Boolean) {
+        renderer.ambient = on
+        requestRender()
+    }
+
     private inner class Renderer(private val assets: AssetManager) : GLSurfaceView.Renderer {
         @Volatile var pendingShader: ShaderPreset = ShaderPreset.OFF
         @Volatile var colorMode = 0f
+        @Volatile var ambient = false
         @Volatile var integerScale = false
         @Volatile var aspect = AspectRatio.ORIGINAL
         @Volatile var aspectOverride: AspectRatio? = null
@@ -166,6 +173,9 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var positionHandle = 0
         private var texSizeHandle = -1
         private var colorModeHandle = -1
+        private var ambientHandle = -1
+        private var viewHandle = -1
+        private val viewport = IntArray(4)
         private var blitProgram = 0
         private var blitPositionHandle = 0
         private var blitSrcSizeHandle = -1
@@ -176,6 +186,9 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var prescaleHeight = 0
         private var prescaleReady = false
         private var tiltProgram = 0
+        private var ambientProgram = 0
+        private var ambientPositionHandle = 0
+        private var ambientPixelHandle = -1
         private var tiltPositionHandle = 0
         private var tiltAxisHandle = -1
         private var tiltRadiusHandle = -1
@@ -262,12 +275,22 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             // width, and a linear shrink makes edges pop between sharp and soft as it scrolls. Draw it at a whole multiple
             // first and shrink that by exact area, so pixel edges stay crisp and move smoothly.
             val tilt = tiltShift
-            if (tilt != TiltShift.OFF && sizeTilt(size.width, size.height)) {
-                // Picture into an offscreen texture, then blurred sideways and up-down onto the screen.
+            val shadows = ambient && ambientProgram != 0
+            if ((tilt != TiltShift.OFF || shadows) && sizeTilt(size.width, size.height)) {
+                // Picture into an offscreen texture; then the ambient shadows (when on), then blurred sideways and up-down
+                // (when tilt-shift is on) onto the screen.
                 drawPicture(tiltFbos[0], 0, 0, size, videoWidth, videoHeight)
-                val radius = tilt.maxRadius * size.height / TILT_REFERENCE_HEIGHT
-                tiltPass(tiltTextures[0], tiltFbos[1], 0, 0, size, 1f, 0f, radius, tilt.focus)
-                tiltPass(tiltTextures[1], target, x, y, size, 0f, 1f, radius, tilt.focus)
+                var from = 0 // which of the two offscreen textures holds the picture now
+                if (shadows) {
+                    val last = tilt == TiltShift.OFF
+                    ambientPass(tiltTextures[from], if (last) target else tiltFbos[1 - from], if (last) x else 0, if (last) y else 0, size, videoWidth, videoHeight)
+                    if (!last) from = 1 - from
+                }
+                if (tilt != TiltShift.OFF) {
+                    val radius = tilt.maxRadius * size.height / TILT_REFERENCE_HEIGHT
+                    tiltPass(tiltTextures[from], tiltFbos[1 - from], 0, 0, size, 1f, 0f, radius, tilt.focus)
+                    tiltPass(tiltTextures[1 - from], target, x, y, size, 0f, 1f, radius, tilt.focus)
+                }
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
             } else {
                 drawPicture(target, x, y, size, videoWidth, videoHeight)
@@ -451,6 +474,16 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             drawGame(videoWidth, videoHeight)
         }
 
+        /** The ambient shadows: [source] drawn into [fbo] (0: the screen) at ([x], [y]) with soft shadows thrown from its dark outlines. */
+        private fun ambientPass(source: Int, fbo: Int, x: Int, y: Int, size: ViewportSize, videoWidth: Int, videoHeight: Int) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+            GLES20.glViewport(x, y, size.width, size.height)
+            GLES20.glUseProgram(ambientProgram)
+            GLES20.glUniform2f(ambientPixelHandle, 1f / videoWidth, 1f / videoHeight)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, source)
+            drawQuad(ambientPositionHandle)
+        }
+
         /** Blurs [source] along ([axisX], [axisY]) into [fbo] (0: the screen) at ([x], [y]). */
         private fun tiltPass(source: Int, fbo: Int, x: Int, y: Int, size: ViewportSize, axisX: Float, axisY: Float, radius: Float, focus: Float) {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
@@ -468,6 +501,13 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             GLES20.glUseProgram(program)
             if (colorModeHandle >= 0) {
                 GLES20.glUniform1f(colorModeHandle, colorMode)
+            }
+            if (ambientHandle >= 0) {
+                GLES20.glUniform1f(ambientHandle, if (ambient) 1f else 0f)
+            }
+            if (viewHandle >= 0 && ambient) {
+                GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, viewport, 0)
+                GLES20.glUniform4f(viewHandle, viewport[0].toFloat(), viewport[1].toFloat(), viewport[2].toFloat(), viewport[3].toFloat())
             }
             if (texSizeHandle >= 0) {
                 GLES20.glUniform2f(texSizeHandle, videoWidth.toFloat(), videoHeight.toFloat())
@@ -559,6 +599,20 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             }
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
             tiltReady = true
+            setUpAmbient()
+        }
+
+        private fun setUpAmbient() {
+            ambientProgram = runCatching { buildProgram("shaders/tilt/vertex.glsl", "shaders/ambient/fragment.glsl", "ambient") }
+                .getOrElse { error ->
+                    Log.e(TAG, "Failed to build ambient shadow shader, shadows off", error)
+                    0
+                }
+            if (ambientProgram == 0) return
+            ambientPositionHandle = GLES20.glGetAttribLocation(ambientProgram, "position")
+            GLES20.glUseProgram(ambientProgram)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(ambientProgram, "tex"), 0)
+            ambientPixelHandle = GLES20.glGetUniformLocation(ambientProgram, "pixel")
         }
 
         /** Gives both offscreen textures this size; false (and the blur off) when the GPU won't render into them. */
@@ -638,6 +692,8 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             // Set per frame in onDrawFrame, since the video size depends on the loaded game.
             texSizeHandle = GLES20.glGetUniformLocation(program, "texSize")
             colorModeHandle = GLES20.glGetUniformLocation(program, "ccMode")
+            ambientHandle = GLES20.glGetUniformLocation(program, "ccAmbient")
+            viewHandle = GLES20.glGetUniformLocation(program, "ccView")
             for ((name, value) in preset.uniforms) {
                 val loc = GLES20.glGetUniformLocation(program, name)
                 if (loc >= 0) {

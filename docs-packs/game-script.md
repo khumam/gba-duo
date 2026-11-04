@@ -117,6 +117,20 @@ pack has no `wide()`).
 }
 ```
 
+### Turning ambient colour on and off
+
+**Ambient colour** is a global setting (one for every game, also in the Quick menu): a richer, warmer colour grade with soft shading (a low sun at the top left, a cool vignette) and drop shadows under sprites, trees and walls, on the
+picture. The app handles the reserved action `ambientView` itself: `"args"` is `"on"`, `"off"` or `"toggle"` (the default).
+Every snapshot carries `_ambient` (1 or 0) and `_ambientLabel` (`ON` or `OFF`). It needs no `wide()`, so every pack can offer it.
+
+```json
+{
+  "type": "box", "class": "wide-pill",
+  "onClick": { "call": "ambientView", "args": ["toggle"] },
+  "children": [ { "type": "text", "text": "COLOR {_ambientLabel}" } ]
+}
+```
+
 `zelda-the-minish-cap-companion/game.lua` is the two-layer example (camera and room origin from
 `gRoomControls`, layers from `gMapTop` / `gMapBottom`). `golden-sun-companion/game.lua` is the
 three-layer one with u32 cells: one grid in EWRAM holds the three BG layers side by side, so each

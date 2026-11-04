@@ -68,6 +68,9 @@ class EmuThread(
     /** The Wide view mode the player chose for this game (it also needs the pack's game.lua to define `wide()`). */
     @Volatile var wideMode = WideMode.OFF
 
+    /** Ambient colour (one setting for every game), here so the companion screen's button shows its state. */
+    @Volatile var ambientOn = false
+
     /** The active pack's game.lua defines `wide()`: Wide view can be turned on. Set on the emu thread. */
     @Volatile var wideAvailable = false
         private set
@@ -246,7 +249,7 @@ class EmuThread(
         val interval = (60 / pack.tickHz).coerceAtLeast(1)
         if (due || framesSinceSnapshot >= interval) {
             framesSinceSnapshot = 0
-            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideMode, wideAvailable))
+            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideMode, wideAvailable), ambientOn)
             onSnapshot?.invoke(snapshot)
         }
     }

@@ -15,6 +15,7 @@ import com.khumam.gbaduo.achievements.AchievementPopups
 import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.WideControl
+import com.khumam.gbaduo.companion.AmbientControl
 import com.khumam.gbaduo.companion.WideMode
 import com.khumam.gbaduo.companion.CompanionActivity
 import com.khumam.gbaduo.companion.CompanionController
@@ -34,6 +35,7 @@ import com.khumam.gbaduo.emu.PerfOverlaySettings
 import com.khumam.gbaduo.emu.ScaleSettings
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
+import com.khumam.gbaduo.emu.AmbientSettings
 import com.khumam.gbaduo.emu.TiltShiftSettings
 import com.khumam.gbaduo.library.GameTitle
 import com.khumam.gbaduo.library.RomArchive
@@ -139,6 +141,7 @@ class PlayerActivity : Activity() {
         gameView.setIntegerScaling(ScaleSettings.integer(this))
         gameView.setAspectRatio(AspectSettings.default(this))
         gameView.setTiltShift(TiltShiftSettings.default(this))
+        gameView.setAmbient(AmbientSettings.on(this))
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
         emu.hardcore = hardcore
         emu.wideMode = when (storage.settings.getString(GameSettingsKeys.WIDE)) {
@@ -146,6 +149,7 @@ class PlayerActivity : Activity() {
             GameSettingsKeys.WIDE_EXTRA -> WideMode.EXTRA
             else -> WideMode.OFF
         }
+        emu.ambientOn = AmbientSettings.on(this)
         saveMirror?.let { mirror ->
             emu.onSaveDataChanged = mirror::requestOut
             // After the core is unloaded, so the save it writes on the way out is included.
@@ -177,6 +181,14 @@ class PlayerActivity : Activity() {
         emu.requestSnapshot()
     }
 
+    /** Ambient colour on or off (from the companion screen's button or the Quick menu); one setting for every game. */
+    private fun setAmbient(on: Boolean) {
+        AmbientSettings.setOn(this, on)
+        emu.ambientOn = on
+        findViewById<GameView>(R.id.game_view).setAmbient(on)
+        emu.requestSnapshot()
+    }
+
     private fun waitForLoadThenSetUp(gameView: GameView, header: RomHeader, crc32: Long, storage: GameStorage) {
         gameView.post(object : Runnable {
             override fun run() {
@@ -189,11 +201,13 @@ class PlayerActivity : Activity() {
                         initialShader = savedShader,
                         initialTilt = TiltShiftSettings.default(this@PlayerActivity),
                         initialIntegerScaling = ScaleSettings.integer(this@PlayerActivity),
+                        initialAmbient = AmbientSettings.on(this@PlayerActivity),
                         hardcore = hardcore,
                         onSetFfSpeed = { emu.ffMultiplier = it },
                         onSetShader = { savedShader = it; storage.settings.put(GameSettingsKeys.SHADER, it.id); gameView.setShader(it) },
                         onSetTiltShift = { TiltShiftSettings.setDefault(this@PlayerActivity, it); gameView.setTiltShift(it) },
                         onSetIntegerScaling = { ScaleSettings.setInteger(this@PlayerActivity, it); gameView.setIntegerScaling(it) },
+                        onSetAmbient = { setAmbient(it) },
                         onQuit = { finish() },
                     )
                     val notes = PlayerNotes(findViewById(android.R.id.content) as android.widget.FrameLayout).also { playerNotes = it }
@@ -250,7 +264,11 @@ class PlayerActivity : Activity() {
         emu.onActionResult = { result -> runOnUiThread { companionScreen?.applyScriptResult(result) } }
         controller.onUiChange = emu::setUiState
         controller.onScriptCall = { name, args ->
-            if (WideControl.handles(name)) setWide(WideControl.next(emu.wideMode, args), storage) else emu.callAction(name, args)
+            when {
+                WideControl.handles(name) -> setWide(WideControl.next(emu.wideMode, args), storage)
+                AmbientControl.handles(name) -> setAmbient(AmbientControl.next(emu.ambientOn, args))
+                else -> emu.callAction(name, args)
+            }
         }
         emu.setUiState(controller.uiState)
     }
