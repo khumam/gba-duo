@@ -151,6 +151,9 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
         LaunchedEffect(pressed) { tree.setPressed(node, pressed) }
         modifier = modifier.clickable(interactionSource = interactions, indication = null, onClick = onClick)
     }
+    // A tap that makes its own box untappable removes the effect above before it sees the
+    // release, so clear `:pressed` here or the box keeps its pressed look.
+    if (!tappable && node.onClick != null) LaunchedEffect(Unit) { tree.setPressed(node, false) }
 
     fun inset(side: String) = (style.padding(side) + style.borderWidth(side)) * density
     val insets = remember(style, density) { Insets(inset("left"), inset("top"), inset("right"), inset("bottom")) }
