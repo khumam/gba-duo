@@ -377,6 +377,19 @@ static void c_work_is_charged_to_the_budget(void) {
     }
 }
 
+/* mem.read over 64 KB is an error, not a quietly shorter string. */
+static void mem_read_over_the_cap_errors(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    load("function update() return { n = #mem.read(0x02000000, 65537) } end");
+    char* r = gbaduo_script_tick();
+    CHECK(r == NULL && strstr(gbaduo_script_last_error(), "65536 bytes at most") != NULL);
+    free(r);
+    load("function update() return { n = #mem.read(0x02000000, 0), m = #mem.read(0x02000000, -5) } end");
+    r = gbaduo_script_tick();
+    CHECK(json_has(r, "\"n\":0") && json_has(r, "\"m\":0"));
+    free(r);
+}
+
 /* Wall-clock cap: a few slow instructions (big string.rep) can't hold the thread either. */
 static void slow_ticks_hit_the_time_limit(void) {
     fake_reset(GBADUO_BUS_GBA);
@@ -852,6 +865,7 @@ int main(void) {
     tilemap_rejects_bad_sizes();
     tilemap_reads_lz77_tiles_and_map();
     c_work_is_charged_to_the_budget();
+    mem_read_over_the_cap_errors();
     slow_ticks_hit_the_time_limit();
     sprite_composes_parts();
     sprite_rejects_bad_parts();

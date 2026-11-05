@@ -63,6 +63,16 @@ class StyleResolverTest {
     }
 
     @Test
+    fun pointerEventsInheritsAndAChildCanTurnItBackOn() {
+        val resolver = StyleResolver(emptyList(), listOf(css(".off { pointer-events: none } .on { pointer-events: auto }")))
+        val (off, inherited, on) = resolveChain(resolver, StyleNode("box", staticClasses = setOf("off")), StyleNode("box"), StyleNode("box", staticClasses = setOf("on")))
+        assertEquals("none", off.keyword("pointer-events"))
+        assertEquals("none", inherited.keyword("pointer-events"))
+        assertEquals("auto", on.keyword("pointer-events"))
+        assertEquals("auto", resolver.resolve(StyleNode("box"), null).keyword("pointer-events"))
+    }
+
+    @Test
     fun customPropertiesInheritAndSubstitute() {
         val resolver = StyleResolver(
             emptyList(),

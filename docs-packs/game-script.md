@@ -120,7 +120,7 @@ pack has no `wide()`).
 
 ## ambient(): the look of the game
 
-**Ambient** (a setting for every game, in the Quick menu too) gives the picture the pack's own look. The app has the
+**Ambient** (kept per game, like Wide view) gives the picture the pack's own look. The app has the
 effects; the numbers are the pack's, so a pack without `ambient()` gets no look at all (the button shows `N/A`).
 `ambient()` returns a table, or `nil` / `false` for the plain picture here. Every field is optional and its default
 changes nothing, so a field left out is an effect left off:
@@ -147,7 +147,8 @@ under an open sky, read from the map's type).
 
 ### Turning Ambient on and off
 
-The app handles the reserved action `ambientView` itself: `"args"` is `"on"`, `"off"` or `"toggle"` (the default).
+Ambient has no switch in the app's menus: the pack offers it with a button, so a pack with `ambient()`
+should have one. The app handles the reserved action `ambientView` itself: `"args"` is `"on"`, `"off"` or `"toggle"` (the default).
 Every snapshot carries `_ambient` (1 or 0) and `_ambientLabel` (`ON`, `OFF`, or `N/A` when the pack has no `ambient()`).
 
 ```json

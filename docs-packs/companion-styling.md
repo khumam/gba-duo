@@ -133,11 +133,17 @@ Units: `px` (= Android dp; unitless numbers are px), `%`, `em`, `rem`, `vw`, `vh
 | Box | `width`, `height`, `min-*`, `max-*`, `aspect-ratio`, `margin` (incl. `auto`), `padding`, `box-sizing` |
 | Background | `background`, `background-color`, `background-image` (`url()`, `linear-gradient()`), `background-size`, `background-position`, `background-repeat` |
 | Border | `border`, `border-{top,right,bottom,left}`, `border-width/style/color`, `border-radius` (per corner, px or %) — styles `solid`, `dashed`, `dotted` |
-| Effects | `opacity`, `box-shadow` (first shadow, no `inset`), `transform` (`translate`, `scale`, `rotate`), `transform-origin`, `overflow: hidden`, `visibility` |
+| Effects | `opacity`, `box-shadow` (first shadow, no `inset`), `transform` (`translate`, `scale`, `rotate`), `transform-origin`, `overflow: hidden`, `visibility`, `pointer-events` (`auto`, `none`) |
 | Transitions | `transition` for `opacity`, `color`, `background-color`, `transform`, `width`, `height` (`ms`/`s`, `linear`, `ease*`, `cubic-bezier()`, delay) |
 | Text | `color`, `font-family` (+ `@font-face`), `font-size`, `font-weight`, `font-style`, `letter-spacing`, `line-height`, `text-align`, `text-transform`, `text-shadow`, `text-decoration`, `white-space`, `text-overflow`, `line-clamp` |
 | Images | `object-fit`, `image-rendering: pixelated` (the default for `image`) |
 | Bars | `accent-color` on the bar colors its fill (or style `bar > fill` directly) |
+
+A box only takes taps while it can be seen. Boxes at `visibility: hidden`, at
+`opacity: 0` (or inside a box at `opacity: 0`) and at `pointer-events: none` let taps
+fall through to whatever is underneath. The check uses the target value, so a box
+fading out stops taking taps as soon as its class changes. `pointer-events` inherits,
+so a child can set `pointer-events: auto` to take taps inside a `none` parent.
 
 `display: stack` is GBADuo-specific: children are layered on top of each other
 at the top-left (like Android's FrameLayout); use `place-items` to center or

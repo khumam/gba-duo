@@ -84,6 +84,7 @@ object Properties {
         def("box-shadow", false, "none", { it.trim().lowercase() == "none" || CssValues.shadow(it) != null })
         def("opacity", false, "1", { v -> CssValues.numberWithUnit(v)?.let { (n, unit) -> unit == "" || unit == "%" } == true })
         def("visibility", true, "visible", keywords("visible", "hidden", "collapse"))
+        def("pointer-events", true, "auto", keywords("auto", "none"))
         def("transform", false, "none", { CssValues.transform(it) != null })
         def("transform-origin", false, "50% 50%", { backgroundPosition(it) != null })
         def("transition", false, "none", { CssValues.transitions(it) != null })

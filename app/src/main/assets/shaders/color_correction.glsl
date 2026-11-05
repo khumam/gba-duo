@@ -2,7 +2,7 @@
 // Shaders read the game through cc(texture2D(...)). ccMode: 0 off, 1 GBA, 2 GBC.
 // The GBA branch is mGBA's gba-color shader (MPL-2.0, https://github.com/mgba-emu/mgba).
 uniform float ccMode;
-// Ambient (Quick menu > Ambient colour): the pack's colour grade (game.lua's ambient()) on the plain picture. 0 off, 1 on.
+// Ambient (the pack's button, per game): the pack's colour grade (game.lua's ambient()) on the plain picture. 0 off, 1 on.
 uniform float ccAmbient;
 // The pack's grade: [0] saturation, contrast, brightness, sun slope; [1] tint r, g, b, vignette; [2] vignette colour r, g, b.
 uniform vec4 ccLook[3];

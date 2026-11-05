@@ -246,11 +246,16 @@ static int l_mem_s32(lua_State* L) {
     return 1;
 }
 
+/* Bigger reads error rather than come back short: read in chunks. */
+#define MEM_READ_MAX 65536
+
 static int l_mem_read(lua_State* L) {
     uint32_t addr = (uint32_t) luaL_checkinteger(L, 1);
     lua_Integer n = luaL_checkinteger(L, 2);
     if (n < 0) n = 0;
-    if (n > 65536) n = 65536;
+    if (n > MEM_READ_MAX) {
+        return luaL_error(L, "mem.read: %d bytes at most per call (asked for %I)", MEM_READ_MAX, n);
+    }
     charge(L, (size_t) n);
     if (n == 0) {
         lua_pushliteral(L, "");

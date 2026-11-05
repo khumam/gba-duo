@@ -5,7 +5,7 @@ import java.io.File
 
 /**
  * Every per-game setting in one JSON object, `<game dir>/settings.json`: the current save
- * slot (`"slot"`), the shader (`"shader"`), the color correction (`"color"`), the wide view (`"wide"`) and whatever comes next. Pure, no Android.
+ * slot (`"slot"`), the shader (`"shader"`), the color correction (`"color"`), the wide view (`"wide"`), ambient (`"ambient"`) and whatever comes next. Pure, no Android.
  *
  * A missing or broken file reads as empty. [put] changes one key and keeps all the others;
  * it writes a temp file and renames it, so a crash never leaves half a file.
@@ -42,6 +42,10 @@ object GameSettingsKeys {
     const val WIDE = "wide"
     const val WIDE_ON = "on"
     const val WIDE_EXTRA = "extra"
+
+    /** Ambient (the pack's look from game.lua's ambient()): `on`, or absent for off. Only the pack's button changes it. */
+    const val AMBIENT = "ambient"
+    const val AMBIENT_ON = "on"
 
     /** Artwork lock: absent = scraping may change it, `none` = player removed it, `picked` = player chose it. */
     const val ARTWORK = "artwork"

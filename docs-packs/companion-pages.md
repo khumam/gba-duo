@@ -136,6 +136,8 @@ end
 Where the data comes from is up to the pack:
 - **Game RAM:** party stats, moves, HP.
 - **ROM:** `mem.*` reads the cartridge too, e.g. species base stats.
+  `mem.read(addr, n)` returns at most 64 KB per call; asking for more is an error,
+  so read a big table in chunks.
 - **Data files in the pack:** `.lua` modules loaded with `pack.require`, like
   the type chart, or notes from a guide whose license allows it.
 

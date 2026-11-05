@@ -15,6 +15,8 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -138,7 +140,12 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
     if (style.keyword("overflow") == "auto" || style.keyword("overflow") == "scroll") {
         modifier = modifier.verticalScroll(rememberScrollState())
     }
-    node.onClick?.let { onClick ->
+    // A box takes taps only while it can be seen: not `visibility: hidden`, not at
+    // `opacity: 0` (its own or an ancestor's target value, so a fading-out box stops
+    // taking taps at once) and not `pointer-events: none`.
+    val faded = LocalFaded.current || style.opacity <= 0f
+    val tappable = visible && !faded && style.keyword("pointer-events") != "none"
+    node.onClick?.takeIf { tappable }?.let { onClick ->
         val interactions = remember { MutableInteractionSource() }
         val pressed by interactions.collectIsPressedAsState()
         LaunchedEffect(pressed) { tree.setPressed(node, pressed) }
@@ -158,10 +165,15 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
         when {
             text != null -> CssText(text, style, transitions, platform)
             node.isImage -> if (image != null) CssImage(image, style)
-            else -> for (child in node.children) key(child) { CssNode(child, tree, platform) }
+            else -> CompositionLocalProvider(LocalFaded provides faded) {
+                for (child in node.children) key(child) { CssNode(child, tree, platform) }
+            }
         }
     }
 }
+
+/** Inside a box at `opacity: 0`: children can't be seen, so they don't take taps either. */
+private val LocalFaded = compositionLocalOf { false }
 
 @Composable
 private fun CssText(raw: String, style: ComputedStyle, transitions: List<TransitionSpec>, platform: CompanionPlatform) {

@@ -68,7 +68,7 @@ class EmuThread(
     /** The Wide view mode the player chose for this game (it also needs the pack's game.lua to define `wide()`). */
     @Volatile var wideMode = WideMode.OFF
 
-    /** Ambient colour (one setting for every game), here so the companion screen's button shows its state. */
+    /** Ambient for this game, here so the companion screen's button shows its state. */
     @Volatile var ambientOn = false
     private var lightingRequested = false
     private val lookValues = FloatArray(AmbientLook.FIELDS)

@@ -141,15 +141,27 @@ private fun DrawScope.drawBackgroundImage(paint: BoxPaint, image: ImageBitmap) {
     val xs = if (paint.imageRepeatX) generateSequence(x0 - dw * kotlin.math.ceil(x0 / dw)) { it + dw }.takeWhile { it < size.width }.take(MAX_TILES).toList() else listOf(x0)
     val ys = if (paint.imageRepeatY) generateSequence(y0 - dh * kotlin.math.ceil(y0 / dh)) { it + dh }.takeWhile { it < size.height }.take(MAX_TILES).toList() else listOf(y0)
     for (y in ys) for (x in xs) {
+        val (left, width) = tileSpan(x, dw)
+        val (top, height) = tileSpan(y, dh)
         drawImage(
             image,
             srcOffset = IntOffset.Zero,
             srcSize = IntSize(image.width, image.height),
-            dstOffset = IntOffset(x.roundToInt(), y.roundToInt()),
-            dstSize = IntSize(dw.roundToInt(), dh.roundToInt()),
+            dstOffset = IntOffset(left, top),
+            dstSize = IntSize(width, height),
             filterQuality = quality,
         )
     }
+}
+
+/**
+ * Whole-pixel start and size of a tile at [start] with size [size]. Rounding the end
+ * edge rather than the size makes neighbouring tiles share an edge, so a fractional
+ * tile size can't leave 1px gaps or overlaps between them.
+ */
+internal fun tileSpan(start: Float, size: Float): Pair<Int, Int> {
+    val left = start.roundToInt()
+    return left to (start + size).roundToInt() - left
 }
 
 private const val MAX_TILES = 256
