@@ -26,6 +26,7 @@ All optional. The sandbox is the same as `main.lua`'s (`mem`, `gfx`, `lz77`, `lo
 | `init()` | once, after load | set up state. Read-only. |
 | `frame(view)` | after each emulated frame | read and, if allowed, write the game's RAM |
 | `wide(view)` | after each emulated frame, only while **Wide view** is on | describe the world for the wide margins. Read-only. |
+| `ambient()` | four times a second, only while **Ambient** is on | the look of the game: colour grade and light. Read-only. |
 
 `view` is a table: `frame` (the frame counter, `frame()` only), `width` (the picture's width in
 pixels), `height` (the picture's height), `left` and `top` (columns before and rows above the game's
@@ -117,11 +118,37 @@ pack has no `wide()`).
 }
 ```
 
-### Turning ambient colour on and off
+## ambient(): the look of the game
 
-**Ambient colour** is a global setting (one for every game, also in the Quick menu): a richer, warmer colour grade with soft shading (a low sun at the top left, a cool vignette) and drop shadows under sprites, trees and walls, on the
-picture. The app handles the reserved action `ambientView` itself: `"args"` is `"on"`, `"off"` or `"toggle"` (the default).
-Every snapshot carries `_ambient` (1 or 0) and `_ambientLabel` (`ON` or `OFF`). It needs no `wide()`, so every pack can offer it.
+**Ambient** (a setting for every game, in the Quick menu too) gives the picture the pack's own look. The app has the
+effects; the numbers are the pack's, so a pack without `ambient()` gets no look at all (the button shows `N/A`).
+`ambient()` returns a table, or `nil` / `false` for the plain picture here. Every field is optional and its default
+changes nothing, so a field left out is an effect left off:
+
+| Field | Default | What it does |
+|---|---|---|
+| `saturation`, `contrast`, `brightness` | 1 | the colour grade (0 to 3) |
+| `tint` | `{ 1, 1, 1 }` | a multiplier per channel, `{ r, g, b }`, each 0 to 2 |
+| `vignette`, `vignetteColor` | 0, `{ 0, 0, 0 }` | how far (0 to 1) the edges sink toward that multiplier |
+| `sunSlope` | 0 | the top left this much brighter than the bottom right (-1 to 1) |
+| `shadow`, `shadowLength`, `shadowColor` | 0, 8, `{ 1, 1, 1 }` | sprites throw shadows toward the bottom right, up to `shadowLength` game pixels (1 to 16); a full shadow multiplies the picture by `shadowColor` |
+| `rim`, `rimColor` | 0, `{ 1, 1, 1 }` | light added on the edges that face the sun |
+| `crease` | 0 | darkening where things meet the ground |
+| `bloom` | 0 | bright pixels glow |
+| `haze` | 0 | the backdrop sinks into a cool haze |
+| `clouds`, `cloudSize`, `cloudSpeed` | 0, 150, 1 | cloud shadows (in `shadowColor`) drifting over the ground, `cloudSize` game pixels across (16 to 1024), pinned to the map as the camera moves |
+
+The light (`shadow`, `rim`, `crease`, `haze`, `clouds`) knows what stands in front of what: on GBA the app follows
+which of the game's own layers drew each pixel (sprites in front of the backgrounds, the backgrounds by priority). On
+GB and GBC only `shadow` works, from dark outlines. The app asks again four times a second, so the look can follow the
+place: return another table indoors, in a cave, at night. Keep it in a file of its own and let `game.lua` hand it over,
+like `ambient = pack.require("ambient").ambient`; `pokemon-emerald-companion/ambient.lua` is the example (clouds only
+under an open sky, read from the map's type).
+
+### Turning Ambient on and off
+
+The app handles the reserved action `ambientView` itself: `"args"` is `"on"`, `"off"` or `"toggle"` (the default).
+Every snapshot carries `_ambient` (1 or 0) and `_ambientLabel` (`ON`, `OFF`, or `N/A` when the pack has no `ambient()`).
 
 ```json
 {

@@ -85,7 +85,7 @@ struct GbaDuoScript {
     bool writeWindow;
     uint32_t tapBytesLeft;
     /* game.lua: consecutive errors of frame() / wide(); five of either switch it off. */
-    int errorStreak[2];
+    int errorStreak[3];
     bool disabled;
     bool loggedWrite;
 };
@@ -1400,7 +1400,7 @@ const char* gbaduo_game_last_error(void) {
 
 /* ---- game.lua hooks ----------------------------------------------------------- */
 
-enum { HOOK_FRAME = 0, HOOK_WIDE = 1 };
+enum { HOOK_FRAME = 0, HOOK_WIDE = 1, HOOK_AMBIENT = 2 };
 
 bool gbaduo_game_has(const char* hook) {
     activate(SCRIPT_GAME);
@@ -1668,6 +1668,124 @@ bool gbaduo_game_wide(int width, int height, int left, int top, float match, str
     }
     lua_pop(L, 1);
     return ok;
+}
+
+/* ---- ambient(): the look ---------------------------------------------------------- */
+
+/* Number field [name] of the table on top of the stack into [out] (left as it is when absent); false (error set) when
+ * it is not a number in [min, max]. */
+static bool look_number(lua_State* L, const char* name, float min, float max, float* out) {
+    lua_getfield(L, -1, name);
+    bool ok = true;
+    if (!lua_isnil(L, -1)) {
+        int isNumber = 0;
+        lua_Number v = lua_tonumberx(L, -1, &isNumber);
+        if (!isNumber || v < min || v > max) {
+            char message[128];
+            snprintf(message, sizeof(message), "field '%s' must be a number from %g to %g", name, (double) min, (double) max);
+            set_error(message);
+            ok = false;
+        } else {
+            *out = (float) v;
+        }
+    }
+    lua_pop(L, 1);
+    return ok;
+}
+
+/* Colour field [name] ({ r, g, b } multipliers, 0..2 each) of the table on top of the stack into out[0..2]. */
+static bool look_color(lua_State* L, const char* name, float* out) {
+    lua_getfield(L, -1, name);
+    bool ok = true;
+    if (!lua_isnil(L, -1)) {
+        if (!lua_istable(L, -1) || lua_rawlen(L, -1) != 3) {
+            ok = false;
+        } else {
+            for (int i = 0; i < 3 && ok; i++) {
+                lua_rawgeti(L, -1, i + 1);
+                int isNumber = 0;
+                lua_Number v = lua_tonumberx(L, -1, &isNumber);
+                if (!isNumber || v < 0 || v > 2) ok = false;
+                else out[i] = (float) v;
+                lua_pop(L, 1);
+            }
+        }
+        if (!ok) {
+            char message[128];
+            snprintf(message, sizeof(message), "field '%s' must be { r, g, b }, each from 0 to 2", name);
+            set_error(message);
+        }
+    }
+    lua_pop(L, 1);
+    return ok;
+}
+
+void gbaduo_look_defaults(float* look) {
+    for (int i = 0; i < AMB_FIELDS; i++) look[i] = 0.0f;
+    look[AMB_SATURATION] = look[AMB_CONTRAST] = look[AMB_BRIGHTNESS] = 1.0f;
+    look[AMB_TINT_R] = look[AMB_TINT_G] = look[AMB_TINT_B] = 1.0f;
+    look[AMB_SHADOW_LENGTH] = 8.0f;
+    look[AMB_SHADOW_R] = look[AMB_SHADOW_G] = look[AMB_SHADOW_B] = 1.0f;
+    look[AMB_RIM_R] = look[AMB_RIM_G] = look[AMB_RIM_B] = 1.0f;
+    look[AMB_CLOUD_SIZE] = 150.0f;
+    look[AMB_CLOUD_SPEED] = 1.0f;
+}
+
+static bool read_look(lua_State* L, float* look) {
+    gbaduo_look_defaults(look);
+    return look_number(L, "saturation", 0, 3, &look[AMB_SATURATION]) &&
+           look_number(L, "contrast", 0, 3, &look[AMB_CONTRAST]) &&
+           look_number(L, "brightness", 0, 3, &look[AMB_BRIGHTNESS]) &&
+           look_color(L, "tint", &look[AMB_TINT_R]) &&
+           look_number(L, "vignette", 0, 1, &look[AMB_VIGNETTE]) &&
+           look_color(L, "vignetteColor", &look[AMB_VIGNETTE_R]) &&
+           look_number(L, "sunSlope", -1, 1, &look[AMB_SUN_SLOPE]) &&
+           look_number(L, "shadow", 0, 1, &look[AMB_SHADOW]) &&
+           look_number(L, "shadowLength", 1, 16, &look[AMB_SHADOW_LENGTH]) &&
+           look_color(L, "shadowColor", &look[AMB_SHADOW_R]) &&
+           look_number(L, "rim", 0, 1, &look[AMB_RIM]) &&
+           look_color(L, "rimColor", &look[AMB_RIM_R]) &&
+           look_number(L, "crease", 0, 1, &look[AMB_CREASE]) &&
+           look_number(L, "bloom", 0, 1, &look[AMB_BLOOM]) &&
+           look_number(L, "haze", 0, 1, &look[AMB_HAZE]) &&
+           look_number(L, "clouds", 0, 1, &look[AMB_CLOUDS]) &&
+           look_number(L, "cloudSize", 16, 1024, &look[AMB_CLOUD_SIZE]) &&
+           look_number(L, "cloudSpeed", 0, 10, &look[AMB_CLOUD_SPEED]);
+}
+
+int gbaduo_game_ambient(float* look) {
+    activate(SCRIPT_GAME);
+    if (!g_script.L || g_script.disabled) return 0;
+    lua_State* L = g_script.L;
+    g_script.lastError[0] = '\0';
+    if (lua_getglobal(L, "ambient") != LUA_TFUNCTION) {
+        lua_pop(L, 1);
+        return 0;
+    }
+    start_budget(INSTRUCTION_BUDGET_PER_FRAME, TIME_BUDGET_PER_FRAME_MS);
+    g_script.writeWindow = false;
+    g_script.tapBytesLeft = 0;
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        hook_failed(HOOK_AMBIENT, "ambient()", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return -1;
+    }
+    int result = -1;
+    if (lua_isnil(L, -1) || (lua_isboolean(L, -1) && !lua_toboolean(L, -1))) {
+        g_script.errorStreak[HOOK_AMBIENT] = 0; /* the plain picture here: not an error */
+        result = 0;
+    } else if (!lua_istable(L, -1)) {
+        hook_failed(HOOK_AMBIENT, "ambient()", "must return a table, nil or false");
+    } else if (!read_look(L, look)) {
+        char reason[512];
+        snprintf(reason, sizeof(reason), "%s", g_script.lastError);
+        hook_failed(HOOK_AMBIENT, "ambient()", reason);
+    } else {
+        g_script.errorStreak[HOOK_AMBIENT] = 0;
+        result = 1;
+    }
+    lua_pop(L, 1);
+    return result;
 }
 
 /* The table on top of the stack as malloc'd JSON, popped; NULL (with [what] in the error) if too large. */
@@ -2006,6 +2124,15 @@ Java_com_khumam_gbaduo_emu_NativeCore_gameHas(JNIEnv* env, jobject thiz, jstring
     bool has = hookChars && gbaduo_game_has(hookChars);
     if (hookChars) (*env)->ReleaseStringUTFChars(env, hook, hookChars);
     return has ? JNI_TRUE : JNI_FALSE;
+}
+
+/* ambient() into [out] (AMB_FIELDS floats): 1 a look, 0 none here (or no hook), -1 an error (the last good look stays). */
+JNIEXPORT jint JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_gameAmbient(JNIEnv* env, jobject thiz, jfloatArray out) {
+    float look[AMB_FIELDS];
+    int r = gbaduo_game_ambient(look);
+    if (r == 1 && (*env)->GetArrayLength(env, out) >= AMB_FIELDS) (*env)->SetFloatArrayRegion(env, out, 0, AMB_FIELDS, look);
+    return r;
 }
 
 JNIEXPORT jboolean JNICALL

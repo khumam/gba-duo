@@ -16,11 +16,12 @@ object CompanionSnapshot {
         scriptLoaded: Boolean,
         wide: WideState = WideState.NONE,
         ambient: Boolean = false,
+        ambientAvailable: Boolean = true,
     ): Map<String, Any?> {
         val values: MutableMap<String, Any?> = ValuesReader.readAll(manifest.values, memory).toMutableMap()
         values[FRAME_COUNTER_KEY] = frameCounter
         WideControl.put(values, wide)
-        AmbientControl.put(values, ambient)
+        AmbientControl.put(values, ambient, ambientAvailable)
         if (scriptLoaded) {
             val scripted = LuaScript.tick()
             if (scripted != null) {

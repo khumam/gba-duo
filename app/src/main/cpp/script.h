@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "wide.h"
+#include "ambient_look.h"
 
 struct lua_State;
 
@@ -77,6 +78,16 @@ bool gbaduo_game_frame(int64_t frameCounter, int width, int height, int left, in
  * budget (the reason in gbaduo_game_last_error()).
  */
 bool gbaduo_game_wide(int width, int height, int left, int top, float match, struct WideWorld* out);
+
+/**
+ * Calls ambient() (read-only, no arguments): the look of the game while Ambient is on, a table of optional fields (see
+ * ambient_look.h). 1 with [look] (AMB_FIELDS floats) filled, absent fields at their defaults; 0 for nil/false or no
+ * hook (the plain picture); -1 for an error, a wrong field or the budget (the reason in gbaduo_game_last_error()).
+ */
+int gbaduo_game_ambient(float* look);
+
+/** [look] (AMB_FIELDS floats) at the defaults: a look that changes nothing. */
+void gbaduo_look_defaults(float* look);
 
 /** For tests: a malloc'd copy of the ARGB8888 image for a "gfx:..." key, or NULL. */
 uint32_t* gbaduo_script_image(const char* key, int* width, int* height);

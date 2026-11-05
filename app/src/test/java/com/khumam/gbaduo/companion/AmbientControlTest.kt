@@ -32,4 +32,11 @@ class AmbientControlTest {
         assertEquals(0L, off["_ambient"])
         assertEquals("OFF", off["_ambientLabel"])
     }
+
+    @Test
+    fun aPackWithoutALookIsNotAvailable() {
+        val values = mutableMapOf<String, Any?>().also { AmbientControl.put(it, true, available = false) }
+        assertEquals(0L, values["_ambient"])
+        assertEquals("N/A", values["_ambientLabel"])
+    }
 }

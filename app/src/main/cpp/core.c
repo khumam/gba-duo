@@ -12,6 +12,7 @@
 #include <mgba-util/vfs.h>
 
 #include "bus.h"
+#include "layers.h"
 #include "script.h"
 #include "wide.h"
 
@@ -296,6 +297,23 @@ Java_com_khumam_gbaduo_emu_NativeCore_runFrame(JNIEnv* env, jobject thiz, jint k
     }
 }
 
+/* Between frames: the layer probe on or off (GBA only). While on, each frame's alpha is its depth. Returns whether it
+ * runs. */
+JNIEXPORT jboolean JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_setLayerDepth(JNIEnv* env, jobject thiz, jboolean on) {
+    if (!g_state.core) return JNI_FALSE;
+    gbaduo_layers_set(g_state.core, on);
+    return gbaduo_layers_on() ? JNI_TRUE : JNI_FALSE;
+}
+
+/* out[0..1] = how far the game's floor has scrolled (see gbaduo_layers_world). */
+JNIEXPORT void JNICALL
+Java_com_khumam_gbaduo_emu_NativeCore_layerWorld(JNIEnv* env, jobject thiz, jintArray out) {
+    int32_t xy[2];
+    gbaduo_layers_world(&xy[0], &xy[1]);
+    (*env)->SetIntArrayRegion(env, out, 0, 2, (const jint*) xy);
+}
+
 JNIEXPORT jobject JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_videoBuffer(JNIEnv* env, jobject thiz) {
     if (!g_state.videoBuffer) {
@@ -500,6 +518,7 @@ Java_com_khumam_gbaduo_emu_NativeCore_unload(JNIEnv* env, jobject thiz) {
     if (!g_state.core) {
         return;
     }
+    gbaduo_layers_set(g_state.core, false);
     mCoreConfigDeinit(&g_state.core->config);
     g_state.core->deinit(g_state.core);
     free(g_state.videoBuffer);

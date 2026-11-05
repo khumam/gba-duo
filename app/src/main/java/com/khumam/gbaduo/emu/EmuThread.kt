@@ -70,6 +70,15 @@ class EmuThread(
 
     /** Ambient colour (one setting for every game), here so the companion screen's button shows its state. */
     @Volatile var ambientOn = false
+    private var lightingRequested = false
+    private val lookValues = FloatArray(AmbientLook.FIELDS)
+    private var look: AmbientLook? = null
+    private var lookCheckedAt = Long.MIN_VALUE / 2
+
+    /** The active pack's game.lua defines `ambient()`: it has a look for Ambient. Set on the emu thread. */
+    @Volatile var ambientAvailable = false
+        private set
+    private val world = IntArray(2)
 
     /** The active pack's game.lua defines `wide()`: Wide view can be turned on. Set on the emu thread. */
     @Volatile var wideAvailable = false
@@ -159,12 +168,17 @@ class EmuThread(
             val speed = if (fastForward && !hardcore) ffMultiplier.coerceAtLeast(2) else 1
 
             applyWide()
+            applyLighting()
             repeat(speed) {
                 NativeCore.runFrame(input.keys())
                 framesRun++
                 runGameFrame()
                 RetroAchievements.frame()
                 audioOut.pump(speed)
+            }
+            if (lightingRequested) {
+                NativeCore.layerWorld(world)
+                gameView.setWorld(world[0], world[1])
             }
             gameView.postFrame()
 
@@ -185,6 +199,30 @@ class EmuThread(
         audioOut.stop()
         RetroAchievements.gameStopped()
         NativeCore.unload()
+    }
+
+    /**
+     * Between frames: while Ambient is on, the pack's look (game.lua's `ambient()`, asked again every
+     * [LOOK_EVERY_FRAMES] so it can follow the place), and the layer probe whenever that look's light needs depth.
+     */
+    private fun applyLighting() {
+        if (ambientOn && ambientAvailable) {
+            if (framesRun - lookCheckedAt >= LOOK_EVERY_FRAMES) {
+                lookCheckedAt = framesRun
+                when (NativeCore.gameAmbient(lookValues)) {
+                    1 -> AmbientLook(lookValues.copyOf()).let { if (it != look) { look = it; gameView.setLook(it) } }
+                    0 -> if (look != null) { look = null; gameView.setLook(null) }
+                    // -1, an error: the last good look stays (five in a row switch game.lua off)
+                }
+            }
+        } else if (look != null) {
+            look = null
+            gameView.setLook(null)
+        }
+        val wanted = look?.needsDepth == true
+        if (wanted == lightingRequested) return
+        lightingRequested = wanted
+        gameView.setDepthLighting(NativeCore.setLayerDepth(wanted))
     }
 
     /** mGBA writes the save file itself shortly after the game saves; notice when it has. */
@@ -249,7 +287,7 @@ class EmuThread(
         val interval = (60 / pack.tickHz).coerceAtLeast(1)
         if (due || framesSinceSnapshot >= interval) {
             framesSinceSnapshot = 0
-            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideMode, wideAvailable), ambientOn)
+            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideMode, wideAvailable), ambientOn, ambientAvailable)
             onSnapshot?.invoke(snapshot)
         }
     }
@@ -309,6 +347,8 @@ class EmuThread(
         gameFrameHook = false
         gameWideHook = false
         wideAvailable = false
+        ambientAvailable = false
+        lookCheckedAt = Long.MIN_VALUE / 2
         NativeCore.unloadGameScript()
 
         val file = pack?.gameScriptFile ?: return
@@ -320,6 +360,7 @@ class EmuThread(
         }
         gameFrameHook = NativeCore.gameHas("frame")
         gameWideHook = NativeCore.gameHas("wide")
+        ambientAvailable = NativeCore.gameHas("ambient")
         wideAvailable = gameWideHook
     }
 
@@ -409,6 +450,9 @@ class EmuThread(
 
         /** About every 3 seconds. */
         const val SAVE_CHECK_FRAMES = 180
+
+        /** Four times a second: the pack's look follows the place (indoors, a cave) without a call every frame. */
+        const val LOOK_EVERY_FRAMES = 15
 
         /** game.lua errors are logged at most this often (5 seconds). */
         const val GAME_ERROR_LOG_FRAMES = 300

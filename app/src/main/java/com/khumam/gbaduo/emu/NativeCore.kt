@@ -22,6 +22,21 @@ object NativeCore {
     /** Direct RGBA8888 buffer, [videoWidth] x [videoHeight], valid until the next [unload]. */
     external fun videoBuffer(): ByteBuffer?
 
+    /**
+     * Between frames: the layer probe on or off (GBA only; false when it cannot run). While on, each pixel's alpha in
+     * [videoBuffer] is its depth: which of the game's own layers drew it (0 the backdrop, 255 the nearest sprite).
+     */
+    external fun setLayerDepth(on: Boolean): Boolean
+
+    /**
+     * Calls game.lua's `ambient()` into [out] ([AmbientLook.FIELDS] floats): 1 a look, 0 none here or no hook (the plain
+     * picture), -1 an error (see [lastGameError]).
+     */
+    external fun gameAmbient(out: FloatArray): Int
+
+    /** out[0..1] = how far the game's floor has scrolled since the layer probe came on, in game pixels. */
+    external fun layerWorld(out: IntArray)
+
     /** Video output size of the loaded game: 240x160 for GBA, 160x144 for GB/GBC. 0 if no core loaded. */
     external fun videoWidth(): Int
 

@@ -130,10 +130,33 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         requestRender()
     }
 
+    /** Where the game's floor is (game pixels, see [NativeCore.layerWorld]), so the clouds stay put on it. Thread-safe. */
+    fun setWorld(x: Int, y: Int) {
+        renderer.worldX = x
+        renderer.worldY = y
+    }
+
+    /** The pack's look while Ambient is on (game.lua's `ambient()`), or null: the plain picture. Thread-safe. */
+    fun setLook(look: AmbientLook?) {
+        renderer.look = look
+        requestRender()
+    }
+
+    /** The frame's alpha is the layer probe's depth map: the ambient light uses it. Thread-safe. */
+    fun setDepthLighting(on: Boolean) {
+        renderer.depthLighting = on
+        requestRender()
+    }
+
     private inner class Renderer(private val assets: AssetManager) : GLSurfaceView.Renderer {
         @Volatile var pendingShader: ShaderPreset = ShaderPreset.OFF
         @Volatile var colorMode = 0f
         @Volatile var ambient = false
+        @Volatile var look: AmbientLook? = null
+        @Volatile var depthLighting = false
+        @Volatile var worldX = 0
+        @Volatile var worldY = 0
+        private val startNanos = System.nanoTime()
         @Volatile var integerScale = false
         @Volatile var aspect = AspectRatio.ORIGINAL
         @Volatile var aspectOverride: AspectRatio? = null
@@ -174,6 +197,8 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var texSizeHandle = -1
         private var colorModeHandle = -1
         private var ambientHandle = -1
+        private var lookHandle = -1
+        private var ambientLookHandle = -1
         private var viewHandle = -1
         private val viewport = IntArray(4)
         private var blitProgram = 0
@@ -189,6 +214,9 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var ambientProgram = 0
         private var ambientPositionHandle = 0
         private var ambientPixelHandle = -1
+        private var ambientDepthHandle = -1
+        private var ambientWorldHandle = -1
+        private var ambientTimeHandle = -1
         private var tiltPositionHandle = 0
         private var tiltAxisHandle = -1
         private var tiltRadiusHandle = -1
@@ -275,7 +303,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             // width, and a linear shrink makes edges pop between sharp and soft as it scrolls. Draw it at a whole multiple
             // first and shrink that by exact area, so pixel edges stay crisp and move smoothly.
             val tilt = tiltShift
-            val shadows = ambient && ambientProgram != 0
+            val shadows = ambient && look?.lit == true && ambientProgram != 0
             if ((tilt != TiltShift.OFF || shadows) && sizeTilt(size.width, size.height)) {
                 // Picture into an offscreen texture; then the ambient shadows (when on), then blurred sideways and up-down
                 // (when tilt-shift is on) onto the screen.
@@ -480,6 +508,13 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             GLES20.glViewport(x, y, size.width, size.height)
             GLES20.glUseProgram(ambientProgram)
             GLES20.glUniform2f(ambientPixelHandle, 1f / videoWidth, 1f / videoHeight)
+            GLES20.glUniform1f(ambientDepthHandle, if (depthLighting) 1f else 0f)
+            look?.let { GLES20.glUniform4fv(ambientLookHandle, 4, it.light, 0) }
+            GLES20.glUniform2f(ambientWorldHandle, worldX.toFloat(), worldY.toFloat())
+            GLES20.glUniform1f(ambientTimeHandle, ((System.nanoTime() - startNanos) / 1_000_000L % 3_600_000L) / 1000f)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture) // the game's own frame, its alpha the depth
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, source)
             drawQuad(ambientPositionHandle)
         }
@@ -502,10 +537,14 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             if (colorModeHandle >= 0) {
                 GLES20.glUniform1f(colorModeHandle, colorMode)
             }
+            val graded = if (ambient) look else null
             if (ambientHandle >= 0) {
-                GLES20.glUniform1f(ambientHandle, if (ambient) 1f else 0f)
+                GLES20.glUniform1f(ambientHandle, if (graded != null) 1f else 0f)
             }
-            if (viewHandle >= 0 && ambient) {
+            if (lookHandle >= 0 && graded != null) {
+                GLES20.glUniform4fv(lookHandle, 3, graded.grade, 0)
+            }
+            if (viewHandle >= 0 && graded != null) {
                 GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, viewport, 0)
                 GLES20.glUniform4f(viewHandle, viewport[0].toFloat(), viewport[1].toFloat(), viewport[2].toFloat(), viewport[3].toFloat())
             }
@@ -613,6 +652,11 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             GLES20.glUseProgram(ambientProgram)
             GLES20.glUniform1i(GLES20.glGetUniformLocation(ambientProgram, "tex"), 0)
             ambientPixelHandle = GLES20.glGetUniformLocation(ambientProgram, "pixel")
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(ambientProgram, "depthTex"), 1)
+            ambientDepthHandle = GLES20.glGetUniformLocation(ambientProgram, "useDepth")
+            ambientLookHandle = GLES20.glGetUniformLocation(ambientProgram, "look")
+            ambientWorldHandle = GLES20.glGetUniformLocation(ambientProgram, "world")
+            ambientTimeHandle = GLES20.glGetUniformLocation(ambientProgram, "time")
         }
 
         /** Gives both offscreen textures this size; false (and the blur off) when the GPU won't render into them. */
@@ -694,6 +738,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             colorModeHandle = GLES20.glGetUniformLocation(program, "ccMode")
             ambientHandle = GLES20.glGetUniformLocation(program, "ccAmbient")
             viewHandle = GLES20.glGetUniformLocation(program, "ccView")
+            lookHandle = GLES20.glGetUniformLocation(program, "ccLook")
             for ((name, value) in preset.uniforms) {
                 val loc = GLES20.glGetUniformLocation(program, name)
                 if (loc >= 0) {

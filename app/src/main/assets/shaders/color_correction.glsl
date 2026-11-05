@@ -2,8 +2,10 @@
 // Shaders read the game through cc(texture2D(...)). ccMode: 0 off, 1 GBA, 2 GBC.
 // The GBA branch is mGBA's gba-color shader (MPL-2.0, https://github.com/mgba-emu/mgba).
 uniform float ccMode;
-// Ambient colour (Quick menu > Ambient colour): the richer, warmer grade Paper view uses, on the plain picture. 0 off, 1 on.
+// Ambient (Quick menu > Ambient colour): the pack's colour grade (game.lua's ambient()) on the plain picture. 0 off, 1 on.
 uniform float ccAmbient;
+// The pack's grade: [0] saturation, contrast, brightness, sun slope; [1] tint r, g, b, vignette; [2] vignette colour r, g, b.
+uniform vec4 ccLook[3];
 uniform vec4 ccView; // x, y, width, height of the viewport being drawn (for the shading, in fragment coordinates)
 
 vec4 ccDevice(vec4 c) {
@@ -31,15 +33,14 @@ vec4 cc(vec4 c) {
         return c;
     }
     float lum = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-    vec3 rgb = mix(vec3(lum), c.rgb, 1.32);
-    rgb = (rgb - 0.5) * 1.06 + 0.5;
-    rgb *= vec3(1.05, 1.02, 0.95);
-    // Shading: a low sun from the top left lights that side and leaves the opposite corner in shadow, and the edges
-    // fall into a cool shade (vignette), so the picture has depth and a centre.
+    vec3 rgb = mix(vec3(lum), c.rgb, ccLook[0].x);
+    rgb = (rgb - 0.5) * ccLook[0].y + 0.5;
+    rgb *= ccLook[1].rgb * ccLook[0].z;
+    // Shading: [sun slope] lights the top left that much more than the bottom right, and the edges sink toward the
+    // vignette colour, so the picture has depth and a centre.
     vec2 uv = (gl_FragCoord.xy - ccView.xy) / max(ccView.zw, vec2(1.0));
-    float sun = 0.86 + 0.24 * (0.5 * (1.0 - uv.x) + 0.5 * uv.y);
+    rgb *= 1.0 + ccLook[0].w * ((0.5 * (1.0 - uv.x) + 0.5 * uv.y) - 0.5);
     float edge = smoothstep(0.38, 1.0, length((uv - 0.5) * vec2(1.0, 1.1)) * 1.45);
-    rgb *= sun;
-    rgb = mix(rgb, rgb * vec3(0.42, 0.40, 0.58), edge * 0.62);
+    rgb = mix(rgb, rgb * ccLook[2].rgb, edge * ccLook[1].w);
     return vec4(clamp(rgb, 0.0, 1.0), c.a);
 }

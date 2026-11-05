@@ -749,6 +749,34 @@ static void wide_markers_are_read_and_checked(void) {
     gbaduo_game_unload();
 }
 
+/* ambient(): the pack's look. Absent fields keep their defaults (a look that changes nothing); a bad one is an error. */
+static void ambient_hook_reads_the_look(void) {
+    float look[AMB_FIELDS];
+    gload("function ambient() return { saturation = 1.1, tint = { 1.02, 1.0, 0.97 }, shadow = 0.5, clouds = 0.3 } end\n");
+    CHECK(gbaduo_game_has("ambient"));
+    CHECK(gbaduo_game_ambient(look) == 1);
+    CHECK(look[AMB_SATURATION] > 1.09f && look[AMB_SATURATION] < 1.11f && look[AMB_CONTRAST] == 1.0f);
+    CHECK(look[AMB_TINT_B] > 0.96f && look[AMB_TINT_B] < 0.98f && look[AMB_SHADOW] == 0.5f && look[AMB_VIGNETTE] == 0.0f);
+    CHECK(look[AMB_CLOUD_SIZE] == 150.0f && look[AMB_SHADOW_LENGTH] == 8.0f);
+    gbaduo_game_unload();
+
+    gload("function ambient() return nil end\n");                   /* the plain picture here */
+    CHECK(gbaduo_game_ambient(look) == 0 && strlen(gbaduo_game_last_error()) == 0);
+    gbaduo_game_unload();
+
+    gload("function ambient() return { saturation = 9 } end\n");
+    CHECK(gbaduo_game_ambient(look) == -1 && strstr(gbaduo_game_last_error(), "saturation") != NULL);
+    gbaduo_game_unload();
+
+    gload("function ambient() return { tint = { 1, 1 } } end\n");
+    CHECK(gbaduo_game_ambient(look) == -1 && strstr(gbaduo_game_last_error(), "tint") != NULL);
+    gbaduo_game_unload();
+
+    gload("function wide() return nil end\n");                      /* no hook: no look */
+    CHECK(!gbaduo_game_has("ambient") && gbaduo_game_ambient(look) == 0);
+    gbaduo_game_unload();
+}
+
 static void wide_nil_is_hidden_not_error(void) {
     struct WideWorld w;
     gload("function wide() return nil end\n");
@@ -841,6 +869,7 @@ int main(void) {
     wide_returns_world();
     wide_markers_are_read_and_checked();
     wide_nil_is_hidden_not_error();
+    ambient_hook_reads_the_look();
     wide_missing_field_is_error();
     frame_error_skips_and_keeps_running();
     budget_is_enforced();
