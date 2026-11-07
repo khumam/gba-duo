@@ -18,6 +18,7 @@ import com.khumam.gbaduo.emu.PerfOverlaySettings
 import com.khumam.gbaduo.emu.TiltShift
 import com.khumam.gbaduo.emu.TiltShiftSettings
 import com.khumam.gbaduo.emu.ScaleSettings
+import com.khumam.gbaduo.emu.ShaderChoice
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.RomLibrary
@@ -113,18 +114,9 @@ class SettingsActivity : PixelPage() {
         savesSummary.text = saveFolder?.let { getString(R.string.save_folder_summary_set, it) } ?: getString(R.string.save_folder_summary_none)
     }
 
-    /** The app-wide shader; a game can still pick its own in Game settings. */
+    /** The app-wide shader (the Shader page); a game can still pick its own in Game settings. */
     private fun chooseShader() {
-        val presets = ShaderPreset.entries
-        AlertDialog.Builder(this)
-            .setTitle(R.string.shader_title)
-            .setSingleChoiceItems(presets.map { it.displayName }.toTypedArray(), presets.indexOf(ShaderSettings.default(this))) { dialog, which ->
-                ShaderSettings.setDefault(this, presets[which])
-                shaderSummary.text = getString(R.string.shader_summary_current, presets[which].displayName)
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        startActivity(Intent(this, ShaderActivity::class.java))
     }
 
     /** The app-wide color correction; a game can still pick its own in Game settings. */

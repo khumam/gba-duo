@@ -1,0 +1,37 @@
+# glslang + SPIRV-Cross, vendored under engine/, as one INTERFACE target `slang_toolchain`.
+# Included by app/src/main/cpp/CMakeLists.txt (Android) and by app/src/test/native/slang/CMakeLists.txt (host).
+get_filename_component(GLSLANG_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../engine/glslang" ABSOLUTE)
+get_filename_component(SPIRV_CROSS_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../engine/spirv-cross" ABSOLUTE)
+
+if(NOT EXISTS "${GLSLANG_DIR}/CMakeLists.txt" OR NOT EXISTS "${SPIRV_CROSS_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "glslang / SPIRV-Cross missing under engine/")
+endif()
+
+set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_JS OFF CACHE BOOL "" FORCE)
+set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_CTEST OFF CACHE BOOL "" FORCE)
+set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(SKIP_GLSLANG_INSTALL ON CACHE BOOL "" FORCE)
+add_subdirectory("${GLSLANG_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/glslang" EXCLUDE_FROM_ALL)
+
+set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_MSL OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_CPP OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_C_API OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_UTIL OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_SHARED OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_STATIC ON CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
+add_subdirectory("${SPIRV_CROSS_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/spirv-cross" EXCLUDE_FROM_ALL)
+
+add_library(slang_toolchain INTERFACE)
+target_include_directories(slang_toolchain INTERFACE "${GLSLANG_DIR}" "${SPIRV_CROSS_DIR}")
+target_link_libraries(slang_toolchain INTERFACE glslang SPIRV glslang-default-resource-limits spirv-cross-glsl spirv-cross-core)

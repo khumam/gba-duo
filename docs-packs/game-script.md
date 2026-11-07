@@ -71,7 +71,7 @@ table, every field an integer (bus addresses are plain numbers):
 | `metatiles`, `metatiles2`, `split` | ids below `split` read from `metatiles`, the rest from `metatiles2` (16 bytes each) |
 | `tiles` | 4bpp tile data, 32 bytes a tile (normally VRAM `0x06000000`) |
 | `palette` | 16 banks of 16 BGR555 colours (normally `0x05000000`) |
-| `markers` (optional) | up to 64 `{ x, y, kind }` icons painted over the margins, never over the game's own frame: `x`, `y` is a world pixel (same space as the world's `x`, `y`), `kind` is 1 NPC (white), 2 trainer (red), 3 item (yellow) or 4 door/warp (cyan). Works for single-grid and layered worlds. A bad entry or more than 64 is an error like any other bad field |
+| `markers` (optional) | up to 64 icons painted over the margins, never over the game's own frame: `{ x, y, kind }` with `x`, `y` a world pixel (same space as the world's `x`, `y`) and `kind` 1 NPC (white), 2 trainer or enemy (red), 3 item (yellow) or 4 door/warp (cyan), drawn as a diamond centred on `x`, `y`. Add `tiles`, `palette`, `w`, `h` (and optionally `hflip`) to draw a sprite instead: `tiles` and `palette` are bus addresses of 4bpp tile data in the GBA's 1D order and of 16 BGR555 colours (index 0 clear), `w` x `h` the size in pixels (multiples of 8, 8 to 64), and `x`, `y` the sprite's top-left. A sprite made of several OAM pieces is several markers. Works for single-grid and layered worlds. A bad entry or more than 64 is an error like any other bad field |
 
 A metatile is 8 u16 tile entries: bottom layer TL, TR, BL, BR, then top layer TL, TR, BL, BR.
 A tile entry: bits 0-9 tile, 10 h-flip, 11 v-flip, 12-15 palette bank. A pixel is the top
@@ -162,7 +162,9 @@ Every snapshot carries `_ambient` (1 or 0) and `_ambientLabel` (`ON`, `OFF`, or 
 `zelda-the-minish-cap-companion/game.lua` is the two-layer example (camera and room origin from
 `gRoomControls`, layers from `gMapTop` / `gMapBottom`). `golden-sun-companion/game.lua` is the
 three-layer one with u32 cells: one grid in EWRAM holds the three BG layers side by side, so each
-layer's `grid` starts at its block of columns and all three share the same `x`, `y`. `pokemon-firered-companion/game.lua` is a worked example (FireRed 1.0, also `markers`: the map's NPCs, trainers, items and doors read from the ROM event table, hidden once their save flag is set): it reads the map the
+layer's `grid` starts at its block of columns and all three share the same `x`, `y`. Markers: `pokemon-firered-companion/game.lua` reads the map's NPCs from the ROM event table, `zelda-the-minish-cap-companion/game.lua` walks the game's entity array and draws each enemy and NPC as its real sprite (the OAM piece list from the ROM's frame table, tiles live from OBJ VRAM), and `golden-sun-companion/game.lua` walks the actor array and draws a sprite only while the game has the actor on screen (it reuses its OBJ tile slots), a diamond otherwise.
+
+`pokemon-firered-companion/game.lua` is a worked example (FireRed 1.0, also `markers`: the map's NPCs, trainers, items and doors read from the ROM event table, hidden once their save flag is set): it reads the map the
 game keeps in RAM (`gBackupMapLayout`) and the tilesets from the ROM layout. It follows the camera
 from the BG scroll registers (`mem.u16(0x04000014)`), anchored whenever the player stands still,
 and keeps following across a map connection: the game rebases the tile coordinates there (the

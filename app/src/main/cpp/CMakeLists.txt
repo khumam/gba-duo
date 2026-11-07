@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(gbaduo C)
+project(gbaduo C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 get_filename_component(MGBA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine/mgba" ABSOLUTE)
 
@@ -93,7 +95,11 @@ target_compile_definitions(rcheevos PUBLIC
     RC_HASH_NO_ENCRYPTED
     RC_HASH_NO_ZIP)
 
-add_library(gbaduo SHARED core.c script.c memwrite.c wide.c achievements.c layers.c)
+# glslang + SPIRV-Cross (vendored under engine/) for the libretro slang shader chain.
+include("${CMAKE_CURRENT_SOURCE_DIR}/slang_toolchain.cmake")
+
+add_library(gbaduo SHARED core.c script.c memwrite.c wide.c achievements.c layers.c
+    slang_source.cpp slang_preset.cpp slang_translate.cpp slang_chain_plan.cpp slang_chain.cpp slang_jni.cpp)
 
 target_compile_definitions(gbaduo PRIVATE USE_PTHREADS M_CORE_GBA M_CORE_GB)
 
@@ -103,4 +109,4 @@ target_include_directories(gbaduo PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/mgba/include"
     "${LUA_DIR}/src")
 
-target_link_libraries(gbaduo mgba lua rcheevos android log)
+target_link_libraries(gbaduo mgba lua rcheevos slang_toolchain GLESv3 android log)

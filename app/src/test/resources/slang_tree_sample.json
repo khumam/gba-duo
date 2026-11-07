@@ -1,0 +1,146 @@
+{
+ "sha": "abc123def",
+ "tree": [
+  {
+   "path": "bilinear.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "nearest.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "stock.slang",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "README.md",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "Makefile",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "crt",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "crt/crt-geom.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "crt/crt-easymode.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "crt/shaders",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "crt/shaders/crt-geom.slang",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "crt/crt-effects",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "crt/crt-effects/glow.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "crt/crt-effects/shaders",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "crt/crt-effects/shaders/glow.slang",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "crt/Zebra.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "pixel-art-scaling",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "pixel-art-scaling/sharp-bilinear.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "pixel-art-scaling/textures",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "pixel-art-scaling/textures/lut.png",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "include",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "include/common.inc",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "include/helpers.h",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "spec",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "spec/notes.md",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "handheld",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "handheld/lcd-grid-v2.slangp",
+   "type": "blob",
+   "sha": "x"
+  },
+  {
+   "path": "handheld/shaders",
+   "type": "tree",
+   "sha": "x"
+  },
+  {
+   "path": "handheld/shaders/lcd.slang",
+   "type": "blob",
+   "sha": "x"
+  }
+ ],
+ "truncated": false
+}

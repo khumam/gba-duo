@@ -9,6 +9,7 @@ import android.widget.TextView
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.emu.ColorCorrection
 import com.khumam.gbaduo.emu.ColorSettings
+import com.khumam.gbaduo.emu.ShaderChoice
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.Platform
@@ -65,7 +66,10 @@ class GameSettingsActivity : PixelPage() {
 
     override fun onResume() {
         super.onResume()
-        if (::settings.isInitialized) renderArtwork()
+        if (::settings.isInitialized) {
+            renderArtwork()
+            render()    // the Shader page may have changed this game's shader
+        }
     }
 
     private val platformId get() = Platform.byId(intent.getStringExtra(EXTRA_PLATFORM_ID))
@@ -143,12 +147,12 @@ class GameSettingsActivity : PixelPage() {
     }
 
     /** This game's own shader; Off (or none saved) means it follows the app-wide default. */
-    private fun picked() = ShaderPreset.byId(settings.getString(GameSettingsKeys.SHADER))
+    private fun picked() = ShaderChoice.parse(settings.getString(GameSettingsKeys.SHADER))
 
     /** Off reads as "Default (X)", since an Off game uses the app-wide shader. */
-    private fun label(preset: ShaderPreset) =
-        if (preset == ShaderPreset.OFF) getString(R.string.shader_follow_default, ShaderSettings.default(this).displayName)
-        else preset.displayName
+    private fun label(choice: ShaderChoice) =
+        if (choice == ShaderChoice.OFF) getString(R.string.shader_follow_default, ShaderSettings.default(this).displayName)
+        else choice.displayName
 
     private fun render() {
         shaderSummary.text = label(picked())
@@ -174,18 +178,9 @@ class GameSettingsActivity : PixelPage() {
             .show()
     }
 
-    /** A list of the shaders to choose from; picking one saves it for this game at once. */
+    /** This game's shader, on the Shader page; what it saves is read back when this page shows again. */
     private fun chooseShader() {
-        val presets = ShaderPreset.entries
-        AlertDialog.Builder(this)
-            .setTitle(R.string.game_settings_shader)
-            .setSingleChoiceItems(presets.map(::label).toTypedArray(), presets.indexOf(picked())) { dialog, which ->
-                settings.put(GameSettingsKeys.SHADER, presets[which].takeIf { it != ShaderPreset.OFF }?.id)
-                render()
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        startActivity(Intent(this, ShaderActivity::class.java).putExtra(ShaderActivity.EXTRA_GAME_DIR, intent.getStringExtra(EXTRA_GAME_DIR)))
     }
 
     companion object {

@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.Context
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.emu.EmuThread
+import com.khumam.gbaduo.emu.ShaderChoice
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.TiltShift
 import java.text.DateFormat
@@ -14,12 +15,12 @@ class QuickMenu(
     private val context: Context,
     private val emu: EmuThread,
     private val states: SaveStates,
-    initialShader: ShaderPreset,
+    initialShader: ShaderChoice,
     initialTilt: TiltShift,
     initialIntegerScaling: Boolean,
     private val hardcore: Boolean,
     private val onSetFfSpeed: (Int) -> Unit,
-    private val onSetShader: (ShaderPreset) -> Unit,
+    private val onSetShader: (ShaderChoice) -> Unit,
     private val onSetTiltShift: (TiltShift) -> Unit,
     private val onSetIntegerScaling: (Boolean) -> Unit,
     private val onQuit: () -> Unit,
@@ -62,7 +63,8 @@ class QuickMenu(
     }
 
     private fun cycleShader() {
-        shader = ShaderPreset.next(shader)
+        // The built-ins cycle in order; from a library shader the next step is the first built-in.
+        shader = ShaderChoice.Builtin((shader as? ShaderChoice.Builtin)?.let { ShaderPreset.next(it.preset) } ?: ShaderPreset.entries.first())
         onSetShader(shader)
         emu.paused = false
     }

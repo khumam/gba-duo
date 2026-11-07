@@ -1,0 +1,9 @@
+shaders = 2
+shader0 = stock.slang
+alias0 = First
+shader1 = crt/shaders/crt-geom.slang
+textures = "lut"
+lut = lut.png
+lut_linear = true
+parameters = "CRTgamma"
+CRTgamma = 2.0

@@ -289,4 +289,36 @@
     <string name="pack_writes_confirm">Some companion packs can change a game\'s memory when you tap them, for example to equip an item.\n\nEach pack still asks before its first change in each game, and only acts on your taps. A bad change can crash a game or spoil a save.</string>
     <string name="pack_writes_turn_on">Turn on</string>
     <string name="pack_modifies_game">can modify the game</string>
+
+    <!-- Shader page -->
+    <string name="shader_in_use">In use</string>
+    <string name="shader_from">From</string>
+    <string name="shader_origin_builtin">Built-in</string>
+    <string name="shader_why_game">Set for this game</string>
+    <string name="shader_why_default">Default for every game</string>
+    <string name="shader_why_none">No shader is on</string>
+    <string name="shader_missing">%1$s is not on this device any more, so it is not running.</string>
+    <string name="shader_header_builtin">Built-in</string>
+    <string name="shader_header_library">libretro library</string>
+    <string name="shader_library_entry">libretro shaders</string>
+    <string name="shader_library_summary">Browse the library and download shaders</string>
+    <string name="shader_library_needs_es3">Needs OpenGL ES 3.0 or newer; this device has less</string>
+    <string name="shader_state_in_use">In use</string>
+    <string name="shader_state_downloaded">Downloaded: tap to use</string>
+    <string name="shader_state_get">Tap to download and use</string>
+    <string name="shader_downloading">Downloading %1$d / %2$d…</string>
+    <string name="shader_applied">%1$s is on</string>
+    <string name="shader_list_loading">Loading the shader list…</string>
+    <string name="shader_list_unavailable">The shader list could not be loaded. Built-in shaders still work.</string>
+    <string name="shader_list_refresh">Refresh list</string>
+    <string name="shader_retry">Try again</string>
+    <string name="shader_err_offline">No connection. Shaders you already downloaded still work.</string>
+    <string name="shader_err_http">GitHub did not answer (%1$s). Try again in a while.</string>
+    <string name="shader_err_too_big">A file of this shader is too big to download.</string>
+    <string name="shader_err_install">Could not install the shader: %1$s</string>
+    <string name="shader_remove">Remove</string>
+    <string name="shader_remove_confirm">Remove %1$s from this device?</string>
+    <string name="shader_removed">%1$s removed</string>
+    <string name="shader_start_failed">Shader could not start: %1$s</string>
+    <string name="shader_library_title">Library</string>
 </resources>

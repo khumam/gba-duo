@@ -3,14 +3,22 @@ package com.khumam.gbaduo.emu
 import android.content.Context
 import android.content.res.AssetManager
 import android.opengl.GLES20
+import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.roundToInt
+import java.util.concurrent.Executors
+import javax.microedition.khronos.egl.EGL10
 import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.egl.EGLContext
+import javax.microedition.khronos.egl.EGLDisplay
 import javax.microedition.khronos.opengles.GL10
 
 private const val TAG = "GameView"
@@ -24,6 +32,8 @@ private const val ZOOM_NANOS = 340_000_000L
 /** The picture height [TiltShift.maxRadius] is given for; the blur scales with the picture. */
 private const val TILT_REFERENCE_HEIGHT = 960f
 
+private const val EGL_CONTEXT_CLIENT_VERSION = 0x3098
+
 /**
  * Blit of the emulator's RGBA8888 framebuffer (240x160 for GBA, 160x144 for GB/GBC) in the
  * chosen [AspectRatio], with a swappable post-process shader.
@@ -31,7 +41,7 @@ private const val TILT_REFERENCE_HEIGHT = 960f
 class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(context, attrs) {
 
     @Volatile var frameBuffer: ByteBuffer? = null
-    private val renderer = Renderer(context.assets)
+    private val renderer = Renderer(context.assets, ShaderLibrary.of(context).root)
 
     /** Call before setting [frameBuffer]; the size of the core's video output in pixels. */
     fun setVideoSize(width: Int, height: Int) {
@@ -49,7 +59,19 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
     }
 
     init {
-        setEGLContextClientVersion(2)
+        setEGLContextClientVersion(2)   // the config chooser; the factory below asks for ES 3 first
+        // Library (slang) shaders are translated to GLSL ES 3.x, so try an ES 3 context and fall back to ES 2 (built-in shaders only).
+        setEGLContextFactory(object : EGLContextFactory {
+            override fun createContext(egl: EGL10, display: EGLDisplay, config: EGLConfig): EGLContext {
+                val es3 = egl.eglCreateContext(display, config, EGL10.EGL_NO_CONTEXT, intArrayOf(EGL_CONTEXT_CLIENT_VERSION, 3, EGL10.EGL_NONE))
+                if (es3 != null && es3 != EGL10.EGL_NO_CONTEXT) return es3
+                return egl.eglCreateContext(display, config, EGL10.EGL_NO_CONTEXT, intArrayOf(EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE))
+            }
+
+            override fun destroyContext(egl: EGL10, display: EGLDisplay, context: EGLContext) {
+                egl.eglDestroyContext(display, context)
+            }
+        })
         setRenderer(renderer)
         renderMode = RENDERMODE_WHEN_DIRTY
     }
@@ -82,10 +104,16 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
     }
 
     /** Thread-safe; the switch happens on the GL thread before the next frame draws. */
-    fun setShader(preset: ShaderPreset) {
-        renderer.pendingShader = preset
+    fun setShader(choice: ShaderChoice) {
+        renderer.pendingChoice = choice
         requestRender()
     }
+
+    /** Called on the main thread with the first error line when a library shader could not be loaded; the previous shader stays. */
+    @Volatile var onShaderError: ((String) -> Unit)? = null
+
+    /** True once the GL context is OpenGL ES 3.0 or newer, which library (slang) shaders need. */
+    val supportsLibraryShaders: Boolean get() = renderer.es3
 
     /** Thread-safe; read by the GL thread on the next frame. */
     fun setColorCorrection(correction: ColorCorrection) {
@@ -148,8 +176,9 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         requestRender()
     }
 
-    private inner class Renderer(private val assets: AssetManager) : GLSurfaceView.Renderer {
-        @Volatile var pendingShader: ShaderPreset = ShaderPreset.OFF
+    private inner class Renderer(private val assets: AssetManager, private val libraryRoot: File) : GLSurfaceView.Renderer {
+        @Volatile var pendingChoice: ShaderChoice = ShaderChoice.OFF
+        @Volatile var es3 = false
         @Volatile var colorMode = 0f
         @Volatile var ambient = false
         @Volatile var look: AmbientLook? = null
@@ -191,6 +220,20 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var zoomingIn = false
 
         private var activeShader: ShaderPreset? = null
+        private var activeChoice: ShaderChoice? = null
+
+        // The library shader chain (native). prepare runs off the GL thread; instantiate and render on it.
+        private var chain = 0L
+        private var chainTexture = 0
+        private var chainWidth = 0
+        private var chainHeight = 0
+        private var chainFrame = 0
+        private var chainActive = false
+        private var preparingPath: String? = null
+        @Volatile private var preparedPlan = 0L
+        @Volatile private var prepareError: String? = null
+        private val prepareThread = Executors.newSingleThreadExecutor()
+        private val mainHandler = Handler(Looper.getMainLooper())
         private var program = 0
         private var texture = 0
         private var positionHandle = 0
@@ -231,6 +274,20 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private lateinit var vertexBuffer: FloatBuffer
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+            // A new GL context: the old chain's objects are gone with the old one. Free it before creating anything here,
+            // so deleting its stale names cannot touch a new object, and let the choice be applied again.
+            if (chain != 0L) SlangChain.destroy(chain)
+            chain = 0L
+            chainTexture = 0
+            chainWidth = 0
+            chainHeight = 0
+            activeChoice = null
+            preparingPath = null
+            val major = IntArray(1)
+            GLES20.glGetIntegerv(GLES30.GL_MAJOR_VERSION, major, 0)
+            GLES20.glGetError()
+            es3 = major[0] >= 3
+
             val textures = IntArray(1)
             GLES20.glGenTextures(1, textures, 0)
             texture = textures[0]
@@ -265,10 +322,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         }
 
         override fun onDrawFrame(gl: GL10?) {
-            val wanted = pendingShader
-            if (wanted != activeShader) {
-                applyShader(wanted)
-            }
+            updateShader()
 
             var videoWidth: Int
             var videoHeight: Int
@@ -289,6 +343,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             frameHeight = videoHeight
 
             val size = ScreenFit.viewport(surfaceWidth, surfaceHeight, videoWidth, videoHeight, aspectOverride ?: aspect, integerScale)
+            runChain(videoWidth, videoHeight, size)
             val x = (surfaceWidth - size.width) / 2
             val y = (surfaceHeight - size.height) / 2
             val frameRect = frameRect(x, y, size, videoWidth, videoHeight)
@@ -494,12 +549,15 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
 
         /** The game picture, [size] big, with its corner at ([x], [y]) of framebuffer [fbo] (0: the screen). */
         private fun drawPicture(fbo: Int, x: Int, y: Int, size: ViewportSize, videoWidth: Int, videoHeight: Int) {
-            val sharp = !integerScale && prescaleReady && !ScreenFit.isWholeNumber(size, videoWidth, videoHeight)
+            // The library chain already drew the picture at the viewport's size: show it 1:1, no whole-number prescale.
+            val sharp = !chainActive && !integerScale && prescaleReady && !ScreenFit.isWholeNumber(size, videoWidth, videoHeight)
             if (sharp && drawPrescaled(fbo, size, x, y, videoWidth, videoHeight)) return
 
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
             GLES20.glViewport(x, y, size.width, size.height)
+            if (chainActive) GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, chainTexture)
             drawGame(videoWidth, videoHeight)
+            if (chainActive) GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
         }
 
         /** The ambient shadows: [source] drawn into [fbo] (0: the screen) at ([x], [y]) with soft shadows thrown from its dark outlines. */
@@ -713,6 +771,116 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             return true
         }
 
+        /** Moves from the shader running to the one asked for, keeping the running one when the new one cannot start. */
+        private fun updateShader() {
+            val wanted = pendingChoice
+            if (wanted != activeChoice) {
+                when (val route = ShaderRoute.pick(wanted, es3, chainCreated = false, error = null)) {
+                    is ShaderRoute.Builtin -> {
+                        destroyChain()
+                        applyShader(route.preset)
+                        if (pendingChoice == wanted) activeChoice = wanted
+                        preparingPath = null
+                    }
+                    is ShaderRoute.KeepPrevious -> {
+                        val library = wanted as ShaderChoice.Library
+                        if (!es3) {
+                            reportError(route.error ?: "Shader unavailable")
+                            pendingChoice = activeChoice ?: ShaderChoice.OFF
+                        } else if (preparingPath != library.path) {
+                            preparingPath = library.path
+                            val root = libraryRoot
+                            prepareThread.execute {
+                                val plan = SlangChain.prepare(root, library.path)
+                                if (plan == 0L) prepareError = SlangChain.lastError() else preparedPlan = plan
+                                requestRender()
+                            }
+                        }
+                    }
+                    is ShaderRoute.Chain -> Unit
+                }
+            }
+            val plan = preparedPlan
+            if (plan != 0L) {
+                preparedPlan = 0L
+                finishChain(plan)
+            }
+            val error = prepareError
+            if (error != null) {
+                prepareError = null
+                val failed = preparingPath
+                preparingPath = null
+                if (failed != null && pendingChoice == ShaderChoice.Library(failed)) {
+                    reportError(error)
+                    pendingChoice = activeChoice ?: ShaderChoice.OFF
+                }
+            }
+        }
+
+        /** A prepared plan arrived: build its GL objects, and switch to it only if it is still what the player wants. */
+        private fun finishChain(plan: Long) {
+            val path = preparingPath
+            preparingPath = null
+            if (path == null || pendingChoice != ShaderChoice.Library(path)) {
+                SlangChain.discard(plan)
+                return
+            }
+            val handle = SlangChain.instantiate(plan)
+            if (handle == 0L) {
+                reportError(SlangChain.lastError())
+                pendingChoice = activeChoice ?: ShaderChoice.OFF
+                return
+            }
+            destroyChain()
+            chain = handle
+            chainFrame = 0
+            applyShader(ShaderPreset.OFF)   // the chain's picture is shown by the plain program, so colour, ambient and tilt-shift still apply
+            activeChoice = ShaderChoice.Library(path)
+        }
+
+        private fun destroyChain() {
+            if (chain != 0L) SlangChain.destroy(chain)
+            chain = 0L
+            chainActive = false
+        }
+
+        private fun reportError(message: String) {
+            val first = message.lineSequence().firstOrNull { it.isNotBlank() } ?: message
+            Log.e(TAG, "Library shader: $first")
+            mainHandler.post { onShaderError?.invoke(first) }
+        }
+
+        /** Draws the frame through the chain into [chainTexture], sized to the viewport; sets [chainActive]. */
+        private fun runChain(videoWidth: Int, videoHeight: Int, size: ViewportSize) {
+            chainActive = false
+            if (chain == 0L || size.width <= 0 || size.height <= 0) return
+            if (chainTexture == 0 || chainWidth != size.width || chainHeight != size.height) {
+                // A new texture for a new size, not a re-specified one: some GPU drivers keep rendering into the old storage
+                // of a texture whose size changes after it has been a framebuffer target.
+                val ids = IntArray(1)
+                if (chainTexture != 0) {
+                    ids[0] = chainTexture
+                    GLES20.glDeleteTextures(1, ids, 0)
+                }
+                GLES20.glGenTextures(1, ids, 0)
+                chainTexture = ids[0]
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, chainTexture)
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, size.width, size.height, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+                )
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+                chainWidth = size.width
+                chainHeight = size.height
+            }
+            SlangChain.render(chain, texture, videoWidth, videoHeight, chainTexture, size.width, size.height, chainFrame++)
+            chainActive = true
+        }
+
         /** Compiles+links [preset]; on failure logs and keeps whatever program was already active. */
         private fun applyShader(preset: ShaderPreset) {
             val newProgram = runCatching { buildProgram(preset) }.getOrElse { error ->
@@ -720,7 +888,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 null
             }
             if (newProgram == null) {
-                pendingShader = activeShader ?: ShaderPreset.OFF
+                pendingChoice = activeChoice ?: ShaderChoice.OFF
                 return
             }
 

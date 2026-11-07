@@ -33,7 +33,7 @@ import com.khumam.gbaduo.emu.GameView
 import com.khumam.gbaduo.emu.InputMapper
 import com.khumam.gbaduo.emu.PerfOverlaySettings
 import com.khumam.gbaduo.emu.ScaleSettings
-import com.khumam.gbaduo.emu.ShaderPreset
+import com.khumam.gbaduo.emu.ShaderChoice
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.emu.TiltShiftSettings
 import com.khumam.gbaduo.library.GameTitle
@@ -77,7 +77,7 @@ class PlayerActivity : Activity() {
     private var topResumed = false
 
     /** This game's shader, from its `settings.json`; Off until the player picks one. */
-    private var savedShader = ShaderPreset.OFF
+    private var savedShader: ShaderChoice = ShaderChoice.OFF
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -136,6 +136,7 @@ class PlayerActivity : Activity() {
         audioOut = AudioOut()
         val gameView = findViewById<GameView>(R.id.game_view)
         gameView.setShader(savedShader)
+        gameView.onShaderError = { message -> Toast.makeText(this, getString(R.string.shader_start_failed, message), Toast.LENGTH_LONG).show() }
         gameView.setColorCorrection(ColorSettings.forGame(this, storage.settings))
         gameView.setIntegerScaling(ScaleSettings.integer(this))
         gameView.setAspectRatio(AspectSettings.default(this))

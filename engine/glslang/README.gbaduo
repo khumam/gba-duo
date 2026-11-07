@@ -1,0 +1,3 @@
+Vendored glslang 15.4.0 (commit 8a85691a0740d390761a1008b4696f57facd02c4), https://github.com/KhronosGroup/glslang
+Licence: see LICENSE.txt (BSD-3 / Apache-2.0 / MIT parts). Used to compile libretro slang shaders to SPIR-V.
+Trimmed: Test/, gtests/, External/, kokoro/ removed. Built without SPIRV-Tools (ENABLE_OPT=OFF), no standalone tools.

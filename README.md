@@ -101,7 +101,7 @@ the world fills all four sides, top and bottom too, so the whole screen is map.
 - **Save folder** - optionally mirror every game's saves to a folder you pick (SD
   card, a synced folder), so backups and moving to another device are file copies.
 - **Fast-forward** - hold **R2**; 2x, 3x or 4x, picked in the menu.
-- **Shaders** - Off, GBA Color, LCD Grid, Scanlines and Scale2x.
+- **Shaders** - Off, LCD Grid, Scanlines and Scale2x built in, plus the libretro slang shader library: browse its folders in the Shader page, download a shader, and use it (translated to OpenGL ES with glslang and SPIRV-Cross).
 - **Tilt-shift** - a soft blur at the top and bottom of the picture (Off, Light, Strong).
 - **Screen options** - integer scaling, aspect ratio (Original, 4:3, 16:9, Stretch) and
   pixel-perfect output.
@@ -266,11 +266,15 @@ The APK lands in `app/build/outputs/apk/release/`.
 ## Credits
 
 <details>
-<summary>mGBA, Lua, AndroidX</summary>
+<summary>mGBA, Lua, glslang, SPIRV-Cross, AndroidX</summary>
 
 - [mGBA](https://mgba.io) by Vicki Pfau (endrift) and contributors runs the games (MPL 2.0;
   source in [`engine/mgba`](https://github.com/mgba-emu/mgba)).
 - [Lua](https://www.lua.org) by PUC-Rio (MIT) runs the companion packs' scripts.
+- [glslang](https://github.com/KhronosGroup/glslang) (BSD-3 / Apache 2.0 / MIT, in [`engine/glslang`](engine/glslang)) and
+  [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) (Apache 2.0, in [`engine/spirv-cross`](engine/spirv-cross))
+  translate libretro's slang shaders for OpenGL ES. The shaders themselves are downloaded on request from
+  [libretro/slang-shaders](https://github.com/libretro/slang-shaders), each under its own license (see its files).
 - AndroidX, Jetpack Compose, Material Components and Kotlin (Apache 2.0).
 - The Harvest Moon pack's memory map comes from
   [Data Crystal](https://datacrystal.tcrf.net/wiki/Harvest_Moon:_Friends_of_Mineral_Town/RAM_map)

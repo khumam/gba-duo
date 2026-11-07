@@ -1,0 +1,3 @@
+Vendored SPIRV-Cross vulkan-sdk-1.4.363.0 (commit f11ba9f0b21ba8fc15153d50a2a1ae31ab1cf8f7), https://github.com/KhronosGroup/SPIRV-Cross
+Licence: Apache-2.0 (see LICENSE). Used to turn SPIR-V into GLSL ES 3.00 for the shader chain.
+Trimmed: shaders*/, reference/, tests-other/, samples/, external/ removed. Built as a static GLSL-only library.
