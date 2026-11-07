@@ -24,6 +24,7 @@ enum AmbientField {
     AMB_CLOUDS,                 /* 0..1: cloud shadows drifting over the ground */
     AMB_CLOUD_SIZE,             /* game pixels across a cloud, 16..1024 */
     AMB_CLOUD_SPEED,            /* 0..10, 1 = a slow drift */
+    AMB_SUN_X,                  /* -1..1: where the sun leans horizontally: -1 top left (the default), 0 straight above, 1 top right */
     AMB_FIELDS
 };
 

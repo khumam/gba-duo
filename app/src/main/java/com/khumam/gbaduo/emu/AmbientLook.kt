@@ -13,7 +13,7 @@ class AmbientLook(val values: FloatArray) {
     val grade: FloatArray = floatArrayOf(
         values[SATURATION], values[CONTRAST], values[BRIGHTNESS], values[SUN_SLOPE],
         values[TINT_R], values[TINT_G], values[TINT_B], values[VIGNETTE],
-        values[VIGNETTE_R], values[VIGNETTE_G], values[VIGNETTE_B], 0f,
+        values[VIGNETTE_R], values[VIGNETTE_G], values[VIGNETTE_B], values[SUN_X],
     )
 
     /** The light for `look[4]` in shaders/ambient/fragment.glsl. */
@@ -21,7 +21,7 @@ class AmbientLook(val values: FloatArray) {
         values[SHADOW], values[SHADOW_LENGTH], values[RIM], values[CREASE],
         values[SHADOW_R], values[SHADOW_G], values[SHADOW_B], values[BLOOM],
         values[RIM_R], values[RIM_G], values[RIM_B], values[HAZE],
-        values[CLOUDS], values[CLOUD_SIZE], values[CLOUD_SPEED], 0f,
+        values[CLOUDS], values[CLOUD_SIZE], values[CLOUD_SPEED], values[SUN_X],
     )
 
     /** The light pass has something to do. */
@@ -64,6 +64,7 @@ class AmbientLook(val values: FloatArray) {
         const val CLOUDS = 23
         const val CLOUD_SIZE = 24
         const val CLOUD_SPEED = 25
-        const val FIELDS = 26
+        const val SUN_X = 26
+        const val FIELDS = 27
     }
 }

@@ -1734,6 +1734,7 @@ void gbaduo_look_defaults(float* look) {
     look[AMB_RIM_R] = look[AMB_RIM_G] = look[AMB_RIM_B] = 1.0f;
     look[AMB_CLOUD_SIZE] = 150.0f;
     look[AMB_CLOUD_SPEED] = 1.0f;
+    look[AMB_SUN_X] = -1.0f;
 }
 
 static bool read_look(lua_State* L, float* look) {
@@ -1755,7 +1756,8 @@ static bool read_look(lua_State* L, float* look) {
            look_number(L, "haze", 0, 1, &look[AMB_HAZE]) &&
            look_number(L, "clouds", 0, 1, &look[AMB_CLOUDS]) &&
            look_number(L, "cloudSize", 16, 1024, &look[AMB_CLOUD_SIZE]) &&
-           look_number(L, "cloudSpeed", 0, 10, &look[AMB_CLOUD_SPEED]);
+           look_number(L, "cloudSpeed", 0, 10, &look[AMB_CLOUD_SPEED]) &&
+           look_number(L, "sunX", -1, 1, &look[AMB_SUN_X]);
 }
 
 int gbaduo_game_ambient(float* look) {

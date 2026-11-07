@@ -1,6 +1,6 @@
 // Ambient, second part: light, as the pack's ambient() says (every strength and colour comes from [look]). With the layer probe on (GBA), the game texture's alpha says which of the game's own
 // layers drew each pixel (0 the backdrop, the backgrounds close together around 0.4-0.6, the sprites from 0.88), so the
-// light knows what stands in front of what: sprites throw soft shadows onto the ground (the sun is at the top left), the
+// light knows what stands in front of what: sprites throw soft shadows onto the ground (the sun is up, leaning left or right as the pack says), the
 // edges that face the sun catch a warm rim, creases at their feet darken, bright pixels bloom and the backdrop sinks into
 // a cool haze. Small steps between backgrounds (one floor split over two of them) cast nothing. Clouds drift over it all,
 // pinned to the floor's scroll ([world]) so they stay on the ground while the camera moves. Without depth
@@ -19,7 +19,7 @@ uniform float useDepth;   // 1 when depthTex's alpha is a depth map
 uniform vec2 world;       // how far the floor has scrolled, game pixels
 uniform float time;       // seconds
 // The pack's light: [0] shadow, shadow length (game px), rim, crease; [1] shadow colour r, g, b, bloom;
-// [2] rim colour r, g, b, haze; [3] clouds, cloud size (game px), cloud speed.
+// [2] rim colour r, g, b, haze; [3] clouds, cloud size (game px), cloud speed, sun x (-1 top left, 0 straight above, 1 top right).
 uniform vec4 look[4];
 
 float luma(vec3 c) {
@@ -49,12 +49,17 @@ float cloud(vec2 p) {
     return smoothstep(0.50, 0.72, n);
 }
 
+// Toward the sun, in game pixels per step: always up, leaning left or right by [look[3].w] (-1 is the old top left).
+vec2 sunDir() {
+    return normalize(vec2(look[3].w, 1.0)) * 1.4142;
+}
+
 vec3 lumaShadows(vec3 c) {
     float lum = luma(c);
     float shade = 0.0;
     for (int i = 1; i <= 4; i++) {
         float reach = float(i);
-        float s = luma(texture2D(tex, texCoord + vec2(-1.0, 1.0) * pixel * reach).rgb);
+        float s = luma(texture2D(tex, texCoord + sunDir() * pixel * reach).rgb);
         // an occluder is a dark pixel that is clearly darker than the one in its shadow
         float occluder = (1.0 - smoothstep(0.10, 0.30, s)) * smoothstep(0.55, 0.30, s / max(lum, 0.06));
         shade = max(shade, occluder * (1.0 - 0.2 * (reach - 1.0)));
@@ -69,8 +74,8 @@ void main() {
         gl_FragColor = vec4(lumaShadows(c), 1.0);
         return;
     }
-    vec2 sun = vec2(-1.0, 1.0);            // toward the sun: up and to the left
-    vec2 side = vec2(1.0, 1.0) * 0.5;      // across the shadow, to soften its edge
+    vec2 sun = sunDir();                   // toward the sun
+    vec2 side = vec2(sun.y, -sun.x) * 0.5; // across the shadow, to soften its edge
     float d = depthAt(texCoord);
 
     // Shadows: something nearer between this pixel and the sun, up to [shadow length] game pixels away, fading with it.

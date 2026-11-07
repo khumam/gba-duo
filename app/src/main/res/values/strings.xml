@@ -206,6 +206,16 @@
     <string name="scraping_remove_all">Remove all covers</string>
     <string name="scraping_remove_all_confirm">Remove the cover from every game? Your artwork folder and SteamGridDB are not touched.</string>
     <string name="scraping_removed_all">All covers removed</string>
+    <string name="game_settings_save">Save data</string>
+    <string name="save_load">Load .sav file</string>
+    <string name="save_load_desc">Replace this game\'s save with a .sav file</string>
+    <string name="save_load_confirm">Loading this file will overwrite the current save of this game%s. The current save is backed up first (game.sav.bak-&lt;time&gt;).</string>
+    <string name="save_load_confirm_device"> on this device</string>
+    <string name="save_load_confirm_folder"> in your save folder</string>
+    <string name="save_load_invalid">Not a save file (empty, or bigger than 1 MB)</string>
+    <string name="save_load_done">Save loaded. The old one was backed up.</string>
+    <string name="save_load_done_unsynced">Save loaded on this device. The save folder can\'t be reached; it gets the save when it\'s back.</string>
+    <string name="save_load_failed">Couldn\'t load the save: %s</string>
     <string name="game_settings_artwork">Cover</string>
     <string name="artwork_from_folder">Cover from your artwork folder</string>
     <string name="artwork_from_sgdb">Cover from SteamGridDB</string>

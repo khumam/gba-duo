@@ -130,7 +130,8 @@ changes nothing, so a field left out is an effect left off:
 | `saturation`, `contrast`, `brightness` | 1 | the colour grade (0 to 3) |
 | `tint` | `{ 1, 1, 1 }` | a multiplier per channel, `{ r, g, b }`, each 0 to 2 |
 | `vignette`, `vignetteColor` | 0, `{ 0, 0, 0 }` | how far (0 to 1) the edges sink toward that multiplier |
-| `sunSlope` | 0 | the top left this much brighter than the bottom right (-1 to 1) |
+| `sunSlope` | 0 | the sun's side this much brighter than the opposite one (-1 to 1) |
+| `sunX` | -1 | where the sun leans horizontally, -1 to 1: -1 the top left (shadows fall to the bottom right), 0 straight above (shadows fall straight down, the top edges catch the light), 1 the top right |
 | `shadow`, `shadowLength`, `shadowColor` | 0, 8, `{ 1, 1, 1 }` | sprites throw shadows toward the bottom right, up to `shadowLength` game pixels (1 to 16); a full shadow multiplies the picture by `shadowColor` |
 | `rim`, `rimColor` | 0, `{ 1, 1, 1 }` | light added on the edges that face the sun |
 | `crease` | 0 | darkening where things meet the ground |

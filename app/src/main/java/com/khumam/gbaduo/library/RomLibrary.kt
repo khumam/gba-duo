@@ -35,7 +35,7 @@ data class LibraryFolder(val uri: Uri, val name: String)
 
 /**
  * Lists `.gba`/`.gb`/`.gbc` files, and `.zip`s holding one, in every user-picked
- * folder (each scanned one level deep) via the Storage Access Framework. [list]
+ * folder (each scanned through its subfolders, up to [MAX_DEPTH] deep) via the Storage Access Framework. [list]
  * does blocking I/O: call it off the main thread.
  */
 class RomLibrary(private val context: Context) {
@@ -103,8 +103,9 @@ class RomLibrary(private val context: Context) {
     private fun collectRomFiles(dir: DocumentFile, depth: Int = 0): List<DocumentFile> {
         val children = dir.listFiles()
         val files = children.filter { it.isFile && it.name?.let(RomArchive::isLibraryFileName) == true }
-        if (depth >= 1) return files
-        val subfolders = children.filter { it.isDirectory }
+        if (depth >= MAX_DEPTH) return files
+        // Hidden folders (.Trash, .thumbnails...) never hold the player's ROMs.
+        val subfolders = children.filter { it.isDirectory && it.name?.startsWith(".") == false }
         return files + subfolders.flatMap { collectRomFiles(it, depth + 1) }
     }
 
@@ -121,6 +122,8 @@ class RomLibrary(private val context: Context) {
     }
 
     companion object {
+        /** How many folders deep a library folder is scanned; a guard against runaway trees. */
+        private const val MAX_DEPTH = 8
         private const val KEY_FOLDERS = "folder_uris"
         private const val KEY_LEGACY_FOLDER = "folder_uri"
     }

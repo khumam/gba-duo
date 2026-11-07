@@ -4,7 +4,7 @@
 uniform float ccMode;
 // Ambient (the pack's button, per game): the pack's colour grade (game.lua's ambient()) on the plain picture. 0 off, 1 on.
 uniform float ccAmbient;
-// The pack's grade: [0] saturation, contrast, brightness, sun slope; [1] tint r, g, b, vignette; [2] vignette colour r, g, b.
+// The pack's grade: [0] saturation, contrast, brightness, sun slope; [1] tint r, g, b, vignette; [2] vignette colour r, g, b, sun x.
 uniform vec4 ccLook[3];
 uniform vec4 ccView; // x, y, width, height of the viewport being drawn (for the shading, in fragment coordinates)
 
@@ -36,10 +36,10 @@ vec4 cc(vec4 c) {
     vec3 rgb = mix(vec3(lum), c.rgb, ccLook[0].x);
     rgb = (rgb - 0.5) * ccLook[0].y + 0.5;
     rgb *= ccLook[1].rgb * ccLook[0].z;
-    // Shading: [sun slope] lights the top left that much more than the bottom right, and the edges sink toward the
+    // Shading: [sun slope] lights the side the sun is on (the top, leaning by sun x) that much more than the other, and the edges sink toward the
     // vignette colour, so the picture has depth and a centre.
     vec2 uv = (gl_FragCoord.xy - ccView.xy) / max(ccView.zw, vec2(1.0));
-    rgb *= 1.0 + ccLook[0].w * ((0.5 * (1.0 - uv.x) + 0.5 * uv.y) - 0.5);
+    rgb *= 1.0 + ccLook[0].w * dot(uv - 0.5, normalize(vec2(ccLook[2].w, 1.0)) * 0.7071);
     float edge = smoothstep(0.38, 1.0, length((uv - 0.5) * vec2(1.0, 1.1)) * 1.45);
     rgb = mix(rgb, rgb * ccLook[2].rgb, edge * ccLook[1].w);
     return vec4(clamp(rgb, 0.0, 1.0), c.a);

@@ -7,16 +7,20 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 
-/** Every `.slangp` preset in the libretro repo at one commit. */
+/** Every `.slangp` preset in the shader repo at one commit. */
 data class ShaderListing(val sha: String, val presets: List<String>, val fetchedAtMillis: Long)
 
 object ShaderCatalog {
-    private const val REPO = "libretro/slang-shaders"
+    /**
+     * The shader library: GBA Duo's own copy of libretro's slang-shaders, with a few extra preset sets added (sonkun,
+     * crt-guest-advanced). Laid out like the libretro repo, so the relative paths inside presets work the same.
+     */
+    const val REPO = "khumam/gba-duo-slang-shaders"
 
     /** The newest commit's sha, as plain text (what `raw.githubusercontent.com` pins files by). */
     const val COMMIT_URL = "https://api.github.com/repos/$REPO/commits/master"
 
-    /** The whole file tree at [sha]: one request (about 5,800 entries, under the API's size limit today). */
+    /** The whole file tree at [sha]: one request (about 6,700 entries, under the API's size limit today). */
     fun treeUrl(sha: String) = "https://api.github.com/repos/$REPO/git/trees/$sha?recursive=1"
 
     /** Where a file of the repo can be downloaded from at [sha]. */
@@ -80,6 +84,8 @@ class ShaderCatalogStore(
 
     private fun readCache(): ShaderListing? = runCatching {
         val o = JSONObject(cacheFile.readText())
+        // a list kept from another repo (the app used libretro's own before) names commits this one doesn't have
+        if (o.optString("repo") != ShaderCatalog.REPO) return@runCatching null
         val presets = o.getJSONArray("presets")
         ShaderListing(o.getString("sha"), (0 until presets.length()).map { presets.getString(it) }, o.getLong("fetchedAt"))
     }.getOrNull()
@@ -88,6 +94,7 @@ class ShaderCatalogStore(
         runCatching {
             cacheFile.parentFile?.mkdirs()
             val o = JSONObject()
+                .put("repo", ShaderCatalog.REPO)
                 .put("sha", listing.sha)
                 .put("fetchedAt", listing.fetchedAtMillis)
                 .put("presets", org.json.JSONArray(listing.presets))

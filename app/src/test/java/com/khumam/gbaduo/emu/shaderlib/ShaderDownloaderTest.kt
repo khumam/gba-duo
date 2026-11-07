@@ -47,7 +47,7 @@ class ShaderDownloaderTest {
     }
 
     private fun serving(files: Map<String, String>) = FakeHttp { url ->
-        val path = url.removePrefix("https://raw.githubusercontent.com/libretro/slang-shaders/$sha/")
+        val path = url.removePrefix("https://raw.githubusercontent.com/khumam/gba-duo-slang-shaders/$sha/")
         files[path]?.let { HttpResponse(200, it.toByteArray()) } ?: HttpResponse(404, ByteArray(0))
     }
 

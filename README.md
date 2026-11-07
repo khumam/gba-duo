@@ -274,7 +274,9 @@ The APK lands in `app/build/outputs/apk/release/`.
 - [glslang](https://github.com/KhronosGroup/glslang) (BSD-3 / Apache 2.0 / MIT, in [`engine/glslang`](engine/glslang)) and
   [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) (Apache 2.0, in [`engine/spirv-cross`](engine/spirv-cross))
   translate libretro's slang shaders for OpenGL ES. The shaders themselves are downloaded on request from
-  [libretro/slang-shaders](https://github.com/libretro/slang-shaders), each under its own license (see its files).
+  [khumam/gba-duo-slang-shaders](https://github.com/khumam/gba-duo-slang-shaders), a copy of
+  [libretro/slang-shaders](https://github.com/libretro/slang-shaders) with a few presets added (sonkun's, and Guest's
+  crt-guest-advanced), each under its own license (see its files).
 - AndroidX, Jetpack Compose, Material Components and Kotlin (Apache 2.0).
 - The Harvest Moon pack's memory map comes from
   [Data Crystal](https://datacrystal.tcrf.net/wiki/Harvest_Moon:_Friends_of_Mineral_Town/RAM_map)
