@@ -6,6 +6,7 @@ import com.khumam.gbaduo.controls.HotkeyAction
 /** The string for an action's row and messages. */
 fun HotkeyAction.labelRes(): Int = when (this) {
     HotkeyAction.QUICK_MENU -> R.string.hotkey_quick_menu
+    HotkeyAction.COMPANION -> R.string.hotkey_companion
     HotkeyAction.FAST_FORWARD -> R.string.hotkey_fast_forward
     HotkeyAction.QUICK_SAVE -> R.string.hotkey_quick_save
     HotkeyAction.QUICK_LOAD -> R.string.hotkey_quick_load

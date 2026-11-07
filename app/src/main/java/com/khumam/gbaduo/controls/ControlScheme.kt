@@ -4,7 +4,7 @@ import android.view.KeyEvent
 import com.khumam.gbaduo.emu.GbaKeys
 
 /** The things a hotkey can do, in the order the Hotkeys page lists them. */
-enum class HotkeyAction { QUICK_MENU, FAST_FORWARD, QUICK_SAVE, QUICK_LOAD, NEXT_SLOT, PREV_SLOT, EXIT }
+enum class HotkeyAction { QUICK_MENU, COMPANION, FAST_FORWARD, QUICK_SAVE, QUICK_LOAD, NEXT_SLOT, PREV_SLOT, EXIT }
 
 enum class FastForwardMode { HOLD, TOGGLE }
 

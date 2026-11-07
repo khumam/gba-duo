@@ -7,10 +7,14 @@ import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Toast
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.companion.android.CompanionOverlay
 import com.khumam.gbaduo.achievements.AchievementPopups
 import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
@@ -65,6 +69,9 @@ class PlayerActivity : Activity() {
     private var companionScreen: CompanionController? = null
     private var companionPresentation: CompanionPresentation? = null
     private var companionActivity: CompanionActivity.Session? = null
+
+    /** The companion over the game (no second screen, or Settings asks for it); null when it has a screen of its own. */
+    private var companionOverlay: CompanionOverlay? = null
     private var resumed = false
     private var achievementPopups: AchievementPopups? = null
     private var saveMirror: SaveMirror? = null
@@ -240,16 +247,24 @@ class PlayerActivity : Activity() {
         val gameDisplay = display?.displayId ?: CompanionPlacement.MAIN_DISPLAY
         val presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).map { it.displayId }
         val controller = CompanionController(this, header.title, header.gameCode, crc32)
-        when (val target = CompanionPlacement.choose(gameDisplay, presentationDisplays)) {
+        when (val target = CompanionPlacement.choose(gameDisplay, presentationDisplays, preferOverlay = CompanionSettings.overlay(this))) {
             is CompanionPlacement.Target.Presentation -> {
                 val display = displayManager.getDisplay(target.displayId) ?: return
-                companionPresentation = CompanionPresentation(this, display, controller, onKey = ::handleKeyEvent).also { it.show() }
+                val presentation = CompanionPresentation(this, display, controller, onKey = ::handleKeyEvent)
+                try {
+                    presentation.show()
+                } catch (e: WindowManager.InvalidDisplayException) {
+                    // The second screen was listed but went away (or off) before the window opened: over the game instead.
+                    Log.w("PlayerActivity", "Companion screen unavailable, showing it over the game", e)
+                    showOverlayTarget(controller)
+                }
+                if (companionOverlay == null) companionPresentation = presentation
             }
             is CompanionPlacement.Target.Activity -> {
                 companionActivity = CompanionActivity.show(this, target.displayId, controller, onKey = ::handleKeyEvent, onBecameTop = ::keepFocusOnGame)
                     ?: return
             }
-            CompanionPlacement.Target.None -> return
+            CompanionPlacement.Target.Overlay -> showOverlayTarget(controller)
         }
         companionScreen = controller
 
@@ -393,6 +408,7 @@ class PlayerActivity : Activity() {
             KeyEvent.ACTION_UP -> false
             else -> return false
         }
+        if (companionOverlay?.isShowing == true) return overlayKey(event, down)
         if (event.keyCode == KeyEvent.KEYCODE_BACK) {
             if (down && event.repeatCount == 0) openQuickMenu()
             return true
@@ -408,14 +424,63 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /** Puts the companion over the game, hidden until the hotkey or the quick menu calls it up. */
+    private fun showOverlayTarget(controller: CompanionController) {
+        val gameView = findViewById<GameView>(R.id.game_view)
+        val root = gameView.parent as ViewGroup
+        val overlay = CompanionOverlay(this, controller, onDismiss = ::hideCompanion)
+        root.addView(overlay, root.indexOfChild(gameView) + 1, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        companionOverlay = overlay
+        quickMenu?.onShowCompanion = ::showCompanion
+    }
+
+    /** The overlay's hotkey: up when hidden, away when up. Nothing to do when the companion has a screen of its own. */
+    private fun toggleCompanion() {
+        if (companionOverlay?.isShowing == true) hideCompanion() else showCompanion()
+    }
+
+    /** Pauses the game while the companion is up: it is read and tapped, the game can't be seen. */
+    private fun showCompanion() {
+        val overlay = companionOverlay ?: return
+        if (overlay.isShowing) return
+        if (::input.isInitialized) input.releaseAll()
+        emu.paused = true
+        overlay.show()
+        emu.requestSnapshot()
+    }
+
+    private fun hideCompanion() {
+        val overlay = companionOverlay ?: return
+        if (!overlay.isShowing) return
+        overlay.hide()
+        if (::input.isInitialized) input.releaseAll()
+        emu.paused = !resumed
+    }
+
     /** Lifts held keys first, so nothing stays pressed while the menu has the focus. */
     private fun openQuickMenu() {
         if (::input.isInitialized) input.releaseAll()
         quickMenu?.show()
     }
 
+    /**
+     * Buttons while the companion is over the game (touch only): Back and the companion hotkey put it away, nothing
+     * else does anything. The input mapper still sees every key, so a hotkey combo is recognised and nothing is left held.
+     */
+    private fun overlayKey(event: KeyEvent, down: Boolean): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (down && event.repeatCount == 0) hideCompanion()
+            return true
+        }
+        if (!::input.isInitialized) return true
+        val result = input.onKey(event.keyCode, down, event.repeatCount)
+        if (result is KeyResult.Action && result.action == HotkeyAction.COMPANION) hideCompanion()
+        return true
+    }
+
     private fun perform(action: HotkeyAction) {
         if (action == HotkeyAction.QUICK_MENU) return openQuickMenu()
+        if (action == HotkeyAction.COMPANION) return toggleCompanion()
         // A dialog (exit) takes the focus: lift what's held first.
         if (action == HotkeyAction.EXIT) input.releaseAll()
         hotkeys?.perform(action)
@@ -448,7 +513,7 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
-        if (::emu.isInitialized) emu.paused = false
+        if (::emu.isInitialized) emu.paused = companionOverlay?.isShowing == true
         refreshWritePermission?.invoke()
     }
 
@@ -463,6 +528,7 @@ class PlayerActivity : Activity() {
         if (::audioOut.isInitialized) audioOut.release()
         window.decorView.removeCallbacks(reclaimFocus)
         companionPresentation?.dismiss()
+        companionOverlay?.destroy()
         companionActivity?.let(CompanionActivity::close)
         super.onDestroy()
     }

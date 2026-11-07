@@ -23,7 +23,13 @@ class CompanionPlacementTest {
     }
 
     @Test
-    fun aSingleScreenHasNoCompanion() {
-        assertEquals(Target.None, CompanionPlacement.choose(gameDisplayId = 0, presentationDisplayIds = emptyList()))
+    fun aSingleScreenOverlaysTheCompanionOnTheGame() {
+        assertEquals(Target.Overlay, CompanionPlacement.choose(gameDisplayId = 0, presentationDisplayIds = emptyList()))
+    }
+
+    @Test
+    fun theOverlaySettingWinsOverASecondScreen() {
+        assertEquals(Target.Overlay, CompanionPlacement.choose(gameDisplayId = 0, presentationDisplayIds = listOf(4), preferOverlay = true))
+        assertEquals(Target.Overlay, CompanionPlacement.choose(gameDisplayId = 4, presentationDisplayIds = listOf(4), preferOverlay = true))
     }
 }

@@ -31,6 +31,9 @@ class QuickMenu(
     private var integerScaling = initialIntegerScaling
     private var dialog: AlertDialog? = null
 
+    /** Shows the companion over the game; set only when it has no screen of its own (see CompanionOverlay). */
+    var onShowCompanion: (() -> Unit)? = null
+
     /** True while the menu (or its slot picker) is open; it has input focus then. */
     val isShowing: Boolean get() = dialog?.isShowing == true
 
@@ -39,6 +42,7 @@ class QuickMenu(
         // Hardcore mode leaves out save state, load state and fast-forward.
         val entries = buildList<Pair<String, () -> Unit>> {
             add(context.getString(R.string.resume) to { emu.paused = false })
+            onShowCompanion?.let { show -> add(context.getString(R.string.companion_show) to show) }   // it keeps the game paused
             if (!hardcore) {
                 add(context.getString(R.string.save_state) to { showSlotPicker(save = true) })
                 add(context.getString(R.string.load_state) to { showSlotPicker(save = false) })

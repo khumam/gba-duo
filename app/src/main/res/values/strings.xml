@@ -53,6 +53,11 @@
     <string name="controls_ff_hold">Hold</string>
     <string name="controls_ff_toggle">Toggle</string>
     <string name="hotkey_quick_menu">Open quick menu</string>
+    <string name="hotkey_companion">Show or hide companion</string>
+    <string name="companion_show">Companion screen</string>
+    <string name="companion_overlay_title">Companion screen</string>
+    <string name="companion_overlay_off">On the second screen (over the game when there is none)</string>
+    <string name="companion_overlay_on">Over the game: show it from the quick menu or a hotkey</string>
     <string name="hotkey_fast_forward">Fast-forward</string>
     <string name="hotkey_quick_save">Quick save state</string>
     <string name="hotkey_quick_load">Quick load state</string>

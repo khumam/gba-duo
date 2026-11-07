@@ -30,6 +30,7 @@ class HotkeyActions(
                 if (hardcore) activity.runOnUiThread { notes.show(activity.getString(R.string.hardcore_blocked)) } else stateAction(action)
             HotkeyAction.EXIT -> confirmExit()
             HotkeyAction.FAST_FORWARD -> Unit // handled by the InputMapper
+            HotkeyAction.COMPANION -> Unit // handled by PlayerActivity, which owns the overlay
         }
     }
 
