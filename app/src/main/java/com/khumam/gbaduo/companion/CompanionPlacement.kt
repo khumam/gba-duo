@@ -3,7 +3,7 @@ package com.khumam.gbaduo.companion
 /**
  * Where the companion screen goes, given the display the game runs on: the other
  * screen (on the Thor the game can be opened on either one), or, with no other
- * screen or when Settings asks for it, over the game itself, shown by a hotkey.
+ * screen, over the game itself, shown from the quick menu or a hotkey.
  */
 object CompanionPlacement {
 
@@ -27,10 +27,9 @@ object CompanionPlacement {
     /**
      * [presentationDisplayIds] are the displays Android offers for presentations
      * (`DisplayManager.DISPLAY_CATEGORY_PRESENTATION`: secondary displays, possibly
-     * including the game's own). [preferOverlay] (Settings) puts it over the game even when there is another screen.
+     * including the game's own).
      */
-    fun choose(gameDisplayId: Int, presentationDisplayIds: List<Int>, mainDisplayId: Int = MAIN_DISPLAY, preferOverlay: Boolean = false): Target {
-        if (preferOverlay) return Target.Overlay
+    fun choose(gameDisplayId: Int, presentationDisplayIds: List<Int>, mainDisplayId: Int = MAIN_DISPLAY): Target {
         presentationDisplayIds.firstOrNull { it != gameDisplayId && it != mainDisplayId }?.let { return Target.Presentation(it) }
         if (gameDisplayId != mainDisplayId) return Target.Activity(mainDisplayId)
         return Target.Overlay

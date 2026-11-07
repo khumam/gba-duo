@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import com.khumam.gbaduo.R
+import com.khumam.gbaduo.companion.ScreenSetup
 import com.khumam.gbaduo.controls.Binding
 import com.khumam.gbaduo.controls.Change
 import com.khumam.gbaduo.controls.ControlPrefs
@@ -47,7 +48,10 @@ class HotkeysActivity : CapturePage() {
         clearHotkey = button(getString(R.string.controls_clear_hotkey), Pixel.WHITE_SOFT) { setHotkeyButton(null) }
         content.addView(clearHotkey, spaced(10, ViewGroup.LayoutParams.WRAP_CONTENT))
 
+        // The companion hotkey only matters on one screen: with two, the companion has a screen of its own.
+        val dual = ScreenSetup.isDualScreen(this)
         for (action in HotkeyAction.values()) {
+            if (action == HotkeyAction.COMPANION && dual) continue
             val (card, value) = menuCard(R.drawable.ic_settings, Pixel.YELLOW, getString(action.labelRes()), "") { change(action) }
             values[action] = value
             card.setOnLongClickListener { clear(action); true }

@@ -247,7 +247,7 @@ class PlayerActivity : Activity() {
         val gameDisplay = display?.displayId ?: CompanionPlacement.MAIN_DISPLAY
         val presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).map { it.displayId }
         val controller = CompanionController(this, header.title, header.gameCode, crc32)
-        when (val target = CompanionPlacement.choose(gameDisplay, presentationDisplays, preferOverlay = CompanionSettings.overlay(this))) {
+        when (val target = CompanionPlacement.choose(gameDisplay, presentationDisplays)) {
             is CompanionPlacement.Target.Presentation -> {
                 val display = displayManager.getDisplay(target.displayId) ?: return
                 val presentation = CompanionPresentation(this, display, controller, onKey = ::handleKeyEvent)

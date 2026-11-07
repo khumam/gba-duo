@@ -33,7 +33,6 @@ class SettingsActivity : PixelPage() {
     private lateinit var raSummary: TextView
     private lateinit var savesSummary: TextView
     private lateinit var writesSummary: TextView
-    private lateinit var overlaySummary: TextView
     private lateinit var scrapingSummary: TextView
     private lateinit var shaderSummary: TextView
     private lateinit var colorSummary: TextView
@@ -86,8 +85,6 @@ class SettingsActivity : PixelPage() {
         }.second
         writesSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
             getString(R.string.pack_writes_title), getString(R.string.pack_writes_off)) { toggleWrites() }.second
-        overlaySummary = menuCard(R.drawable.ic_settings, Pixel.MINT,
-            getString(R.string.companion_overlay_title), "") { toggleOverlay() }.second
         raSummary = menuCard(R.drawable.ic_trophy, Pixel.MINT,
             getString(R.string.ra_title), getString(R.string.ra_logged_out)) {
             startActivity(Intent(this, RetroAchievementsActivity::class.java))
@@ -104,7 +101,6 @@ class SettingsActivity : PixelPage() {
         val count = RomLibrary(this).folders.size
         foldersSummary.text = if (count == 0) getString(R.string.no_folders_yet) else getString(R.string.rom_folders_summary)
         renderWrites()
-        renderOverlay()
         shaderSummary.text = getString(R.string.shader_summary_current, ShaderSettings.default(this).displayName)
         colorSummary.text = getString(R.string.shader_summary_current, ColorSettings.default(this).displayName)
         aspectSummary.text = getString(R.string.shader_summary_current, AspectSettings.default(this).displayName)
@@ -187,16 +183,6 @@ class SettingsActivity : PixelPage() {
     private fun toggleScale() {
         ScaleSettings.setInteger(this, !ScaleSettings.integer(this))
         renderScale()
-    }
-
-    private fun renderOverlay() {
-        overlaySummary.text = getString(if (CompanionSettings.overlay(this)) R.string.companion_overlay_on else R.string.companion_overlay_off)
-    }
-
-    /** Flips at once; the next game started uses it. */
-    private fun toggleOverlay() {
-        CompanionSettings.setOverlay(this, !CompanionSettings.overlay(this))
-        renderOverlay()
     }
 
     private fun renderWrites() {

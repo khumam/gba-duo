@@ -6,7 +6,6 @@ import android.content.Context
 object CompanionSettings {
     private const val PREFS = "companion"
     private const val KEY_ALLOW_WRITES = "allow_memory_writes"
-    private const val KEY_OVERLAY = "overlay"
 
     /**
      * "Allow packs to write to the game": off by default. While off, no pack can change
@@ -17,16 +16,5 @@ object CompanionSettings {
 
     fun setAllowWrites(context: Context, allowed: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ALLOW_WRITES, allowed).apply()
-    }
-
-    /**
-     * "Companion screen: over the game": off by default, so a second screen gets it. On, the companion is shown over
-     * the game by a hotkey even with a second screen (one-screen devices always work that way).
-     */
-    fun overlay(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_OVERLAY, false)
-
-    fun setOverlay(context: Context, on: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_OVERLAY, on).apply()
     }
 }

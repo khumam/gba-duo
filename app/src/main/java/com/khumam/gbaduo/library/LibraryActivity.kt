@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import com.khumam.gbaduo.companion.ScreenSetup
 import android.os.Handler
 import android.os.Looper
 import android.text.SpannableStringBuilder
@@ -118,6 +119,7 @@ class LibraryActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_library)
         library = RomLibrary(this)
+        ScreenSetup.detect(this)    // one screen or two: decides where the companion goes and what offers to show it
         RetroAchievements.init(this) // logs back in with a stored token, if you've logged in before
         bindViews()
         styleViews()
