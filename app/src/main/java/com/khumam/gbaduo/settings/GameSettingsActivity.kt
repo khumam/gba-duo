@@ -93,7 +93,7 @@ class GameSettingsActivity : PixelPage() {
         val uri = data?.data ?: return
         io.execute {
             val bytes = runCatching {
-                contentResolver.openInputStream(uri)?.use { it.readNBytes(SaveImport.MAX_SIZE + 1) }
+                contentResolver.openInputStream(uri)?.use(SaveImport::readCapped)
             }.getOrNull()
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
@@ -120,8 +120,8 @@ class GameSettingsActivity : PixelPage() {
         val gameDir = File(intent.getStringExtra(EXTRA_GAME_DIR) ?: return)
         io.execute {
             val folder: Uri? = SaveFolder.uri(this)
-            val root = folder?.let { SaveFolder.open(this) }
-            val remote = root?.let { SaveLibrary.gameDir(it, gameDir.parentFile?.name.orEmpty(), gameDir.name, create = true) }
+            val root = folder?.let { runCatching { SaveFolder.open(this) }.getOrNull() }
+            val remote = root?.let { runCatching { SaveLibrary.gameDir(it, gameDir.parentFile?.name.orEmpty(), gameDir.name, create = true) }.getOrNull() }
             val result = SaveImport.import(gameDir, bytes, remote, folder?.toString().orEmpty())
             // A save folder is set but can't be reached: the device's copy is replaced and goes out later.
             val folderMissed = folder != null && remote == null

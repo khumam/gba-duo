@@ -18,23 +18,42 @@ namespace {
 
 constexpr int MAX_UNITS = 16;
 constexpr int MAX_HISTORY = 7;
+constexpr int ERROR_CHECK_FRAMES = 3;   // glGetError can stall a threaded driver: only the first frames are checked
 
 struct Target {
     GLuint tex = 0;
     int w = 0, h = 0;
 };
 
+// What a sampler or a *Size member names, worked out once from its name so the frame loop compares no strings.
+enum class RefKind { None, Input, Original, History, PassOutput, PassFeedback, Lut, Output, Viewport };
+
+struct Ref {
+    RefKind kind = RefKind::None;
+    int index = 0;                  // history depth (1 = previous frame), pass or LUT index
+};
+
+enum class MemberKind { Static, FrameCount, Size };
+
+struct MemberRt {
+    MemberKind kind = MemberKind::Static;
+    int offset = 0;
+    Ref ref;                        // for Size
+};
+
 struct UboRt {
     SlangBlock block;
     GLuint buffer = 0;
     GLuint point = 0;
-    std::vector<uint8_t> data;
+    std::vector<uint8_t> data;      // the static members (MVP, parameters, ...) are written once, at instantiate
+    std::vector<MemberRt> dynamic;  // what changes from frame to frame
 };
 
 struct SamplerRt {
     std::string name;
     int unit = 0;
     GLint loc = -1;
+    Ref ref;
 };
 
 struct PassRt {
@@ -49,17 +68,13 @@ struct PassRt {
     GLenum internalFormat = GL_RGBA8;
     GLenum format = GL_RGBA;
     GLenum type = GL_UNSIGNED_BYTE;
+    GLuint checkedTex = 0;          // the output last found framebuffer-complete, at checkedW x checkedH
+    int checkedW = 0, checkedH = 0;
 };
 
 struct TexRef {
     GLuint tex = 0;
     int w = 1, h = 1;
-};
-
-struct Saved {
-    GLint drawFbo, readFbo, program, activeTexture, arrayBuffer, uniformBuffer, vao, viewport[4];
-    GLint tex[MAX_UNITS];
-    GLboolean blend, depth, cull, scissor;
 };
 
 // Puts back the GL bindings instantiate() touches, so the app's own drawing (client-side vertex arrays, VAO 0) is unaffected.
@@ -138,11 +153,6 @@ void putFloats(std::vector<uint8_t>& data, const SlangMember& m, const float* v,
     std::memcpy(data.data() + m.offset, v, bytes);
 }
 
-void putSize(std::vector<uint8_t>& data, const SlangMember& m, int w, int h) {
-    float v[4] = {static_cast<float>(w), static_cast<float>(h), 1.0f / std::max(w, 1), 1.0f / std::max(h, 1)};
-    putFloats(data, m, v, 4);
-}
-
 bool startsWith(const std::string& s, const char* p) { return s.rfind(p, 0) == 0; }
 bool endsWith(const std::string& s, const char* suffix) {
     size_t n = std::strlen(suffix);
@@ -155,6 +165,9 @@ class SlangChain {
 public:
     explicit SlangChain(SlangChainPlan&& p) : plan(std::move(p)) {}
     ~SlangChain() { release(); }
+
+    // The GL context died with every object in it: free only the CPU side (GL calls would hit the new context).
+    void abandon() { released = true; }
 
     bool instantiate(std::string* error);
     void render(unsigned inTex, int inW, int inH, unsigned outTex, int outW, int outH, uint32_t frame);
@@ -170,14 +183,19 @@ private:
     GLuint vao = 0, vbo = 0, fbo = 0, readFbo = 0, black = 0;
     bool floatOk = false;
     bool released = false;
+    int errorChecks = ERROR_CHECK_FRAMES;
+    uint32_t unitsUsed = 0;                             // texture units some pass binds, to unbind their samplers after
 
     TexRef input, original;
     int viewW = 0, viewH = 0;
 
     void release();
     static GLuint makeTexture(int w, int h, GLenum internalFormat, GLenum format, GLenum type, const void* pixels);
-    bool resolve(const std::string& name, int pass, TexRef* ref, GLuint* sampler);
-    bool sizeFor(const std::string& member, int pass, int* w, int* h);
+    Ref parseRef(const std::string& name, int pass) const;
+    Ref parseSizeRef(const std::string& member, int pass) const;
+    void buildBlock(UboRt& u, int pass);
+    bool resolve(const Ref& ref, int pass, TexRef* out, GLuint* sampler) const;
+    void clearTarget(GLuint tex);
     void allocatePass(PassRt& p, int w, int h, bool last);
     void ensureHistory(int w, int h);
     void fillBlock(UboRt& u, int pass, uint32_t frame);
@@ -327,6 +345,16 @@ bool SlangChain::instantiate(std::string* error) {
         luts.push_back(std::move(r));
     }
 
+    // Now that feedback, aliases and LUTs are known: what every sampler and uniform member reads.
+    for (int i = 0; i < count; i++) {
+        PassRt& p = passes[i];
+        for (SamplerRt& s : p.samplers) {
+            s.ref = parseRef(s.name, i);
+            unitsUsed |= 1u << s.unit;
+        }
+        for (UboRt& u : p.ubos) buildBlock(u, i);
+    }
+
     const uint8_t blackPixel[4] = {0, 0, 0, 255};
     black = makeTexture(1, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, blackPixel);
 
@@ -374,60 +402,91 @@ void SlangChain::release() {
     if (readFbo) glDeleteFramebuffers(1, &readFbo);
 }
 
-bool SlangChain::resolve(const std::string& name, int pass, TexRef* ref, GLuint* sampler) {
-    *sampler = passes[pass].sampler;
-    auto fromTarget = [&](const Target& t) { ref->tex = t.tex; ref->w = t.w; ref->h = t.h; return t.tex != 0; };
-    if (name == "Source") {
-        if (pass == 0) { *ref = input; return true; }
-        return fromTarget(passes[pass - 1].out[passes[pass - 1].cur]);
-    }
-    if (name == "Original") { *ref = original; return true; }
+Ref SlangChain::parseRef(const std::string& name, int pass) const {
+    const int count = static_cast<int>(passes.size());
+    if (name == "Source") return pass == 0 ? Ref{RefKind::Input, 0} : Ref{RefKind::PassOutput, pass - 1};
+    if (name == "Original") return {RefKind::Original, 0};
     if (startsWith(name, "OriginalHistory")) {
         int n = std::atoi(name.c_str() + 15);
-        if (n >= 1 && n <= static_cast<int>(history.size()) && history[n - 1].tex && history[n - 1].w == original.w) {
-            return fromTarget(history[n - 1]);
-        }
-        *ref = original;    // not enough history yet
-        return true;
+        return n >= 1 ? Ref{RefKind::History, n} : Ref{RefKind::Original, 0};
     }
     if (startsWith(name, "PassOutput")) {
         int n = std::atoi(name.c_str() + 10);
-        if (n >= 0 && n < pass) return fromTarget(passes[n].out[passes[n].cur]);
-        return false;
+        return n >= 0 && n < pass ? Ref{RefKind::PassOutput, n} : Ref{};
     }
     if (startsWith(name, "PassFeedback")) {
         int n = std::atoi(name.c_str() + 12);
-        if (n >= 0 && n < static_cast<int>(passes.size()) && passes[n].feedback) return fromTarget(passes[n].out[1 - passes[n].cur]);
-        return false;
+        return n >= 0 && n < count && passes[n].feedback ? Ref{RefKind::PassFeedback, n} : Ref{};
     }
     for (const auto& a : aliases) {
-        if (a.first == name && a.second < pass) return fromTarget(passes[a.second].out[passes[a.second].cur]);
-        if (a.first + "Feedback" == name && passes[a.second].feedback) return fromTarget(passes[a.second].out[1 - passes[a.second].cur]);
+        if (a.first == name && a.second < pass) return {RefKind::PassOutput, a.second};
+        if (a.first + "Feedback" == name && passes[a.second].feedback) return {RefKind::PassFeedback, a.second};
     }
-    for (const LutRt& l : luts) {
-        if (l.id == name) { *sampler = l.sampler; return fromTarget(l.t); }
+    for (size_t i = 0; i < luts.size(); i++) {
+        if (luts[i].id == name) return {RefKind::Lut, static_cast<int>(i)};
     }
-    return false;
+    return {};
 }
 
-bool SlangChain::sizeFor(const std::string& member, int pass, int* w, int* h) {
-    TexRef ref;
-    GLuint unused;
-    std::string sampler;
-    if (member == "SourceSize") sampler = "Source";
-    else if (member == "OriginalSize") sampler = "Original";
-    else if (member == "OutputSize") { *w = passes[pass].out[passes[pass].cur].w; *h = passes[pass].out[passes[pass].cur].h; return true; }
-    else if (member == "FinalViewportSize") { *w = viewW; *h = viewH; return true; }
-    else if (startsWith(member, "OriginalHistorySize")) sampler = "OriginalHistory" + member.substr(19);
-    else if (startsWith(member, "PassOutputSize")) sampler = "PassOutput" + member.substr(14);
-    else if (startsWith(member, "PassFeedbackSize")) sampler = "PassFeedback" + member.substr(16);
-    else if (endsWith(member, "FeedbackSize")) sampler = member.substr(0, member.size() - 12) + "Feedback";
-    else if (endsWith(member, "Size")) sampler = member.substr(0, member.size() - 4);
-    else return false;
-    if (!resolve(sampler, pass, &ref, &unused)) return false;
-    *w = ref.w;
-    *h = ref.h;
-    return true;
+Ref SlangChain::parseSizeRef(const std::string& member, int pass) const {
+    if (member == "SourceSize") return parseRef("Source", pass);
+    if (member == "OriginalSize") return parseRef("Original", pass);
+    if (member == "OutputSize") return {RefKind::Output, pass};
+    if (member == "FinalViewportSize") return {RefKind::Viewport, 0};
+    if (startsWith(member, "OriginalHistorySize")) return parseRef("OriginalHistory" + member.substr(19), pass);
+    if (startsWith(member, "PassOutputSize")) return parseRef("PassOutput" + member.substr(14), pass);
+    if (startsWith(member, "PassFeedbackSize")) return parseRef("PassFeedback" + member.substr(16), pass);
+    if (endsWith(member, "FeedbackSize")) return parseRef(member.substr(0, member.size() - 12) + "Feedback", pass);
+    if (endsWith(member, "Size")) return parseRef(member.substr(0, member.size() - 4), pass);
+    return {};
+}
+
+// Writes the members that never change and lists the ones the frame loop updates.
+void SlangChain::buildBlock(UboRt& u, int pass) {
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    const int bytes = static_cast<int>(u.data.size());
+    for (const SlangMember& m : u.block.members) {
+        if (m.name == "MVP") { putFloats(u.data, m, identity, 16); continue; }
+        if (m.name == "FrameCount") {
+            if (m.size >= 4 && m.offset >= 0 && m.offset + 4 <= bytes) u.dynamic.push_back({MemberKind::FrameCount, m.offset, {}});
+            continue;
+        }
+        if (m.name == "FrameDirection") {
+            int32_t one = 1;
+            if (m.size >= 4 && m.offset >= 0 && m.offset + 4 <= bytes) std::memcpy(u.data.data() + m.offset, &one, 4);
+            continue;
+        }
+        if (m.size == 16 && m.offset >= 0 && m.offset + 16 <= bytes) {
+            Ref ref = parseSizeRef(m.name, pass);
+            if (ref.kind != RefKind::None) { u.dynamic.push_back({MemberKind::Size, m.offset, ref}); continue; }
+        }
+        auto it = plan.params.find(m.name);
+        if (it != plan.params.end()) putFloats(u.data, m, &it->second, 1);
+    }
+}
+
+bool SlangChain::resolve(const Ref& ref, int pass, TexRef* out, GLuint* sampler) const {
+    *sampler = passes[pass].sampler;
+    auto fromTarget = [&](const Target& t) { out->tex = t.tex; out->w = t.w; out->h = t.h; return t.tex != 0; };
+    switch (ref.kind) {
+        case RefKind::Input: *out = input; return true;
+        case RefKind::Original: *out = original; return true;
+        case RefKind::History: {
+            int n = ref.index;
+            if (n <= static_cast<int>(history.size()) && history[n - 1].tex && history[n - 1].w == original.w) {
+                return fromTarget(history[n - 1]);
+            }
+            *out = original;    // not enough history yet
+            return true;
+        }
+        case RefKind::PassOutput: return fromTarget(passes[ref.index].out[passes[ref.index].cur]);
+        case RefKind::PassFeedback: return fromTarget(passes[ref.index].out[1 - passes[ref.index].cur]);
+        case RefKind::Lut: *sampler = luts[ref.index].sampler; return fromTarget(luts[ref.index].t);
+        case RefKind::Output: fromTarget(passes[ref.index].out[passes[ref.index].cur]); return true;  // the last pass has no texture of its own
+        case RefKind::Viewport: out->tex = 0; out->w = viewW; out->h = viewH; return true;
+        case RefKind::None: return false;
+    }
+    return false;
 }
 
 void SlangChain::allocatePass(PassRt& p, int w, int h, bool last) {
@@ -444,7 +503,17 @@ void SlangChain::allocatePass(PassRt& p, int w, int h, bool last) {
         t.tex = makeTexture(w, h, p.internalFormat, p.format, p.type, nullptr);
         t.w = w;
         t.h = h;
+        if (p.feedback) clearTarget(t.tex);     // a feedback pass reads it next frame: black, not old memory
     }
+}
+
+void SlangChain::clearTarget(GLuint tex) {
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(0, 0, 0, 0);                   // the GL default, which the app's own clears rely on
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 }
 
 void SlangChain::ensureHistory(int w, int h) {
@@ -453,35 +522,31 @@ void SlangChain::ensureHistory(int w, int h) {
     for (Target& t : history) {
         if (t.tex) glDeleteTextures(1, &t.tex);
         t.tex = makeTexture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);   // copies of the input: its alpha is no colour (see render)
         t.w = w;
         t.h = h;
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);                 // start from black, not whatever the memory held
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0);
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
+        clearTarget(t.tex);                                     // start from black, not whatever the memory held
     }
     historyW = w;
     historyH = h;
 }
 
+// Only the members that change per frame; buildBlock wrote the rest once. Offsets were bounds-checked there.
 void SlangChain::fillBlock(UboRt& u, int pass, uint32_t frame) {
-    std::fill(u.data.begin(), u.data.end(), 0);
-    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    for (const SlangMember& m : u.block.members) {
-        if (m.name == "MVP") { putFloats(u.data, m, identity, 16); continue; }
-        if (m.name == "FrameCount") {
-            if (m.size >= 4 && m.offset + 4 <= static_cast<int>(u.data.size())) std::memcpy(u.data.data() + m.offset, &frame, 4);
+    for (const MemberRt& m : u.dynamic) {
+        uint8_t* at = u.data.data() + m.offset;
+        if (m.kind == MemberKind::FrameCount) {
+            std::memcpy(at, &frame, 4);
             continue;
         }
-        if (m.name == "FrameDirection") {
-            int32_t one = 1;
-            if (m.size >= 4 && m.offset + 4 <= static_cast<int>(u.data.size())) std::memcpy(u.data.data() + m.offset, &one, 4);
-            continue;
+        TexRef ref;
+        GLuint unused;
+        if (resolve(m.ref, pass, &ref, &unused)) {
+            float v[4] = {static_cast<float>(ref.w), static_cast<float>(ref.h), 1.0f / std::max(ref.w, 1), 1.0f / std::max(ref.h, 1)};
+            std::memcpy(at, v, sizeof(v));
+        } else {
+            std::memset(at, 0, 16);
         }
-        int w = 0, h = 0;
-        if (m.size == 16 && sizeFor(m.name, pass, &w, &h)) { putSize(u.data, m, w, h); continue; }
-        auto it = plan.params.find(m.name);
-        if (it != plan.params.end()) putFloats(u.data, m, &it->second, 1);
     }
 }
 
@@ -489,9 +554,17 @@ void SlangChain::draw(int index, uint32_t frame, unsigned outTex, int w, int h) 
     PassRt& p = passes[index];
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outTex, 0);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        LOGW("pass %d: framebuffer incomplete (%dx%d)", index, w, h);
-        return;
+    // The status check can make the driver wait, so it runs only when the output is a new texture or size.
+    if (outTex != p.checkedTex || w != p.checkedW || h != p.checkedH) {
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            LOGW("pass %d: framebuffer incomplete (%dx%d)", index, w, h);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+            p.checkedTex = 0;
+            return;
+        }
+        p.checkedTex = outTex;
+        p.checkedW = w;
+        p.checkedH = h;
     }
     glViewport(0, 0, w, h);
     glUseProgram(p.program);
@@ -505,16 +578,17 @@ void SlangChain::draw(int index, uint32_t frame, unsigned outTex, int w, int h) 
     for (const SamplerRt& s : p.samplers) {
         TexRef ref;
         GLuint sampler = p.sampler;
-        if (!resolve(s.name, index, &ref, &sampler)) { ref.tex = black; ref.w = ref.h = 1; sampler = p.sampler; }
+        if (!resolve(s.ref, index, &ref, &sampler)) { ref.tex = black; ref.w = ref.h = 1; sampler = p.sampler; }
         glActiveTexture(GL_TEXTURE0 + s.unit);
         glBindTexture(GL_TEXTURE_2D, ref.tex);
         glBindSampler(s.unit, sampler);
-        if (p.cfg.mipmap && ref.tex != black && s.name != "Original" && sampler == p.sampler) glGenerateMipmap(GL_TEXTURE_2D);
+        if (p.cfg.mipmap && ref.tex != black && s.ref.kind != RefKind::Original && sampler == p.sampler) glGenerateMipmap(GL_TEXTURE_2D);
     }
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    static int errorsLogged = 0;
-    for (GLenum e; (e = glGetError()) != GL_NO_ERROR && errorsLogged < 20; errorsLogged++) {
-        LOGW("pass %d (%s): GL error 0x%x after draw (%dx%d)", index, p.cfg.shader.c_str(), e, w, h);
+    if (errorChecks > 0) {
+        for (GLenum e; (e = glGetError()) != GL_NO_ERROR;) {
+            LOGW("pass %d (%s): GL error 0x%x after draw (%dx%d)", index, p.cfg.shader.c_str(), e, w, h);
+        }
     }
     // Do not leave the texture attached: the caller re-specifies the output when the viewport changes, and some GPU
     // drivers keep rendering into the old storage of a texture that is re-specified while attached.
@@ -524,27 +598,16 @@ void SlangChain::draw(int index, uint32_t frame, unsigned outTex, int w, int h) 
 void SlangChain::render(unsigned inTex, int inW, int inH, unsigned outTex, int outW, int outH, uint32_t frame) {
     if (passes.empty() || inW <= 0 || inH <= 0 || outW <= 0 || outH <= 0) return;
 
-    Saved s;
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &s.drawFbo);
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &s.readFbo);
-    glGetIntegerv(GL_CURRENT_PROGRAM, &s.program);
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &s.activeTexture);
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &s.arrayBuffer);
-    glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &s.uniformBuffer);
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &s.vao);
-    glGetIntegerv(GL_VIEWPORT, s.viewport);
-    for (int u = 0; u < MAX_UNITS; u++) {
-        glActiveTexture(GL_TEXTURE0 + u);
-        glGetIntegerv(GL_TEXTURE_BINDING_2D, &s.tex[u]);
-    }
-    s.blend = glIsEnabled(GL_BLEND);
-    s.depth = glIsEnabled(GL_DEPTH_TEST);
-    s.cull = glIsEnabled(GL_CULL_FACE);
-    s.scissor = glIsEnabled(GL_SCISSOR_TEST);
+    // No glGet* here: on a threaded driver each one can wait for the GPU thread. The state is set, then reset to the
+    // known defaults the header promises.
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_SCISSOR_TEST);
+    // The app's frame can carry the layer probe's depth in alpha; to the shaders the picture is opaque.
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, inTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
 
     viewW = outW;
     viewH = outH;
@@ -588,24 +651,22 @@ void SlangChain::render(unsigned inTex, int inW, int inH, unsigned outTex, int o
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
     }
 
-    // Put the GL state back the way the app's own drawing expects it.
-    for (int u = 0; u < MAX_UNITS; u++) {
+    // The defaults the app's own drawing expects (see slang_chain_render in the header).
+    for (int u = MAX_UNITS - 1; u >= 0; u--) {
+        if (!(unitsUsed & (1u << u))) continue;
         glActiveTexture(GL_TEXTURE0 + u);
         glBindSampler(u, 0);
-        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(s.tex[u]));
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
-    glActiveTexture(static_cast<GLenum>(s.activeTexture));
-    glBindVertexArray(static_cast<GLuint>(s.vao));
-    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(s.arrayBuffer));
-    glBindBuffer(GL_UNIFORM_BUFFER, static_cast<GLuint>(s.uniformBuffer));
-    glUseProgram(static_cast<GLuint>(s.program));
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(s.readFbo));
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(s.drawFbo));
-    glViewport(s.viewport[0], s.viewport[1], s.viewport[2], s.viewport[3]);
-    if (s.blend) glEnable(GL_BLEND);
-    if (s.depth) glEnable(GL_DEPTH_TEST);
-    if (s.cull) glEnable(GL_CULL_FACE);
-    if (s.scissor) glEnable(GL_SCISSOR_TEST);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, inTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ALPHA);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (errorChecks > 0) errorChecks--;
 }
 
 SlangChain* slang_chain_instantiate(SlangChainPlan&& plan, std::string* error) {
@@ -620,3 +681,9 @@ void slang_chain_render(SlangChain* chain, unsigned inputTexture, int inputWidth
 }
 
 void slang_chain_destroy(SlangChain* chain) { delete chain; }
+
+void slang_chain_abandon(SlangChain* chain) {
+    if (!chain) return;
+    chain->abandon();
+    delete chain;
+}

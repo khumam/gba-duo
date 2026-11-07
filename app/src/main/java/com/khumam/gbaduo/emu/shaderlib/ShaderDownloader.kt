@@ -6,6 +6,9 @@ import com.khumam.gbaduo.library.artwork.Http
 import com.khumam.gbaduo.library.artwork.SteamGridDb
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 
 /** Paths inside the libretro repo, always relative to its root. */
 internal object ShaderPaths {
@@ -33,49 +36,73 @@ class ShaderDownloader(
     private val library: ShaderLibrary,
     private val tempDir: File,
     private val maxFileBytes: Int = DEFAULT_MAX_FILE_BYTES,
+    private val parallelism: Int = DEFAULT_PARALLELISM,
 ) {
 
     /**
      * Downloads [presetPath] and its dependencies at commit [sha] and installs them, or installs nothing: every file is
      * fetched into a temporary folder first and moved into the library only when all of them arrived.
      * [progress] is called after each file with (files done, files known so far).
+     *
+     * The files are fetched a level at a time ([parallelism] at once: a preset, then everything it names, then what
+     * those name...) and handled in order, so the result and the progress are the same as one at a time.
      */
     fun install(presetPath: String, sha: String, progress: (done: Int, total: Int) -> Unit): Fetch<Unit> {
         if (!ShaderLibrary.isSafePath(presetPath) || !presetPath.endsWith(".slangp")) {
             return Fetch.Failed(Fetch.Reason.INSTALL_FAILED, "Not a library preset: $presetPath")
         }
         val staging = File(tempDir, "install-${System.nanoTime()}")
+        val pool = Executors.newFixedThreadPool(parallelism.coerceAtLeast(1))
         try {
             val seen = LinkedHashSet<String>().apply { add(presetPath) }
-            val queue = ArrayDeque<String>().apply { add(presetPath) }
+            var level = listOf(presetPath)
             var done = 0
-            while (queue.isNotEmpty()) {
-                val path = queue.removeFirst()
-                val bytes = try {
-                    val response = http.get(ShaderCatalog.rawUrl(sha, path), emptyMap())
-                    if (response.code != 200) return Fetch.Failed(Fetch.Reason.DOWNLOAD_FAILED, "$path: HTTP ${response.code}")
-                    if (response.body.size > maxFileBytes) return Fetch.Failed(Fetch.Reason.TOO_BIG, path)
-                    response.body
-                } catch (e: IOException) {
-                    return Fetch.Failed(Fetch.Reason.OFFLINE, e.message)
-                }
-                File(staging, path).apply { parentFile?.mkdirs() }.writeBytes(bytes)
-                if (isText(path)) {
-                    val scan = scan(path, bytes.toString(Charsets.UTF_8))
-                    if (scan.rejected.isNotEmpty()) {
-                        return Fetch.Failed(Fetch.Reason.INSTALL_FAILED, "$path names a file outside the shader folder: ${scan.rejected.first()}")
+            while (level.isNotEmpty()) {
+                val fetches = level.map { path -> pool.submit(Callable { fetch(sha, path) }) }
+                val next = ArrayList<String>()
+                for ((i, path) in level.withIndex()) {
+                    val bytes = when (val fetched = await { fetches[i].get() }) {
+                        is Fetch.Ok -> fetched.value
+                        is Fetch.Failed -> return fetched
                     }
-                    for (dep in scan.deps) {
-                        if (seen.size >= MAX_FILES) return Fetch.Failed(Fetch.Reason.TOO_BIG, "more than $MAX_FILES files")
-                        if (seen.add(dep)) queue.add(dep)
+                    File(staging, path).apply { parentFile?.mkdirs() }.writeBytes(bytes)
+                    if (isText(path)) {
+                        val scan = scan(path, bytes.toString(Charsets.UTF_8))
+                        if (scan.rejected.isNotEmpty()) {
+                            return Fetch.Failed(Fetch.Reason.INSTALL_FAILED, "$path names a file outside the shader folder: ${scan.rejected.first()}")
+                        }
+                        for (dep in scan.deps) {
+                            if (seen.size >= MAX_FILES) return Fetch.Failed(Fetch.Reason.TOO_BIG, "more than $MAX_FILES files")
+                            if (seen.add(dep)) next.add(dep)
+                        }
                     }
+                    progress(++done, seen.size)
                 }
-                progress(++done, seen.size)
+                level = next
             }
             return move(staging, seen)
         } finally {
+            pool.shutdownNow()
             staging.deleteRecursively()
         }
+    }
+
+    private fun fetch(sha: String, path: String): Fetch<ByteArray> = try {
+        val response = http.get(ShaderCatalog.rawUrl(sha, path), emptyMap())
+        when {
+            response.code != 200 -> Fetch.Failed(Fetch.Reason.DOWNLOAD_FAILED, "$path: HTTP ${response.code}")
+            response.body.size > maxFileBytes -> Fetch.Failed(Fetch.Reason.TOO_BIG, path)
+            else -> Fetch.Ok(response.body)
+        }
+    } catch (e: IOException) {
+        Fetch.Failed(Fetch.Reason.OFFLINE, e.message)
+    }
+
+    /** [get]'s result, with what the fetch threw (not IOException: that is a Failed already) thrown here as it was. */
+    private fun <T> await(get: () -> T): T = try {
+        get()
+    } catch (e: ExecutionException) {
+        throw e.cause ?: e
     }
 
     private fun move(staging: File, paths: Collection<String>): Fetch<Unit> {
@@ -99,6 +126,7 @@ class ShaderDownloader(
         /** What [UrlHttp] can read of one file: it stops one byte past this, so a bigger file shows up as over the cap instead of arriving cut short. */
         const val DEFAULT_MAX_FILE_BYTES = SteamGridDb.MAX_DOWNLOAD
         private const val MAX_FILES = 500
+        const val DEFAULT_PARALLELISM = 4
 
         /**
          * Every repo path [presetPath] needs: itself, `#reference`d presets, `shaderN` files, `#include`d files (nested) and

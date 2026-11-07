@@ -21,7 +21,7 @@ std::string toString(JNIEnv* env, jstring s) {
 
 extern "C" {
 
-JNIEXPORT jstring JNICALL Java_com_khumam_gbaduo_emu_SlangChain_lastError(JNIEnv* env, jobject) {
+JNIEXPORT jstring JNICALL Java_com_khumam_gbaduo_emu_SlangChain_nativeLastError(JNIEnv* env, jobject) {
     return env->NewStringUTF(g_lastError.c_str());
 }
 
@@ -88,6 +88,10 @@ JNIEXPORT void JNICALL Java_com_khumam_gbaduo_emu_SlangChain_render(JNIEnv*, job
 
 JNIEXPORT void JNICALL Java_com_khumam_gbaduo_emu_SlangChain_destroy(JNIEnv*, jobject, jlong chain) {
     slang_chain_destroy(reinterpret_cast<SlangChain*>(chain));
+}
+
+JNIEXPORT void JNICALL Java_com_khumam_gbaduo_emu_SlangChain_abandon(JNIEnv*, jobject, jlong chain) {
+    slang_chain_abandon(reinterpret_cast<SlangChain*>(chain));
 }
 
 }  // extern "C"

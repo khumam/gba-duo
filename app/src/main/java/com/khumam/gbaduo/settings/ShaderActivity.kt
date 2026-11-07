@@ -89,7 +89,7 @@ class ShaderActivity : PixelPage() {
                 when (result) {
                     is Fetch.Ok -> {
                         listing = result.value
-                        tree = ShaderTree(result.value.presets)
+                        tree = treeFor(result.value)
                         listState = ShaderPageModel.ListState.READY
                     }
                     is Fetch.Failed -> listState = ShaderPageModel.ListState.UNAVAILABLE
@@ -104,6 +104,7 @@ class ShaderActivity : PixelPage() {
 
     private fun render() {
         list.removeAllViews()
+        busySummaries.clear()
         var first: View? = null
         for (row in ShaderPageModel.rows(folder, tree, listState, library, inUse())) {
             val view = addRow(row)
@@ -192,10 +193,14 @@ class ShaderActivity : PixelPage() {
             }
         }
         busySummaries[path] = summary
+        downloads[path]?.let { (done, total) -> summary.text = getString(R.string.shader_downloading, done, total) }
         return view
     }
 
     private val busySummaries = HashMap<String, TextView>()
+
+    /** Presets downloading now (UI thread only): files done and known. Rows are rebuilt on every render, so progress is looked up, not kept in a view. */
+    private val downloads = HashMap<String, Pair<Int, Int>>()
 
     private fun addError(text: String, retry: Boolean) {
         list.addView(note(text, top = 8).also { content.removeView(it); it.setTextColor(Pixel.CORAL) }, spaced(8))
@@ -231,23 +236,29 @@ class ShaderActivity : PixelPage() {
 
     private fun downloadAndApply(path: String, name: String) {
         val sha = listing?.sha ?: return
-        val summary = busySummaries[path]
+        if (path in downloads) return       // already on its way: a second tap would fetch it all again
+        downloads[path] = 0 to 1
         io.execute {
             val result = downloader.install(path, sha) { done, total ->
-                runOnUiThread { summary?.text = getString(R.string.shader_downloading, done, total) }
+                runOnUiThread {
+                    if (path !in downloads) return@runOnUiThread
+                    downloads[path] = done to total
+                    busySummaries[path]?.text = getString(R.string.shader_downloading, done, total)
+                }
             }
             runOnUiThread {
+                downloads.remove(path)
                 if (isDestroyed) return@runOnUiThread
                 when (result) {
                     is Fetch.Ok -> apply(ShaderChoice.Library(path))
-                    is Fetch.Failed -> {
-                        summary?.text = failText(result)
-                        summary?.setTextColor(Pixel.CORAL)
+                    is Fetch.Failed -> busySummaries[path]?.let {
+                        it.text = failText(result)
+                        it.setTextColor(Pixel.CORAL)
                     }
                 }
             }
         }
-        summary?.text = getString(R.string.shader_downloading, 0, 1)
+        busySummaries[path]?.text = getString(R.string.shader_downloading, 0, 1)
     }
 
     private fun confirmRemove(path: String, name: String) {
@@ -274,6 +285,12 @@ class ShaderActivity : PixelPage() {
     }
 
     companion object {
+        /** The folder tree of the last list, kept across pages: every folder is its own page and would build it again. */
+        private var lastTree: Pair<ShaderListing, ShaderTree>? = null
+
+        private fun treeFor(listing: ShaderListing): ShaderTree =
+            lastTree?.takeIf { it.first === listing }?.second ?: ShaderTree(listing.presets).also { lastTree = listing to it }
+
         const val EXTRA_GAME_DIR = "game_dir"
         const val EXTRA_FOLDER = "folder"
     }

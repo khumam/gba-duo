@@ -44,8 +44,13 @@ class SlangChain;
 SlangChain* slang_chain_instantiate(SlangChainPlan&& plan, std::string* error);
 
 // GL thread only. Runs the chain on [inputTexture] (inputWidth x inputHeight) into [outputTexture]
-// (outputWidth x outputHeight, RGBA8, already allocated). Leaves the GL state as it found it.
+// (outputWidth x outputHeight, RGBA8, already allocated). Queries no GL state; leaves it at fixed defaults instead:
+// texture unit 0 active with [inputTexture] bound, no sampler objects, VAO 0, no array or uniform buffer, program 0,
+// framebuffer 0, blend, depth test, cull face and scissor test off. The viewport is the last pass's: set your own.
 void slang_chain_render(SlangChain* chain, unsigned inputTexture, int inputWidth, int inputHeight,
                         unsigned outputTexture, int outputWidth, int outputHeight, uint32_t frame);
 
 void slang_chain_destroy(SlangChain* chain);   // GL thread only
+
+// After the GL context was lost: frees the chain without any GL call (its objects went with the context). Any thread.
+void slang_chain_abandon(SlangChain* chain);

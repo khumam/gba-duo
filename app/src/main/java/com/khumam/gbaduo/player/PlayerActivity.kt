@@ -81,6 +81,12 @@ class PlayerActivity : Activity() {
     /** This game's shader, from its `settings.json`; Off until the player picks one. */
     private var savedShader: ShaderChoice = ShaderChoice.OFF
 
+    /** The write-permission question while it is up: one at a time, however often the pack's button is pressed. */
+    private var consentDialog: AlertDialog? = null
+
+    /** Works out the pack's permission button again (Settings may have changed while the player was away); null without a pack. */
+    private var refreshWritePermission: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.decorView.systemUiVisibility = (
@@ -257,6 +263,15 @@ class PlayerActivity : Activity() {
         val fingerprint = if (manifest.canWriteMemory) PackFingerprint.of(packDir) else ""
         emu.writeAccess = writeAccessFor(manifest, storage, fingerprint)
         emu.writePermission = writePermissionFor(manifest, storage, fingerprint)
+        refreshWritePermission = {
+            val now = writePermissionFor(manifest, storage, fingerprint)
+            // Not while the question is up: its answer sets both.
+            if (now != emu.writePermission && consentDialog?.isShowing != true) {
+                emu.writeAccess = writeAccessFor(manifest, storage, fingerprint)   // what the button shows is what holds
+                emu.writePermission = now
+                emu.requestSnapshot()
+            }
+        }
         // Named as the library shows it ("The Legend of Zelda: The Minish Cap"), not by its header code.
         val gameName = GameTitle.display(intent.getStringExtra(EXTRA_ROM_FILE_NAME).orEmpty(), header.title)
         emu.onWriteConsentNeeded = { runOnUiThread { askWriteConsent(manifest, gameName, storage, fingerprint) } }
@@ -302,8 +317,9 @@ class PlayerActivity : Activity() {
     }
 
     /**
-     * The permission button: the player is asked again now, whatever they answered before (a Yes gets its safety save
-     * state like the first time). Nothing to ask when the pack can't change games here at all.
+     * The permission button: the player is asked again now, whatever they answered before. A Yes gets a safety save
+     * state only when there is none yet: the one there was made before the pack's first change, and a new one would
+     * already hold the pack's changes. Nothing to ask when the pack can't change games here at all.
      */
     private fun reaskWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage, fingerprint: String) {
         runOnUiThread {
@@ -312,14 +328,14 @@ class PlayerActivity : Activity() {
                 WritePermission.OFF -> Toast.makeText(
                     this, if (hardcore) R.string.pack_permission_hardcore else R.string.pack_permission_off, Toast.LENGTH_LONG,
                 ).show()
-                else -> askWriteConsent(manifest, gameTitle, storage, fingerprint)
+                else -> askWriteConsent(manifest, gameTitle, storage, fingerprint, reask = true)
             }
         }
     }
 
     /** The first time a pack is about to change a game: asks, pausing the game meanwhile. Saved per pack and game, for this version of the pack. */
-    private fun askWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage, fingerprint: String) {
-        if (isFinishing || isDestroyed) return
+    private fun askWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage, fingerprint: String, reask: Boolean = false) {
+        if (isFinishing || isDestroyed || consentDialog?.isShowing == true) return
         val wasPaused = emu.paused
         emu.paused = true
         fun answer(allowed: Boolean) {
@@ -328,16 +344,17 @@ class PlayerActivity : Activity() {
             emu.requestSnapshot()
             emu.answerWriteConsent(
                 if (allowed) EmuThread.WriteAccess.ALLOWED else EmuThread.WriteAccess.NONE,
-                // A save state to go back to, made just before the pack's first change.
-                safetyState = if (allowed) storage.beforePackWriteState.absolutePath else null,
+                // A save state to go back to, made just before the pack's first change (kept when re-asked).
+                safetyState = storage.beforePackWriteState.takeIf { allowed && !(reask && it.exists()) }?.absolutePath,
             )
             emu.paused = wasPaused || !resumed
         }
-        AlertDialog.Builder(this)
+        consentDialog = AlertDialog.Builder(this)
             .setTitle(R.string.pack_write_title)
             .setMessage(getString(R.string.pack_write_message, manifest.name, gameTitle))
             .setPositiveButton(R.string.pack_write_allow) { _, _ -> answer(true) }
             .setNegativeButton(R.string.pack_write_deny) { _, _ -> answer(false) }
+            .setOnDismissListener { consentDialog = null }
             .setCancelable(false)
             .show()
     }
@@ -432,6 +449,7 @@ class PlayerActivity : Activity() {
         super.onResume()
         resumed = true
         if (::emu.isInitialized) emu.paused = false
+        refreshWritePermission?.invoke()
     }
 
     override fun onDestroy() {

@@ -1,7 +1,9 @@
 package com.khumam.gbaduo.storage
 
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,6 +28,22 @@ object SaveImport {
     }
 
     fun isValid(bytes: ByteArray) = bytes.isNotEmpty() && bytes.size <= MAX_SIZE
+
+    /**
+     * Up to [MAX_SIZE] + 1 bytes of [input]: enough for [isValid] to see a file that is too big without reading all of it.
+     * (`InputStream.readNBytes` would do this, but it is API 33 and the app runs on 30.)
+     */
+    fun readCapped(input: InputStream): ByteArray {
+        val limit = MAX_SIZE + 1
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (out.size() < limit) {
+            val n = input.read(buffer, 0, minOf(buffer.size, limit - out.size()))
+            if (n < 0) break
+            out.write(buffer, 0, n)
+        }
+        return out.toByteArray()
+    }
 
     /**
      * @param remote this game's folder inside the save folder, or null when no save folder is used.
@@ -58,6 +76,8 @@ object SaveImport {
                 }
             }
         } catch (e: IOException) {
+            return Result.Failed(e.message ?: e.javaClass.simpleName)
+        } catch (e: RuntimeException) {   // the save folder (SAF) throws SecurityException and the like, not IOException
             return Result.Failed(e.message ?: e.javaClass.simpleName)
         }
         val synced = remote == null || runCatching { SaveSync(FileSyncDir(gameDir), remote, rootId).sync(SaveSync.Direction.BOTH).ok }.getOrDefault(false)

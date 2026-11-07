@@ -82,7 +82,16 @@ class ShaderCatalogStore(
         }
     }
 
-    private fun readCache(): ShaderListing? = runCatching {
+    // Every folder page of the browser loads the list again: the parsed list is kept while the file stays the same.
+    private fun readCache(): ShaderListing? {
+        val key = Triple(cacheFile.absolutePath, cacheFile.lastModified(), cacheFile.length())
+        memo?.let { (k, listing) -> if (k == key) return listing }
+        val listing = parseCache() ?: return null
+        memo = key to listing
+        return listing
+    }
+
+    private fun parseCache(): ShaderListing? = runCatching {
         val o = JSONObject(cacheFile.readText())
         // a list kept from another repo (the app used libretro's own before) names commits this one doesn't have
         if (o.optString("repo") != ShaderCatalog.REPO) return@runCatching null
@@ -99,10 +108,12 @@ class ShaderCatalogStore(
                 .put("fetchedAt", listing.fetchedAtMillis)
                 .put("presets", org.json.JSONArray(listing.presets))
             cacheFile.writeText(o.toString())
+            memo = Triple(cacheFile.absolutePath, cacheFile.lastModified(), cacheFile.length()) to listing
         }
     }
 
     private companion object {
+        @Volatile var memo: Pair<Triple<String, Long, Long>, ShaderListing>? = null
         const val MAX_AGE_MILLIS = 24L * 60 * 60 * 1000
         const val COMMIT_HEADERS_URL = ShaderCatalog.COMMIT_URL
         val SHA_HEADERS = mapOf("Accept" to "application/vnd.github.sha")

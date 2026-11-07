@@ -39,7 +39,7 @@ class ShaderDownloaderTest {
     )
 
     private class FakeHttp(val handler: (String) -> HttpResponse) : Http {
-        val requested = mutableListOf<String>()
+        val requested: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())  // fetched from several threads
         override fun get(url: String, headers: Map<String, String>): HttpResponse {
             requested += url
             return handler(url)

@@ -18,6 +18,7 @@ uniform vec2 pixel;       // one game pixel, in texture coordinates
 uniform float useDepth;   // 1 when depthTex's alpha is a depth map
 uniform vec2 world;       // how far the floor has scrolled, game pixels
 uniform float time;       // seconds
+uniform float gameLuma;   // 1: find outlines in the game's own frame (depthTex), not in [tex], which a library shader drew (scanlines read as outlines)
 // The pack's light: [0] shadow, shadow length (game px), rim, crease; [1] shadow colour r, g, b, bloom;
 // [2] rim colour r, g, b, haze; [3] clouds, cloud size (game px), cloud speed, sun x (-1 top left, 0 straight above, 1 top right).
 uniform vec4 look[4];
@@ -29,6 +30,12 @@ float luma(vec3 c) {
 // The depth at [uv] (picture coordinates): the game texture's rows run top to bottom.
 float depthAt(vec2 uv) {
     return texture2D(depthTex, vec2(uv.x, 1.0 - uv.y)).a;
+}
+
+// The brightness the outline test sees at [uv]: the picture's, or with [gameLuma] the game frame's own.
+float outlineLuma(vec2 uv) {
+    vec3 c = gameLuma > 0.5 ? texture2D(depthTex, vec2(uv.x, 1.0 - uv.y)).rgb : texture2D(tex, uv).rgb;
+    return luma(c);
 }
 
 float hash(vec2 p) {
@@ -54,12 +61,12 @@ vec2 sunDir() {
     return normalize(vec2(look[3].w, 1.0)) * 1.4142;
 }
 
-vec3 lumaShadows(vec3 c) {
-    float lum = luma(c);
+vec3 lumaShadows(vec3 c, vec2 sun) {
+    float lum = gameLuma > 0.5 ? outlineLuma(texCoord) : luma(c);
     float shade = 0.0;
     for (int i = 1; i <= 4; i++) {
         float reach = float(i);
-        float s = luma(texture2D(tex, texCoord + sunDir() * pixel * reach).rgb);
+        float s = outlineLuma(texCoord + sun * pixel * reach);
         // an occluder is a dark pixel that is clearly darker than the one in its shadow
         float occluder = (1.0 - smoothstep(0.10, 0.30, s)) * smoothstep(0.55, 0.30, s / max(lum, 0.06));
         shade = max(shade, occluder * (1.0 - 0.2 * (reach - 1.0)));
@@ -70,11 +77,11 @@ vec3 lumaShadows(vec3 c) {
 
 void main() {
     vec3 c = texture2D(tex, texCoord).rgb;
+    vec2 sun = sunDir();                   // toward the sun
     if (useDepth < 0.5) {
-        gl_FragColor = vec4(lumaShadows(c), 1.0);
+        gl_FragColor = vec4(lumaShadows(c, sun), 1.0);
         return;
     }
-    vec2 sun = sunDir();                   // toward the sun
     vec2 side = vec2(sun.y, -sun.x) * 0.5; // across the shadow, to soften its edge
     float d = depthAt(texCoord);
 

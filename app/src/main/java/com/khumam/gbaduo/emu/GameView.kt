@@ -15,6 +15,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.roundToInt
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 import javax.microedition.khronos.egl.EGL10
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.egl.EGLContext
@@ -33,6 +34,12 @@ private const val ZOOM_NANOS = 340_000_000L
 private const val TILT_REFERENCE_HEIGHT = 960f
 
 private const val EGL_CONTEXT_CLIENT_VERSION = 0x3098
+
+/** Parses and translates library shaders off the GL thread: one daemon thread shared by every [GameView], so none outlives its view. */
+private val PREPARE_THREAD = Executors.newSingleThreadExecutor { Thread(it, "slang-prepare").apply { isDaemon = true } }
+
+/** What a prepare for [path] gave: a plan handle, or 0 and [error]. */
+private class Prepared(val path: String, val plan: Long, val error: String?)
 
 /**
  * Blit of the emulator's RGBA8888 framebuffer (240x160 for GBA, 160x144 for GB/GBC) in the
@@ -82,6 +89,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
     private var shown: ByteBuffer? = null
     private var shownWidth = 0
     private var shownHeight = 0
+    private var shownSeq = 0L       // bumped for every frame the core finishes, so the GL thread uploads (and filters) each once
 
     /** Call from the emu thread after each frame; keeps a copy of it and schedules a redraw on the GL thread. */
     fun postFrame() {
@@ -98,9 +106,15 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 copy.clear()
                 shownWidth = width
                 shownHeight = height
+                shownSeq++
             }
         }
         requestRender()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        renderer.discardPrepared()
     }
 
     /** Thread-safe; the switch happens on the GL thread before the next frame draws. */
@@ -111,9 +125,6 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
 
     /** Called on the main thread with the first error line when a library shader could not be loaded; the previous shader stays. */
     @Volatile var onShaderError: ((String) -> Unit)? = null
-
-    /** True once the GL context is OpenGL ES 3.0 or newer, which library (slang) shaders need. */
-    val supportsLibraryShaders: Boolean get() = renderer.es3
 
     /** Thread-safe; read by the GL thread on the next frame. */
     fun setColorCorrection(correction: ColorCorrection) {
@@ -198,6 +209,12 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var frameWidth = 0
         private var frameHeight = 0
 
+        // Which frame [texture] holds and the size its storage was given: a redraw with no new frame (a setting, the zoom,
+        // a paused game) uploads nothing, and a new frame of the same size goes in with glTexSubImage2D.
+        private var uploadedSeq = -1L
+        private var uploadedWidth = 0
+        private var uploadedHeight = 0
+
         // The zoom: the game frame's rectangle (x, y, width, height in GL window pixels) as last shown, and the
         // animation from [zoomFrom] to wherever it should be now, drawn through an offscreen picture the size of the screen.
         private var shownRect: FloatArray? = null
@@ -229,10 +246,9 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var chainHeight = 0
         private var chainFrame = 0
         private var chainActive = false
+        private var chainSeq = -1L          // the frame [chainTexture] shows; -1: none yet (a new chain)
         private var preparingPath: String? = null
-        @Volatile private var preparedPlan = 0L
-        @Volatile private var prepareError: String? = null
-        private val prepareThread = Executors.newSingleThreadExecutor()
+        private val prepared = AtomicReference<Prepared?>(null)
         private val mainHandler = Handler(Looper.getMainLooper())
         private var program = 0
         private var texture = 0
@@ -258,6 +274,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         private var ambientPositionHandle = 0
         private var ambientPixelHandle = -1
         private var ambientDepthHandle = -1
+        private var ambientGameLumaHandle = -1
         private var ambientWorldHandle = -1
         private var ambientTimeHandle = -1
         private var tiltPositionHandle = 0
@@ -276,8 +293,12 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             // A new GL context: the old chain's objects are gone with the old one. Free it before creating anything here,
             // so deleting its stale names cannot touch a new object, and let the choice be applied again.
-            if (chain != 0L) SlangChain.destroy(chain)
+            if (chain != 0L) SlangChain.abandon(chain)
             chain = 0L
+            chainSeq = -1L
+            uploadedSeq = -1L
+            uploadedWidth = 0
+            uploadedHeight = 0
             chainTexture = 0
             chainWidth = 0
             chainHeight = 0
@@ -333,11 +354,20 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 videoWidth = shownWidth
                 videoHeight = shownHeight
                 if (videoWidth <= 0 || videoHeight <= 0) return
-                buffer.clear()
-                GLES20.glTexImage2D(
-                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, videoWidth, videoHeight, 0,
-                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
-                )
+                if (shownSeq != uploadedSeq) {
+                    buffer.clear()
+                    if (videoWidth == uploadedWidth && videoHeight == uploadedHeight) {
+                        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, videoWidth, videoHeight, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer)
+                    } else {
+                        GLES20.glTexImage2D(
+                            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, videoWidth, videoHeight, 0,
+                            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
+                        )
+                        uploadedWidth = videoWidth
+                        uploadedHeight = videoHeight
+                    }
+                    uploadedSeq = shownSeq
+                }
             }
             frameWidth = videoWidth
             frameHeight = videoHeight
@@ -567,6 +597,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             GLES20.glUseProgram(ambientProgram)
             GLES20.glUniform2f(ambientPixelHandle, 1f / videoWidth, 1f / videoHeight)
             GLES20.glUniform1f(ambientDepthHandle, if (depthLighting) 1f else 0f)
+            GLES20.glUniform1f(ambientGameLumaHandle, if (chainActive) 1f else 0f)
             look?.let { GLES20.glUniform4fv(ambientLookHandle, 4, it.light, 0) }
             GLES20.glUniform2f(ambientWorldHandle, worldX.toFloat(), worldY.toFloat())
             GLES20.glUniform1f(ambientTimeHandle, ((System.nanoTime() - startNanos) / 1_000_000L % 3_600_000L) / 1000f)
@@ -712,6 +743,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             ambientPixelHandle = GLES20.glGetUniformLocation(ambientProgram, "pixel")
             GLES20.glUniform1i(GLES20.glGetUniformLocation(ambientProgram, "depthTex"), 1)
             ambientDepthHandle = GLES20.glGetUniformLocation(ambientProgram, "useDepth")
+            ambientGameLumaHandle = GLES20.glGetUniformLocation(ambientProgram, "gameLuma")
             ambientLookHandle = GLES20.glGetUniformLocation(ambientProgram, "look")
             ambientWorldHandle = GLES20.glGetUniformLocation(ambientProgram, "world")
             ambientTimeHandle = GLES20.glGetUniformLocation(ambientProgram, "time")
@@ -790,9 +822,14 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                         } else if (preparingPath != library.path) {
                             preparingPath = library.path
                             val root = libraryRoot
-                            prepareThread.execute {
-                                val plan = SlangChain.prepare(root, library.path)
-                                if (plan == 0L) prepareError = SlangChain.lastError() else preparedPlan = plan
+                            val path = library.path
+                            PREPARE_THREAD.execute {
+                                val result = runCatching { SlangChain.prepare(root, path) }.fold(
+                                    { plan -> if (plan == 0L) Prepared(path, 0L, SlangChain.lastError()) else Prepared(path, plan, null) },
+                                    { e -> Prepared(path, 0L, e.message ?: e.javaClass.simpleName) },
+                                )
+                                // A result nobody picked up yet is replaced: free its plan.
+                                prepared.getAndSet(result)?.let { if (it.plan != 0L) SlangChain.discard(it.plan) }
                                 requestRender()
                             }
                         }
@@ -800,28 +837,29 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                     is ShaderRoute.Chain -> Unit
                 }
             }
-            val plan = preparedPlan
-            if (plan != 0L) {
-                preparedPlan = 0L
-                finishChain(plan)
+            val done = prepared.getAndSet(null) ?: return
+            if (done.path != preparingPath) {
+                // Prepared for a pick the player has since moved away from.
+                if (done.plan != 0L) SlangChain.discard(done.plan)
+                return
             }
-            val error = prepareError
-            if (error != null) {
-                prepareError = null
-                val failed = preparingPath
-                preparingPath = null
-                if (failed != null && pendingChoice == ShaderChoice.Library(failed)) {
-                    reportError(error)
-                    pendingChoice = activeChoice ?: ShaderChoice.OFF
-                }
+            preparingPath = null
+            if (done.plan != 0L) {
+                finishChain(done.path, done.plan)
+            } else if (pendingChoice == ShaderChoice.Library(done.path)) {
+                reportError(done.error ?: "Shader unavailable")
+                pendingChoice = activeChoice ?: ShaderChoice.OFF
             }
         }
 
+        /** Frees a prepared plan nobody will use; the view is going away. */
+        fun discardPrepared() {
+            prepared.getAndSet(null)?.let { if (it.plan != 0L) SlangChain.discard(it.plan) }
+        }
+
         /** A prepared plan arrived: build its GL objects, and switch to it only if it is still what the player wants. */
-        private fun finishChain(plan: Long) {
-            val path = preparingPath
-            preparingPath = null
-            if (path == null || pendingChoice != ShaderChoice.Library(path)) {
+        private fun finishChain(path: String, plan: Long) {
+            if (pendingChoice != ShaderChoice.Library(path)) {
                 SlangChain.discard(plan)
                 return
             }
@@ -834,6 +872,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             destroyChain()
             chain = handle
             chainFrame = 0
+            chainSeq = -1L
             applyShader(ShaderPreset.OFF)   // the chain's picture is shown by the plain program, so colour, ambient and tilt-shift still apply
             activeChoice = ShaderChoice.Library(path)
         }
@@ -850,11 +889,20 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
             mainHandler.post { onShaderError?.invoke(first) }
         }
 
-        /** Draws the frame through the chain into [chainTexture], sized to the viewport; sets [chainActive]. */
+        /**
+         * Draws the frame through the chain into [chainTexture], sized to the viewport; sets [chainActive]. Only for a new
+         * frame or size: a redraw of the same one shows the last result, so history, feedback and FrameCount move once per
+         * emulated frame (and a paused game costs no chain passes).
+         */
         private fun runChain(videoWidth: Int, videoHeight: Int, size: ViewportSize) {
             chainActive = false
             if (chain == 0L || size.width <= 0 || size.height <= 0) return
-            if (chainTexture == 0 || chainWidth != size.width || chainHeight != size.height) {
+            val resized = chainTexture == 0 || chainWidth != size.width || chainHeight != size.height
+            if (!resized && chainSeq == uploadedSeq) {
+                chainActive = true
+                return
+            }
+            if (resized) {
                 // A new texture for a new size, not a re-specified one: some GPU drivers keep rendering into the old storage
                 // of a texture whose size changes after it has been a framebuffer target.
                 val ids = IntArray(1)
@@ -878,6 +926,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : GLSurfaceView(co
                 chainHeight = size.height
             }
             SlangChain.render(chain, texture, videoWidth, videoHeight, chainTexture, size.width, size.height, chainFrame++)
+            chainSeq = uploadedSeq
             chainActive = true
         }
 

@@ -53,4 +53,18 @@ class SaveImportTest {
         assertEquals("old", backups(remote).single().readText())
         assertEquals("old", backups(game).single().readText())
     }
+
+    @Test
+    fun readCappedStopsOneBytePastTheLimit() {
+        val big = ByteArray(SaveImport.MAX_SIZE + 5000) { 7 }
+        val read = SaveImport.readCapped(big.inputStream())
+        assertEquals(SaveImport.MAX_SIZE + 1, read.size)
+        assertFalse(SaveImport.isValid(read))
+    }
+
+    @Test
+    fun readCappedReadsASmallFileWhole() {
+        val small = ByteArray(128 * 1024) { it.toByte() }
+        assertArrayEquals(small, SaveImport.readCapped(small.inputStream()))
+    }
 }

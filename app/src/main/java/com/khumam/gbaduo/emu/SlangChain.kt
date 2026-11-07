@@ -1,5 +1,6 @@
 package com.khumam.gbaduo.emu
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.File
 import java.nio.ByteBuffer
@@ -17,7 +18,13 @@ object SlangChain {
         System.loadLibrary("gbaduo")
     }
 
-    external fun lastError(): String
+    /** A failure on the Kotlin side of [prepare] (a lookup texture that won't decode), which the native error can't know. */
+    private val localError = ThreadLocal<String?>()
+
+    /** Why the last call on this thread failed. */
+    fun lastError(): String = localError.get() ?: nativeLastError()
+
+    private external fun nativeLastError(): String
     private external fun textureList(root: String, preset: String): Array<String>?
     private external fun prepare(root: String, preset: String, ids: Array<String>, sizes: IntArray, pixels: Array<ByteBuffer>): Long
 
@@ -35,11 +42,15 @@ object SlangChain {
 
     external fun destroy(chain: Long)
 
+    /** After the GL context was lost (its objects went with it): frees the chain with no GL call. */
+    external fun abandon(chain: Long)
+
     /**
      * Parses and translates [presetPath] (relative to [root]) and decodes its lookup textures. Any thread.
      * Returns a plan handle for [instantiate], or 0 with [lastError] set.
      */
     fun prepare(root: File, presetPath: String): Long {
+        localError.set(null)
         val list = textureList(root.path, presetPath) ?: return 0
         val luts = decodeLuts(root, list) ?: return 0
         return prepare(root.path, presetPath, luts.map { it.id }.toTypedArray(),
@@ -50,15 +61,33 @@ object SlangChain {
     private fun decodeLuts(root: File, idsAndPaths: Array<String>): List<LutImage>? {
         val out = ArrayList<LutImage>()
         for (i in idsAndPaths.indices step 2) {
-            val file = File(root, idsAndPaths[i + 1])
-            val options = BitmapFactory.Options().apply { inPremultiplied = false }
-            val bitmap = BitmapFactory.decodeFile(file.path, options) ?: return null
+            val path = idsAndPaths[i + 1]
+            val image = runCatching { decode(idsAndPaths[i], File(root, path)) }.getOrElse { e ->
+                localError.set("cannot read image $path: ${e.message ?: e.javaClass.simpleName}")
+                return null
+            }
+            if (image == null) {
+                localError.set("cannot read image $path")
+                return null
+            }
+            out += image
+        }
+        return out
+    }
+
+    private fun decode(id: String, file: File): LutImage? {
+        val options = BitmapFactory.Options().apply { inPremultiplied = false }
+        val decoded = BitmapFactory.decodeFile(file.path, options) ?: return null
+        // 16-bit PNGs decode to RGBA_F16 (8 bytes a pixel), some greyscale ones to other configs: the native side wants RGBA8.
+        val bitmap = if (decoded.config == Bitmap.Config.ARGB_8888) decoded else decoded.copy(Bitmap.Config.ARGB_8888, false).also { decoded.recycle() }
+            ?: return null
+        try {
             val buffer = ByteBuffer.allocateDirect(bitmap.width * bitmap.height * 4)
             bitmap.copyPixelsToBuffer(buffer)
             buffer.rewind()
-            out += LutImage(idsAndPaths[i], bitmap.width, bitmap.height, buffer)
+            return LutImage(id, bitmap.width, bitmap.height, buffer)
+        } finally {
             bitmap.recycle()
         }
-        return out
     }
 }
