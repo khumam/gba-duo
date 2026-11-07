@@ -299,6 +299,8 @@
     <string name="pack_writes_confirm">Some companion packs can change a game\'s memory when you tap them, for example to equip an item.\n\nEach pack still asks before its first change in each game, and only acts on your taps. A bad change can crash a game or spoil a save.</string>
     <string name="pack_writes_turn_on">Turn on</string>
     <string name="pack_modifies_game">can modify the game</string>
+    <string name="pack_permission_off">Off: Settings > Companion keeps every pack from changing games</string>
+    <string name="pack_permission_hardcore">Off in hardcore mode</string>
 
     <!-- Shader page -->
     <string name="shader_in_use">In use</string>

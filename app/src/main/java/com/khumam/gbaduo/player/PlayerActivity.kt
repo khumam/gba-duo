@@ -16,6 +16,8 @@ import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
 import com.khumam.gbaduo.companion.WideControl
 import com.khumam.gbaduo.companion.AmbientControl
+import com.khumam.gbaduo.companion.WritePermission
+import com.khumam.gbaduo.companion.WritePermissionControl
 import com.khumam.gbaduo.companion.WideMode
 import com.khumam.gbaduo.companion.CompanionActivity
 import com.khumam.gbaduo.companion.CompanionController
@@ -254,6 +256,7 @@ class PlayerActivity : Activity() {
         // What the pack's code is now: a write permission given to other code doesn't count.
         val fingerprint = if (manifest.canWriteMemory) PackFingerprint.of(packDir) else ""
         emu.writeAccess = writeAccessFor(manifest, storage, fingerprint)
+        emu.writePermission = writePermissionFor(manifest, storage, fingerprint)
         // Named as the library shows it ("The Legend of Zelda: The Minish Cap"), not by its header code.
         val gameName = GameTitle.display(intent.getStringExtra(EXTRA_ROM_FILE_NAME).orEmpty(), header.title)
         emu.onWriteConsentNeeded = { runOnUiThread { askWriteConsent(manifest, gameName, storage, fingerprint) } }
@@ -266,6 +269,7 @@ class PlayerActivity : Activity() {
             when {
                 WideControl.handles(name) -> setWide(WideControl.next(emu.wideMode, args), storage)
                 AmbientControl.handles(name) -> setAmbient(AmbientControl.next(emu.ambientOn, args), storage)
+                WritePermissionControl.handles(name) -> reaskWriteConsent(manifest, gameName, storage, fingerprint)
                 else -> emu.callAction(name, args)
             }
         }
@@ -286,6 +290,33 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /** What the pack's permission button shows: the stored answer, unless Settings or hardcore keep packs from changing games. */
+    private fun writePermissionFor(manifest: PackManifest, storage: GameStorage, fingerprint: String): WritePermission = when {
+        !manifest.canWriteMemory -> WritePermission.NONE
+        hardcore || !CompanionSettings.allowWrites(this) -> WritePermission.OFF
+        else -> when (storage.writeConsent(manifest.id, fingerprint)) {
+            true -> WritePermission.ALLOWED
+            false -> WritePermission.DENIED
+            null -> WritePermission.ASK
+        }
+    }
+
+    /**
+     * The permission button: the player is asked again now, whatever they answered before (a Yes gets its safety save
+     * state like the first time). Nothing to ask when the pack can't change games here at all.
+     */
+    private fun reaskWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage, fingerprint: String) {
+        runOnUiThread {
+            when (writePermissionFor(manifest, storage, fingerprint)) {
+                WritePermission.NONE -> Unit
+                WritePermission.OFF -> Toast.makeText(
+                    this, if (hardcore) R.string.pack_permission_hardcore else R.string.pack_permission_off, Toast.LENGTH_LONG,
+                ).show()
+                else -> askWriteConsent(manifest, gameTitle, storage, fingerprint)
+            }
+        }
+    }
+
     /** The first time a pack is about to change a game: asks, pausing the game meanwhile. Saved per pack and game, for this version of the pack. */
     private fun askWriteConsent(manifest: PackManifest, gameTitle: String, storage: GameStorage, fingerprint: String) {
         if (isFinishing || isDestroyed) return
@@ -293,6 +324,8 @@ class PlayerActivity : Activity() {
         emu.paused = true
         fun answer(allowed: Boolean) {
             storage.setWriteConsent(manifest.id, allowed, fingerprint)
+            emu.writePermission = if (allowed) WritePermission.ALLOWED else WritePermission.DENIED
+            emu.requestSnapshot()
             emu.answerWriteConsent(
                 if (allowed) EmuThread.WriteAccess.ALLOWED else EmuThread.WriteAccess.NONE,
                 // A save state to go back to, made just before the pack's first change.

@@ -160,6 +160,24 @@ Every snapshot carries `_ambient` (1 or 0) and `_ambientLabel` (`ON`, `OFF`, or 
 }
 ```
 
+### Asking for permission again
+
+A pack with the `memory-write` permission asks the player once, per game, whether it may change the game, and the answer
+is kept for that version of the pack. A pack that does so should also offer a way to be asked again, on its own settings
+page, as with Wide and Ambient. The app handles the reserved action `writePermission` itself: the player is asked right
+then, whatever they answered before (a Yes also saves a restore point first). Every snapshot carries `_writePerm` (1 when
+allowed, else 0) and `_writePermLabel`: `ALLOWED`, `DENIED`, `NOT ASKED`, `OFF` (Settings or hardcore mode keep every pack
+from changing games; a tap then says so) or `N/A` (the pack has no `memory-write`).
+
+```json
+{
+  "type": "box", "class": "wide-pill",
+  "classIf": { "on": "$_writePerm" },
+  "onClick": { "call": "writePermission" },
+  "children": [ { "type": "text", "text": "GAME CHANGES {_writePermLabel}" } ]
+}
+```
+
 `zelda-the-minish-cap-companion/game.lua` is the two-layer example (camera and room origin from
 `gRoomControls`, layers from `gMapTop` / `gMapBottom`). `golden-sun-companion/game.lua` is the
 three-layer one with u32 cells: one grid in EWRAM holds the three BG layers side by side, so each

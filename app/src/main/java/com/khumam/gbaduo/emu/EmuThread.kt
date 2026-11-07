@@ -70,6 +70,9 @@ class EmuThread(
 
     /** Ambient for this game, here so the companion screen's button shows its state. */
     @Volatile var ambientOn = false
+
+    /** What the pack's permission button shows (see WritePermissionControl); set by PlayerActivity. */
+    @Volatile var writePermission = com.khumam.gbaduo.companion.WritePermission.NONE
     private var lightingRequested = false
     private val lookValues = FloatArray(AmbientLook.FIELDS)
     private var look: AmbientLook? = null
@@ -287,7 +290,7 @@ class EmuThread(
         val interval = (60 / pack.tickHz).coerceAtLeast(1)
         if (due || framesSinceSnapshot >= interval) {
             framesSinceSnapshot = 0
-            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideMode, wideAvailable), ambientOn, ambientAvailable)
+            val snapshot = CompanionSnapshot.build(pack, NativeCoreMemoryReader, NativeCore.frameCounter(), scriptActive, WideState(wideMode, wideAvailable), ambientOn, ambientAvailable, writePermission)
             onSnapshot?.invoke(snapshot)
         }
     }
