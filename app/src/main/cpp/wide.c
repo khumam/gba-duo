@@ -18,7 +18,8 @@ static bool layers_valid(const struct WideWorld* w) {
     for (int i = 0; i < w->layerCount; i++) {
         const struct WideLayer* l = &w->layers[i];
         if (l->gridW < 1 || l->gridW > MAX_CELLS || l->gridH < 1 || l->gridH > MAX_CELLS ||
-            l->stride < l->gridW || l->stride > MAX_CELLS || (l->cellBytes != 0 && l->cellBytes != 2 && l->cellBytes != 4)) {
+            l->stride < l->gridW || l->stride > MAX_CELLS || (l->cellBytes != 0 && l->cellBytes != 2 && l->cellBytes != 4) ||
+            l->idShift < 0 || l->idShift > 4) {
             return false;
         }
     }
@@ -80,7 +81,7 @@ static bool layer_entry(const struct WideLayer* l, int32_t wx, int32_t wy, uint1
         id = gbaduo_bus_read16(cell);
         if (id >= 0x4000u && l->special != 0) id = gbaduo_bus_read16(l->special + (id - 0x4000u) * 2u);
     }
-    id &= l->idMask;
+    id = (id & l->idMask) >> l->idShift;
     *entry = gbaduo_bus_read16(l->metatiles + id * 8u + (uint32_t) ((py >> 3) * 2 + (px >> 3)) * 2u);
     *tx = px & 7;
     *ty = py & 7;

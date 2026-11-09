@@ -45,8 +45,9 @@ struct WideMarker {
 struct WideLayer {
     uint32_t grid;              /* cells, row-major, [stride] cells a row, gridW x gridH of them in use */
     int stride, gridW, gridH;
-    int cellBytes;              /* 2 (a u16 cell, the default) or 4 (a u32 cell: id = cell & idMask) */
-    uint16_t idMask;            /* metatile id = cell & idMask */
+    int cellBytes;              /* 2 (a u16 cell, the default) or 4 (a u32 cell; its id is masked and shifted the same way) */
+    uint16_t idMask;            /* metatile id = (cell & idMask) >> idShift, after the special lookup */
+    int idShift;                /* 0 (the default) to 4, for cells holding a scaled id (FE6: metatile * 4, shift 2) */
     uint32_t special;           /* u16 table for cells >= 0x4000 (id = table[cell - 0x4000]); 0: none; u16 cells only */
     uint32_t metatiles;         /* metatiles + id * 8 */
     uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */

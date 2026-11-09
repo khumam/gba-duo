@@ -613,6 +613,30 @@ static void three_layers_of_u32_cells(void) {
     CHECK(buf[0] == wide_pixel(&w, 0, 0) && buf[16] == wide_pixel(&w, 16, 0)); /* the painted row reads the same u32 cells */
 }
 
+/* idShift: cells that hold a scaled id (Fire Emblem stores metatile * 4) read the right metatile. */
+static void layer_id_shift_divides_scaled_cells(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    enum { G = 0x02010000u, MT = 0x02020000u, TILES = 0x06000000u };
+    poke16(PALETTE + 2, 0x001F);
+    poke16(PALETTE + 4, 0x03E0);
+    for (int i = 0; i < 32; i++) { poke8(TILES + 1 * 32 + (uint32_t) i, 0x11); poke8(TILES + 2 * 32 + (uint32_t) i, 0x22); }
+    for (int i = 0; i < 4; i++) { poke16(MT + 1 * 8 + (uint32_t) i * 2, 1); poke16(MT + 2 * 8 + (uint32_t) i * 2, 2); }
+    poke16(G, 1 * 4);                                    /* cell (0,0): metatile 1, stored as 4 */
+    poke16(G + 2, 2 * 4);                                /* cell (1,0): metatile 2, stored as 8 */
+    struct WideWorld w = {
+        .palette = PALETTE, .layerCount = 1,
+        .layers = { { .grid = G, .stride = 2, .gridW = 2, .gridH = 1, .idMask = 0xFFFF, .idShift = 2, .metatiles = MT, .tiles = TILES } },
+    };
+    CHECK(wide_world_valid(&w));
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(0x001F));   /* 4 >> 2 = metatile 1: index 1 */
+    CHECK(wide_pixel(&w, 16, 0) == wide_color(0x03E0));  /* 8 >> 2 = metatile 2: index 2 */
+    w.layers[0].idShift = 0;
+    CHECK(wide_pixel(&w, 0, 0) != wide_color(0x001F));   /* unshifted, 4 reads metatile 4 instead */
+    w.layers[0].idShift = 5;
+    CHECK(!wide_world_valid(&w));                        /* 0 to 4 only */
+    w.layers[0].idShift = -1;
+    CHECK(!wide_world_valid(&w));
+}
 
 /* Markers: drawn in the margins, never over the game's frame, clipped to the picture. */
 static void markers_paint_only_outside_the_frame(void) {
@@ -705,6 +729,7 @@ int main(void) {
     split_selects_second_table();
     layered_world_top_over_bottom_and_black_outside();
     three_layers_of_u32_cells();
+    layer_id_shift_divides_scaled_cells();
     paint_fills_only_margins();
     markers_paint_only_outside_the_frame();
     sprite_markers_draw_their_tiles();

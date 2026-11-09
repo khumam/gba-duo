@@ -609,6 +609,22 @@ static void layers_renders_the_live_map(void) {
         free(px);
     }
     free(r);
+
+    /* idShift: u16 cells holding metatile * 4 (Fire Emblem's maps) are divided back down. */
+    poke16(0x02014000, 1 * 4);
+    poke16(0x02014002, 2 * 4);
+    load("function update() return { k = gfx.layers{ x = 0, y = 0, width = 32, height = 16, palette = 0x02013000,"
+         " layers = { { grid = 0x02014000, stride = 2, gridW = 2, gridH = 1, idMask = 0xFFFF, idShift = 2,"
+         " metatiles = 0x02011000, tiles = 0x02012000 } } } } end");
+    r = gbaduo_script_tick();
+    px = image_of(r, &w, &h);
+    CHECK(px != NULL && w == 32 && h == 16);
+    if (px) {
+        CHECK(px[0] == argb_wide(0x001F));                        /* 4 >> 2: metatile 1 */
+        CHECK(px[16] == argb_wide(0x03E0));                       /* 8 >> 2: metatile 2 */
+        free(px);
+    }
+    free(r);
 }
 
 static void layers_rejects_bad_arguments(void) {
@@ -620,6 +636,10 @@ static void layers_rejects_bad_arguments(void) {
         "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0 }",              /* no layers */
         "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0, layers = {} }",
         "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0, layers = { { grid = 0 } } }",
+        "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0, layers = { { grid = 0x02010000, stride = 4, gridW = 2,"
+        " gridH = 1, idMask = 0xFFF, idShift = 5, metatiles = 0x02011000, tiles = 0x02012000 } } }",   /* idShift is 0 to 4 */
+        "gfx.layers{ x = 0, y = 0, width = 8, height = 8, palette = 0, layers = { { grid = 0x02010000, stride = 4, gridW = 2,"
+        " gridH = 1, idMask = 0xFFF, idShift = -1, metatiles = 0x02011000, tiles = 0x02012000 } } }",
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         char call[512], src[640];
@@ -727,6 +747,16 @@ static void wide_returns_world(void) {
     CHECK(gbaduo_game_wide(320, 160, 40, 0, 0.5f, &w));
     CHECK(w.x == 320 && w.y == 40 && w.split == 50);
     CHECK(w.borderShift == 0 && w.undefinedId == -1); /* both optional */
+
+    /* A layered world: idShift reaches the layer (0 when left out), and out-of-range shifts are refused. */
+    gload("function wide() return { x = 0, y = 0, palette = 0x05000000, layers = {\n"
+          "  { grid = 0x02000000, stride = 2, gridW = 2, gridH = 1, idMask = 0xFFFF, idShift = 2, metatiles = 0x02002000, tiles = 0x06000000 },\n"
+          "  { grid = 0x02001000, stride = 2, gridW = 2, gridH = 1, idMask = 0xFFFF, metatiles = 0x02002000, tiles = 0x06000000 } } } end\n");
+    CHECK(gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    CHECK(w.layerCount == 2 && w.layers[0].idShift == 2 && w.layers[1].idShift == 0);
+    gload("function wide() return { x = 0, y = 0, palette = 0x05000000, layers = {\n"
+          "  { grid = 0x02000000, stride = 2, gridW = 2, gridH = 1, idMask = 0xFFFF, idShift = 5, metatiles = 0x02002000, tiles = 0x06000000 } } } end\n");
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
     gbaduo_game_unload();
 }
 
