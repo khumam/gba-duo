@@ -160,6 +160,8 @@ class PlayerActivity : Activity() {
         gameView.setAmbient(ambientOn)
         emu = EmuThread(romBytes, storage.saveFile.absolutePath, gameView, audioOut, input)
         emu.hardcore = hardcore
+        if (AutoState.save(this)) emu.autoSavePath = storage.autoState.absolutePath
+        if (AutoState.load(this)) emu.autoLoadPath = storage.autoState.absolutePath
         emu.wideMode = when (storage.settings.getString(GameSettingsKeys.WIDE)) {
             GameSettingsKeys.WIDE_ON -> WideMode.WIDE
             GameSettingsKeys.WIDE_EXTRA -> WideMode.EXTRA
@@ -524,7 +526,10 @@ class PlayerActivity : Activity() {
     override fun onPause() {
         resumed = false
         super.onPause()
-        if (::emu.isInitialized) emu.paused = true
+        if (::emu.isInitialized) {
+            emu.paused = true
+            emu.requestAutoSave() // the app may be killed while in the background, so don't wait for onDestroy
+        }
         saveMirror?.requestOut()
     }
 

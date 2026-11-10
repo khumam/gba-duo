@@ -10,19 +10,25 @@ import android.content.SharedPreferences
 class PackUpdates(private val prefs: SharedPreferences) {
 
     fun isStale(now: Long): Boolean {
-        if (!prefs.contains(KEY_CHECKED_AT)) return true
+        if (!prefs.contains(KEY_CHECKED_AT) || !prefs.contains(KEY_CODES)) return true
         return now - prefs.getLong(KEY_CHECKED_AT, 0L) !in 0 until INTERVAL_MS
     }
 
     fun save(packs: List<CatalogPack>, now: Long) {
         val lines = packs.map { listOf(it.id, it.version, it.minAppVersion.orEmpty()).joinToString("\t") }.toSet()
-        prefs.edit().putStringSet(KEY_SNAPSHOT, lines).putLong(KEY_CHECKED_AT, now).apply()
+        val codes = packs.flatMap { pack -> pack.games.map { it.gameCode.trim().uppercase() } }.filter { it.isNotEmpty() }.toSet()
+        prefs.edit().putStringSet(KEY_SNAPSHOT, lines).putStringSet(KEY_CODES, codes).putLong(KEY_CHECKED_AT, now).apply()
     }
 
     /** A failed check retries after [RETRY_MS] rather than on every library visit. */
     fun markFailed(now: Long) {
-        prefs.edit().putLong(KEY_CHECKED_AT, now - INTERVAL_MS + RETRY_MS).apply()
+        // Codes are set too (empty if never fetched) so a failure waits out RETRY_MS instead of retrying every visit.
+        prefs.edit().putLong(KEY_CHECKED_AT, now - INTERVAL_MS + RETRY_MS)
+            .putStringSet(KEY_CODES, catalogGameCodes()).apply()
     }
+
+    /** Game codes (upper-case) the catalog has a pack for, installed or not, as of the last check. */
+    fun catalogGameCodes(): Set<String> = prefs.getStringSet(KEY_CODES, null) ?: emptySet()
 
     /** Ids of installed packs ([installed]: id to version) that the snapshot has a usable newer version of. */
     fun updatableIds(installed: Map<String, String>, appVersion: String): Set<String> {
@@ -38,6 +44,7 @@ class PackUpdates(private val prefs: SharedPreferences) {
         const val INTERVAL_MS = 12L * 60 * 60 * 1000
         const val RETRY_MS = 30L * 60 * 1000
         private const val KEY_SNAPSHOT = "pack_catalog_snapshot"
+        private const val KEY_CODES = "pack_catalog_game_codes"
         private const val KEY_CHECKED_AT = "pack_catalog_checked_at"
     }
 }

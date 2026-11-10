@@ -87,27 +87,26 @@ class QuickMenu(
     }
 
     private fun showSlotPicker(save: Boolean) {
+        val df = DateFormat.getDateTimeInstance()
         val labels = (1..9).map { slot ->
-            if (states.slotExists(slot)) {
-                val whenText = DateFormat.getDateTimeInstance().format(Date(states.slotModified(slot)))
-                context.getString(R.string.slot_n, slot) + " — $whenText"
-            } else {
-                context.getString(R.string.slot_empty, slot)
-            }
+            if (states.slotExists(slot)) context.getString(R.string.slot_n, slot) + " — ${df.format(Date(states.slotModified(slot)))}"
+            else context.getString(R.string.slot_empty, slot)
         }.toMutableList()
+        val paths = (1..9).map { states.slotPath(it) }.toMutableList()
+        // After slot 9: the state Auto save writes when the game is left. Saving here overwrites it.
+        states.auto?.let {
+            labels += context.getString(R.string.state_auto, df.format(Date(it.lastModified())))
+            paths += it.absolutePath
+        }
         // Loading only: the state made before a companion pack first changed the game.
-        val beforePack = if (save) null else states.beforePackWrite
-        if (beforePack != null) {
-            labels += context.getString(R.string.state_before_pack, DateFormat.getDateTimeInstance().format(Date(beforePack.lastModified())))
+        if (!save) states.beforePackWrite?.let {
+            labels += context.getString(R.string.state_before_pack, df.format(Date(it.lastModified())))
+            paths += it.absolutePath
         }
 
         dialog = AlertDialog.Builder(context)
             .setItems(labels.toTypedArray()) { _, which ->
-                if (which == 9 && beforePack != null) {
-                    emu.requestState(beforePack.absolutePath, save = false)
-                } else {
-                    emu.requestState(states.slotPath(which + 1), save)
-                }
+                emu.requestState(paths[which], save)
                 emu.paused = false
             }
             .setOnCancelListener { emu.paused = false }

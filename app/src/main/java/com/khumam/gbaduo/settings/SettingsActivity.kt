@@ -22,6 +22,7 @@ import com.khumam.gbaduo.emu.ShaderChoice
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.RomLibrary
+import com.khumam.gbaduo.player.AutoState
 import com.khumam.gbaduo.library.artwork.Artwork
 import com.khumam.gbaduo.library.ui.Pixel
 import com.khumam.gbaduo.storage.SaveFolder
@@ -33,6 +34,8 @@ class SettingsActivity : PixelPage() {
     private lateinit var raSummary: TextView
     private lateinit var savesSummary: TextView
     private lateinit var writesSummary: TextView
+    private lateinit var autoSaveSummary: TextView
+    private lateinit var autoLoadSummary: TextView
     private lateinit var scrapingSummary: TextView
     private lateinit var shaderSummary: TextView
     private lateinit var colorSummary: TextView
@@ -83,6 +86,10 @@ class SettingsActivity : PixelPage() {
             getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
             startActivity(Intent(this, ScrapingActivity::class.java))
         }.second
+        autoSaveSummary = menuCard(R.drawable.ic_save, Pixel.MINT,
+            getString(R.string.auto_save_title), getString(R.string.auto_save_off)) { toggleAutoSave() }.second
+        autoLoadSummary = menuCard(R.drawable.ic_save, Pixel.YELLOW,
+            getString(R.string.auto_load_title), getString(R.string.auto_load_off)) { toggleAutoLoad() }.second
         writesSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
             getString(R.string.pack_writes_title), getString(R.string.pack_writes_off)) { toggleWrites() }.second
         raSummary = menuCard(R.drawable.ic_trophy, Pixel.MINT,
@@ -101,6 +108,7 @@ class SettingsActivity : PixelPage() {
         val count = RomLibrary(this).folders.size
         foldersSummary.text = if (count == 0) getString(R.string.no_folders_yet) else getString(R.string.rom_folders_summary)
         renderWrites()
+        renderAutoState()
         shaderSummary.text = getString(R.string.shader_summary_current, ShaderSettings.default(this).displayName)
         colorSummary.text = getString(R.string.shader_summary_current, ColorSettings.default(this).displayName)
         aspectSummary.text = getString(R.string.shader_summary_current, AspectSettings.default(this).displayName)
@@ -183,6 +191,21 @@ class SettingsActivity : PixelPage() {
     private fun toggleScale() {
         ScaleSettings.setInteger(this, !ScaleSettings.integer(this))
         renderScale()
+    }
+
+    private fun renderAutoState() {
+        autoSaveSummary.text = getString(if (AutoState.save(this)) R.string.auto_save_on else R.string.auto_save_off)
+        autoLoadSummary.text = getString(if (AutoState.load(this)) R.string.auto_load_on else R.string.auto_load_off)
+    }
+
+    private fun toggleAutoSave() {
+        AutoState.setSave(this, !AutoState.save(this))
+        renderAutoState()
+    }
+
+    private fun toggleAutoLoad() {
+        AutoState.setLoad(this, !AutoState.load(this))
+        renderAutoState()
     }
 
     private fun renderWrites() {

@@ -66,10 +66,7 @@ class CompanionController(
     fun Content() {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             when (val c = content) {
-                is Content.Pack -> CompanionScreen(c.tree, c.platform, onTextFocus = { editing ->
-                    onTextFocus(editing)
-                    if (!editing) onTextEntryEnded()
-                })
+                is Content.Pack -> CompanionScreen(c.tree, c.platform, onTextFocus = ::textFocusChanged)
                 is Content.Message -> BasicText(
                     text = c.text,
                     modifier = Modifier.align(Alignment.Center),
@@ -77,6 +74,20 @@ class CompanionController(
                 )
             }
         }
+    }
+
+    private var editingText = false
+
+    /**
+     * A text field gained or lost focus. Compose also reports "not focused" when a field first appears and when it
+     * leaves, with nobody having typed, so [onTextEntryEnded] (which restarts the game's activity) only runs when
+     * editing really was under way.
+     */
+    private fun textFocusChanged(editing: Boolean) {
+        val wasEditing = editingText
+        editingText = editing
+        onTextFocus(editing)
+        if (wasEditing && !editing) onTextEntryEnded()
     }
 
     private fun message(text: String) = Content.Message("$gameTitle\n$gameCode · ${"%08x".format(crc32)}\n\n$text")

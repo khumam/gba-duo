@@ -90,11 +90,14 @@ class LibraryActivity : Activity() {
     private val packStore by lazy { PackStore(packsDir) }
     private val prefs by lazy { getSharedPreferences("library", MODE_PRIVATE) }
     private val packUpdates by lazy { PackUpdates(getSharedPreferences("pack_updates", MODE_PRIVATE)) }
-    /** Every game found; the carousel shows [filter] of them. `null` filter is all games. */
+    /** Every game found; the carousel shows [filter] of them. */
     private var allEntries: List<RomEntry> = emptyList()
     private var packCodes: Set<String> = emptySet()
     private var packUpdateCodes: Set<String> = emptySet()
-    private var filter: Platform? = null
+
+    /** Game codes the Packs filter matches: installed packs (any source) plus the catalog's, upper-case. */
+    private var filterPackCodes: Set<String> = emptySet()
+    private var filter: LibraryFilter = LibraryFilter.All
     private var splitMode = false
     private var pickPackFor: GameStorage? = null
 
@@ -125,7 +128,7 @@ class LibraryActivity : Activity() {
         styleViews()
 
         carousel = CartridgeCarousel(recycler, onSelected = ::showSelected, onPlay = { play() })
-        filter = Platform.byId(prefs.getString(KEY_FILTER, null))
+        filter = LibraryFilter.byId(prefs.getString(KEY_FILTER, null))
         splitMode = prefs.getBoolean(KEY_SPLIT, false)
         gameList = GameList(findViewById(R.id.game_list), onTap = { position ->
             if (position == carousel.selected) play() else carousel.step(position - carousel.selected)
@@ -374,18 +377,17 @@ class LibraryActivity : Activity() {
 
     private fun cycleFilter(direction: Int) {
         if (allEntries.isEmpty()) return
-        val available = allEntries.map { it.platform }.toSet()
-        val next = PlatformFilter.cycle(filter, available, direction)
+        val next = ShelfFilter.cycle(filter, allEntries, filterPackCodes, direction)
         if (next == filter) return
         filter = next
-        prefs.edit().putString(KEY_FILTER, next?.id).apply()
+        prefs.edit().putString(KEY_FILTER, next.id).apply()
         renderFilter()
         showFiltered(keep = selectedEntry()?.fileName)
     }
 
     /** Puts [filter]'s games on the shelf, keeping [keep] selected if it's among them, else the first game. */
     private fun showFiltered(keep: String?) {
-        val shown = PlatformFilter.apply(allEntries, filter)
+        val shown = ShelfFilter.apply(allEntries, filter, filterPackCodes)
         val target = shown.firstOrNull { it.fileName == keep } ?: shown.firstOrNull()
         gameList.submit(shown)
         carousel.submit(shown, packCodes, packUpdateCodes, keepFileName = target?.fileName)
@@ -399,7 +401,11 @@ class LibraryActivity : Activity() {
     }
 
     private fun renderFilter() {
-        filterButton.text = filter?.label ?: getString(R.string.filter_all)
+        filterButton.text = when (val f = filter) {
+            LibraryFilter.All -> getString(R.string.filter_all)
+            LibraryFilter.Packs -> getString(R.string.filter_packs)
+            is LibraryFilter.OfPlatform -> f.platform.label
+        }
     }
 
     private fun renderViewMode() {
@@ -440,8 +446,9 @@ class LibraryActivity : Activity() {
             val (entries, codes, updateCodes) = result.getOrDefault(Triple(emptyList<RomEntry>(), emptySet(), emptySet()))
             allEntries = entries
             packCodes = codes
+            filterPackCodes = codes.map { it.uppercase() }.toSet() + packUpdates.catalogGameCodes()
             packUpdateCodes = updateCodes
-            val valid = PlatformFilter.valid(filter, entries.map { it.platform }.toSet())
+            val valid = ShelfFilter.valid(filter, entries, filterPackCodes)
             if (valid != filter) { filter = valid; renderFilter() }
             showFiltered(keep = selectedEntry()?.fileName ?: prefs.getString(KEY_LAST_SELECTED, null))
             updateHud(entries)
@@ -540,7 +547,6 @@ class LibraryActivity : Activity() {
         val now = System.currentTimeMillis()
         if (!packUpdates.isStale(now)) return
         background(work = {
-            if (packStore.list().isEmpty()) return@background null
             PackDownloader(UrlHttp(), packsDir, cacheDir).catalog()
         }) { result ->
             when (val fetched = result.getOrNull()) {

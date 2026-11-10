@@ -30,6 +30,9 @@ class GameStorage private constructor(val dir: File) {
         get() = settings.getInt(GameSettingsKeys.SLOT)?.takeIf { it in 1..9 } ?: 1
         set(value) = settings.put(GameSettingsKeys.SLOT, value.coerceIn(1, 9))
 
+    /** Written when the game is left (Auto save) and loaded when it opens (Auto load); shown in the quick menu as its own slot. */
+    val autoState: File get() = File(statesDir, "auto.ss")
+
     /**
      * The save state made automatically just before a companion pack first changes this
      * game's memory, so the player can always go back. Not a numbered slot (and not

@@ -12,6 +12,9 @@ class SaveStates(private val storage: GameStorage) {
 
     fun slotModified(slot: Int): Long = storage.stateFile(slot).lastModified()
 
+    /** The state written when the game was last left, if there is one. */
+    val auto: File? get() = storage.autoState.takeIf { it.exists() }
+
     /** The state made just before a companion pack first changed the game, if there is one. */
     val beforePackWrite: File? get() = storage.beforePackWriteState.takeIf { it.exists() }
 }

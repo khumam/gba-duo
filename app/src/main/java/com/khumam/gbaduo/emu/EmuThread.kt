@@ -111,6 +111,19 @@ class EmuThread(
     /** Called on this thread as it ends, after the core is unloaded (its save written): every time, even after a failure. */
     @Volatile var onStopped: (() -> Unit)? = null
 
+    /** Where Auto save writes the state when the game stops or leaves the screen; null is off. Ignored in hardcore. */
+    @Volatile var autoSavePath: String? = null
+
+    /** A state loaded once as the game starts (Auto load); null or missing file is a normal start. Ignored in hardcore. */
+    @Volatile var autoLoadPath: String? = null
+
+    @Volatile private var autoSaveRequested = false
+
+    /** Thread-safe; writes [autoSavePath] on the emu thread, even while paused. */
+    fun requestAutoSave() {
+        if (autoSavePath != null) autoSaveRequested = true
+    }
+
     /** Frames the core has run since the game started, fast-forwarded ones included; read by the performance overlay. */
     @Volatile var framesRun = 0L
         private set
@@ -155,9 +168,11 @@ class EmuThread(
         gameView.frameBuffer = NativeCore.videoBuffer()
         audioOut.start()
         running = true
+        loadAutoState()
 
         var nextFrameAt = System.nanoTime()
         while (running) {
+            if (autoSaveRequested) writeAutoState()
             if (paused) {
                 // Taps on the companion screen still get their data while the game is paused.
                 if (snapshotRequested) serviceCompanion(activePack)
@@ -198,6 +213,7 @@ class EmuThread(
             }
         }
 
+        writeAutoState() // before the core is unloaded
         LuaScript.unload()
         NativeCore.unloadGameScript()
         audioOut.stop()
@@ -419,6 +435,23 @@ class EmuThread(
             gameErrorLogCountdown = GAME_ERROR_LOG_FRAMES
             Log.w(TAG, "game.lua frame(): ${NativeCore.lastGameError()}")
         }
+    }
+
+    private fun loadAutoState() {
+        val path = autoLoadPath?.takeIf { !hardcore && File(it).isFile } ?: return
+        if (!NativeCore.loadState(path)) Log.w(TAG, "could not load the auto state")
+    }
+
+    /** Written beside the target and renamed over it, so a failed or interrupted write never leaves a half state. */
+    private fun writeAutoState() {
+        autoSaveRequested = false
+        val path = autoSavePath?.takeIf { !hardcore } ?: return
+        val target = File(path)
+        val temp = File("$path.tmp")
+        target.parentFile?.mkdirs()
+        if (NativeCore.saveState(temp.absolutePath) && temp.renameTo(target)) return
+        temp.delete()
+        Log.w(TAG, "could not save the auto state")
     }
 
     private fun saveSafetyState() {
