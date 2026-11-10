@@ -1542,6 +1542,8 @@ static bool read_layers(lua_State* L, struct WideWorld* w) {
             return false;
         }
         l->cellBytes = (int) v;
+        if (!world_field_or(L, "idShift", 0, 4, 0, &v)) { lua_pop(L, 1); return false; }
+        l->idShift = (int) v;
         lua_pop(L, 1);
     }
     w->layerCount = n;
