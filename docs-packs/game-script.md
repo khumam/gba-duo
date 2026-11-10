@@ -87,8 +87,9 @@ bottom first). Each layer has its own grid, its own metatile table and its own t
 |---|---|
 | `grid`, `stride`, `gridW`, `gridH` | cells, row-major, `stride` cells a row, `gridW` x `gridH` of them in use |
 | `cellBytes` (optional, 2) | 2 for u16 cells, 4 for u32 cells (the id is the cell's low bits, see `idMask`) |
-| `idMask` | metatile id = cell & `idMask` |
-| `special` (optional, 0) | a u16 table: a u16 cell >= `0x4000` reads its id from `special[cell - 0x4000]` |
+| `idMask` | metatile id = cell & `idMask` (then shifted, see `idShift`) |
+| `idShift` (optional, 0) | 0 to 4: the id is `(cell & idMask) >> idShift`, for maps whose cells hold a scaled id (FE6 stores metatile × 4: `idShift = 2`) |
+| `special` (optional, 0) | a u16 table: a u16 cell >= `0x4000` reads its id from `special[cell - 0x4000]`, then `idMask` and `idShift` apply |
 | `metatiles` | 4 u16 tile entries (TL, TR, BL, BR) per id, 8 bytes each |
 | `tiles` | 4bpp tile data for this layer (its BG's character base) |
 
