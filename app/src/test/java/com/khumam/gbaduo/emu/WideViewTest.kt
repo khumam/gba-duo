@@ -119,4 +119,14 @@ class WideViewTest {
         repeat(WideFallback.UNUSABLE_FRAMES - 1) { f.step(shown = true, coverage = 0.9f, match = 0.7f) }
         assertFalse(f.active)
     }
+
+    @Test
+    fun anAreaChangeFadeDoesNotFallBack() {
+        val f = WideFallback()
+        repeat(100) { f.step(shown = true, coverage = 0.9f, match = 0.95f) }
+        // A transition between areas: the game's picture is a fade for a while, so the world doesn't match.
+        repeat(WideFallback.CLEARLY_WRONG_FRAMES - 1) { f.step(shown = false, coverage = 0.9f, match = 0.1f) }
+        repeat(100) { f.step(shown = true, coverage = 0.9f, match = 0.95f) }
+        assertFalse(f.active)
+    }
 }

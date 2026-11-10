@@ -267,6 +267,8 @@ class PlayerActivity : Activity() {
             CompanionPlacement.Target.Overlay -> showOverlayTarget(controller)
         }
         companionScreen = controller
+        // Typing in a pack's text field makes the companion's window focusable; when it ends the game takes the controller back.
+        if (companionOverlay == null) controller.onTextEntryEnded = ::returnFocusToGame
 
         val packsDir = File(filesDir, "packs")
         val manifest = storage.packId?.let { PackStore(packsDir).byId(it) } ?: return
@@ -388,6 +390,22 @@ class PlayerActivity : Activity() {
         val decor = window.decorView
         decor.removeCallbacks(reclaimFocus)
         decor.postDelayed(reclaimFocus, FOCUS_CHECK_DELAY_MS)
+    }
+
+    /**
+     * After typing in the companion: restart this same instance on its own display (as [reclaimFocus] does) so that
+     * display is the top focused one again and the controller reaches the game, whether or not Android thinks the
+     * game's activity is still on top. Waits a moment for the keyboard to go away first.
+     */
+    private fun returnFocusToGame() {
+        val decor = window.decorView
+        decor.postDelayed({
+            if (resumed && !isFinishing && quickMenu?.isShowing != true) {
+                val intent = Intent(this, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                val options = ActivityOptions.makeBasic().setLaunchDisplayId(display?.displayId ?: CompanionPlacement.MAIN_DISPLAY)
+                startActivity(intent, options.toBundle())
+            }
+        }, TEXT_ENTRY_FOCUS_DELAY_MS)
     }
 
     private val reclaimFocus = Runnable {
@@ -537,5 +555,6 @@ class PlayerActivity : Activity() {
         const val EXTRA_ROM_URI = "rom_uri"
         const val EXTRA_ROM_FILE_NAME = "rom_file_name"
         private const val FOCUS_CHECK_DELAY_MS = 400L
+        private const val TEXT_ENTRY_FOCUS_DELAY_MS = 250L
     }
 }

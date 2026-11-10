@@ -104,6 +104,55 @@ and `:pressed` feedback. `text` becomes a `text` child with the class `label`
 
 Any other widget with `onClick` works too; `button` just comes styled.
 
+## Drag and drop
+
+Any widget can be picked up and dropped on another.
+
+```json
+{ "type": "list", "items": "$party", "template": {
+  "type": "box",
+  "drag": { "from": "{@index}", "name": "{name}" },
+  "onDrop": { "call": "swap", "args": ["{drag.from}", "{@index}"] }
+} }
+```
+
+- `drag` makes a widget draggable by a long press. Its value is the payload: any
+  value, object or list, with `{binding}` placeholders resolved when the drag starts.
+- `dragIf` (optional) is a binding path, like `visibleIf`: the widget can be dragged only
+  while it is truthy, so a list can make just some of its items draggable
+  (`"dragIf": "$canEquip"`). The rest still take taps.
+- While something is dragged it is drawn above the whole screen, so it can be carried across
+  to any `onDrop` widget.
+- `onDrop` takes the same actions as `onClick`. It runs on the widget the finger
+  is released over (the innermost one with `onDrop`), and the payload is
+  `{drag}` (`{drag.from}` for a field of it). Everything else resolves against the
+  drop target's own data, so `{@index}` is the target's.
+- Releasing over nothing, or over a widget without `onDrop`, does nothing.
+- While dragged, a widget matches `:dragging`; the widget it is over matches
+  `:drop-over`: `.slot:drop-over { outline: 2px solid #fc0; }`.
+- A box with `overflow: hidden` or `auto` clips the widget being dragged.
+
+## `input`
+
+```json
+{ "type": "input", "state": "note", "placeholder": "Note", "maxLength": 40,
+  "onSubmit": { "call": "saveNote", "args": ["{text}"] } }
+```
+
+A single-line text field.
+
+| Field | Default | |
+|---|---|---|
+| `state` | `input` | The UI key holding the text: `$ui.note` in bindings, `ui.note` in Lua. Updated on every edit |
+| `placeholder` | empty | Shown while the field is empty |
+| `maxLength` | 200 | Longest text kept |
+| `onSubmit` | none | Actions run when the keyboard's Done key is pressed; the text is `{text}` |
+
+- The field shows the value of its UI key, so `{ "set": { "note": "" } }` clears it.
+- Typed text is passed as it is: a `{` in it is never treated as a binding.
+- Style it like any widget (`input { background-color: #222; padding: 6px; }`); `color`,
+  `font-size`, `font-weight` and `font-family` set the text.
+
 ## Feeding a page from Lua
 
 `update()` now receives the UI state, which is also the global `ui`.

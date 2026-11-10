@@ -52,6 +52,12 @@ class CompanionController(
     /** Called on the main thread when a tap calls `actions.<name>(args...)` in the pack's Lua. */
     var onScriptCall: (name: String, args: List<Any?>) -> Unit = { _, _ -> }
 
+    /** Called with true while one of the pack's text fields has focus: its window must be able to take the keyboard. */
+    var onTextFocus: (Boolean) -> Unit = {}
+
+    /** Called when editing a text field ends (done, tapped away, left the page): the game should take the controller back. */
+    var onTextEntryEnded: () -> Unit = {}
+
     /** The current UI state, or empty when no pack is shown. */
     val uiState: Map<String, Any?> get() = (content as? Content.Pack)?.tree?.ui ?: emptyMap()
 
@@ -60,7 +66,10 @@ class CompanionController(
     fun Content() {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             when (val c = content) {
-                is Content.Pack -> CompanionScreen(c.tree, c.platform)
+                is Content.Pack -> CompanionScreen(c.tree, c.platform, onTextFocus = { editing ->
+                    onTextFocus(editing)
+                    if (!editing) onTextEntryEnded()
+                })
                 is Content.Message -> BasicText(
                     text = c.text,
                     modifier = Modifier.align(Alignment.Center),

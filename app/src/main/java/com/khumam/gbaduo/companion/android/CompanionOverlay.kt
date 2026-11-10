@@ -14,8 +14,8 @@ import kotlin.math.min
  *
  * Packs are laid out for the Thor's second screen, so the companion keeps that screen's shape
  * ([SCREEN_WIDTH] x [SCREEN_HEIGHT]), as big as fits and centred, with the game dimmed around it. A tap on the dimmed
- * part calls [onDismiss]. Touch only: no view in here takes focus, so the controller stays with the game's window,
- * which decides what its buttons do while this is up.
+ * part calls [onDismiss]. Touch only: the controller stays with the game's window, which decides what its buttons do
+ * while this is up. Only a pack's text field takes focus (to type into it); Compose asks for it when one is tapped.
  */
 internal class CompanionOverlay(
     context: Context,
@@ -33,7 +33,7 @@ internal class CompanionOverlay(
 
     init {
         setBackgroundColor(DIM)
-        descendantFocusability = FOCUS_BLOCK_DESCENDANTS
+        descendantFocusability = FOCUS_AFTER_DESCENDANTS
         isClickable = true
         setOnClickListener { onDismiss() }
         visibility = View.GONE
@@ -47,6 +47,7 @@ internal class CompanionOverlay(
     }
 
     fun hide() {
+        clearFocus()
         visibility = View.GONE
     }
 

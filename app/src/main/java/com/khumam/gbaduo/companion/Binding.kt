@@ -18,7 +18,7 @@ object Binding {
         if (context is ScopedValues) {
             if (path == "@index") return context.index.toLong()
             resolvePlain(path, context.item)?.let { return it }
-            return resolvePlain(path, context.root)
+            return resolve(path, context.root)
         }
         return resolvePlain(path, context)
     }

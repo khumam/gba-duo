@@ -11,7 +11,26 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.focus.onFocusChanged
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.input.ImeAction
+import com.khumam.gbaduo.companion.tree.InputState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -62,16 +81,26 @@ import androidx.compose.ui.graphics.Shadow as TextShadow
  * (style, text, image, visibility, children) changes.
  */
 @Composable
-fun CompanionScreen(tree: CompanionTree, platform: CompanionPlatform, modifier: Modifier = Modifier) {
+fun CompanionScreen(tree: CompanionTree, platform: CompanionPlatform, modifier: Modifier = Modifier, onTextFocus: (Boolean) -> Unit = {}) {
     val density = LocalDensity.current.density
     var size by remember { mutableStateOf(IntSize.Zero) }
     LaunchedEffect(size) {
         if (size != IntSize.Zero) tree.setViewport(size.width / density, size.height / density)
     }
-    CssLayout(VIEWPORT, Insets(), modifier.fillMaxSize().onSizeChanged { size = it }) {
-        CssNode(tree.root, tree, platform)
+    val registry = remember { DropRegistry() }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    CompositionLocalProvider(LocalDropRegistry provides registry, LocalTextFocus provides onTextFocus) {
+        // A tap nothing else took leaves the text field being typed in, and puts the keyboard away.
+        val away = Modifier.pointerInput(Unit) { detectTapGestures { keyboard?.hide(); focus.clearFocus() } }
+        CssLayout(VIEWPORT, Insets(), modifier.fillMaxSize().onSizeChanged { size = it }.then(away)) {
+            CssNode(tree.root, tree, platform)
+        }
     }
 }
+
+/** Called with true when a text field takes focus and false when it gives it up. */
+private val LocalTextFocus = compositionLocalOf<(Boolean) -> Unit> { {} }
 
 private val VIEWPORT = ContainerStyle(display = Display.STACK, alignItems = Align.START, justifyItems = Align.START)
 
@@ -117,12 +146,69 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
     val origin = remember(style) { style.transformOrigin }
     val relative = remember(style, density) { relativeOffset(style, density) }
 
+    // A box takes taps only while it can be seen: not `visibility: hidden`, not at
+    // `opacity: 0` (its own or an ancestor's target value, so a fading-out box stops
+    // taking taps at once) and not `pointer-events: none`.
+    val faded = LocalFaded.current || style.opacity <= 0f
+    val tappable = visible && !faded && style.keyword("pointer-events") != "none"
+
+    // Drag and drop: a long press picks a widget with a `drag` up and it follows the finger; the drop
+    // goes to the `onDrop` widget under it. These modifiers sit outside the graphicsLayer, so the finger's
+    // position stays in untransformed coordinates while the widget moves.
+    val registry = LocalDropRegistry.current
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var dragging by remember { mutableStateOf(false) }
+    val coords = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val payload = remember { arrayOfNulls<Any?>(1) }
+    val canDrag = node.dragPayload != null && node.draggable && tappable
+    val canDrop = node.onDrop != null && tappable
+    if (canDrop) DisposableEffect(node) { onDispose { registry.targets.remove(node) } }
+    val dragDrop = if (canDrag || canDrop) {
+        Modifier
+            .onGloballyPositioned { c ->
+                coords[0] = c
+                if (canDrop) registry.targets[node] = c
+            }
+            .then(
+                if (!canDrag) Modifier else Modifier.pointerInput(node) {
+                    fun finish(drop: Boolean) {
+                        val target = registry.takeOver(tree)
+                        registry.dragging = null
+                        dragging = false
+                        dragOffset = Offset.Zero
+                        tree.setDragging(node, false)
+                        if (drop) target?.onDrop?.invoke(payload[0])
+                        payload[0] = null
+                    }
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = {
+                            payload[0] = node.dragPayload?.invoke()
+                            dragOffset = Offset.Zero
+                            dragging = true
+                            registry.dragging = node
+                            tree.setDragging(node, true)
+                        },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            dragOffset += amount
+                            coords[0]?.let { registry.setOver(tree, registry.hit(it.localToRoot(change.position), node)) }
+                        },
+                        onDragEnd = { finish(drop = true) },
+                        onDragCancel = { finish(drop = false) },
+                    )
+                },
+            )
+    } else {
+        Modifier
+    }
+
     var modifier = Modifier
-        .then(CssParentData(box, style.zIndex ?: 0))
+        .then(CssParentData(box, if (dragging || registry.isLifted(node)) DRAG_Z else style.zIndex ?: 0))
+        .then(dragDrop)
         .graphicsLayer {
             alpha = opacity
-            translationX = resolveTranslate(translateX, size.width, density) + relative.first
-            translationY = resolveTranslate(translateY, size.height, density) + relative.second
+            translationX = resolveTranslate(translateX, size.width, density) + relative.first + dragOffset.x
+            translationY = resolveTranslate(translateY, size.height, density) + relative.second + dragOffset.y
             this.scaleX = scaleX
             this.scaleY = scaleY
             rotationZ = rotation
@@ -140,11 +226,6 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
     if (style.keyword("overflow") == "auto" || style.keyword("overflow") == "scroll") {
         modifier = modifier.verticalScroll(rememberScrollState())
     }
-    // A box takes taps only while it can be seen: not `visibility: hidden`, not at
-    // `opacity: 0` (its own or an ancestor's target value, so a fading-out box stops
-    // taking taps at once) and not `pointer-events: none`.
-    val faded = LocalFaded.current || style.opacity <= 0f
-    val tappable = visible && !faded && style.keyword("pointer-events") != "none"
     node.onClick?.takeIf { tappable }?.let { onClick ->
         val interactions = remember { MutableInteractionSource() }
         val pressed by interactions.collectIsPressedAsState()
@@ -159,14 +240,16 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
     val insets = remember(style, density) { Insets(inset("left"), inset("top"), inset("right"), inset("bottom")) }
     val text = node.text
     val image = node.image
+    val input = node.input
     val container = when {
-        text != null -> TEXT_CONTENT
+        text != null || input != null -> TEXT_CONTENT
         node.isImage -> IMAGE_CONTENT
         else -> remember(style, density) { ContainerStyle.from(style).scaled(density) }
     }
     CssLayout(container, insets, modifier) {
         when {
             text != null -> CssText(text, style, transitions, platform)
+            input != null -> CssInput(input, style, platform)
             node.isImage -> if (image != null) CssImage(image, style)
             else -> CompositionLocalProvider(LocalFaded provides faded) {
                 for (child in node.children) key(child) { CssNode(child, tree, platform) }
@@ -230,6 +313,48 @@ private fun CssText(raw: String, style: ComputedStyle, transitions: List<Transit
             noWrap -> 1
             clamp != null -> clamp
             else -> Int.MAX_VALUE
+        },
+    )
+}
+
+/** A text field: edits go to the tree as they happen, the keyboard's Done key submits. */
+@Composable
+private fun CssInput(input: InputState, style: ComputedStyle, platform: CompanionPlatform) {
+    val family = remember(style.fontFamilies) { platform.fontFamily(style.fontFamilies) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    val textFocus = LocalTextFocus.current
+    val scope = rememberCoroutineScope()
+    DisposableEffect(Unit) { onDispose { textFocus(false) } }
+    val color = Color(style.color)
+    val textStyle = TextStyle(
+        color = color,
+        fontSize = style.fontSizePx.sp,
+        fontWeight = FontWeight(style.fontWeight.coerceIn(1, 1000)),
+        fontFamily = family,
+    )
+    BasicTextField(
+        value = input.text,
+        modifier = Modifier.onFocusChanged { state ->
+            textFocus(state.isFocused)
+            // the window takes focus a moment after it is made focusable: ask for the keyboard once it has
+            if (state.isFocused) scope.launch { delay(150); keyboard?.show() }
+        },
+        onValueChange = { input.onChange(it) },
+        singleLine = true,
+        textStyle = textStyle,
+        cursorBrush = SolidColor(color),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = {
+            input.onSubmit(input.text)
+            keyboard?.hide()
+            focus.clearFocus()
+        }),
+        decorationBox = { field ->
+            if (input.text.isEmpty() && input.placeholder.isNotEmpty()) {
+                BasicText(input.placeholder, style = textStyle.copy(color = color.copy(alpha = 0.5f)))
+            }
+            field()
         },
     )
 }

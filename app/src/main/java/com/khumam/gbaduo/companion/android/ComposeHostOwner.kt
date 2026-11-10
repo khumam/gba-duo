@@ -56,13 +56,14 @@ internal fun companionView(context: Context, owner: ComposeHostOwner, controller
 /**
  * Sets up a window hosting the companion screen:
  * - **Not focusable.** Touching the companion never pulls controller focus away
- *   from the game on the other display; touch input still works.
+ *   from the game on the other display; touch input still works. It still talks to the
+ *   keyboard ([WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM]), so a pack's text field can be typed into.
  * - **Full screen.** The whole display belongs to the companion: no status bar
  *   and no navigation bar or gesture handle over the pack's layout. A swipe from
  *   an edge still shows them briefly. Uses only platform APIs (minSdk 30).
  */
 internal fun Window.setUpForCompanion() {
-    addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+    addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
     attributes = attributes.apply {
         layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
     }
@@ -73,5 +74,21 @@ internal fun Window.setUpForCompanion() {
     decorView.windowInsetsController?.apply {
         systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         hide(WindowInsets.Type.systemBars())
+    }
+}
+
+/**
+ * Lets a companion window take the keyboard while one of its text fields is being edited, and puts it back to not
+ * focusable afterwards. A window that is not focusable can never be typed into, and touching a focusable window on
+ * the second screen only moves Android's focus there, where the game's buttons would no longer reach the game, so
+ * it is focusable for exactly as long as a field has focus (the hosts forward key events to the game either way).
+ */
+internal fun Window.setTextEntry(editing: Boolean) {
+    val both = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+    if (editing) {
+        clearFlags(both)
+        setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+    } else {
+        addFlags(both)
     }
 }

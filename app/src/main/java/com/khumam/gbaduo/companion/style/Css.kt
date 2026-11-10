@@ -28,4 +28,4 @@ data class Stylesheet(
 }
 
 /** Interaction states a selector can test with `:pressed`, `:active` and `:disabled`. */
-enum class PseudoState { PRESSED, ACTIVE, DISABLED }
+enum class PseudoState { PRESSED, ACTIVE, DISABLED, DRAGGING, DROP_OVER }

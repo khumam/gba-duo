@@ -49,10 +49,37 @@ class CompanionNode internal constructor(
     var onClick: (() -> Unit)? = null
         internal set
 
+    /** Set for nodes that can be dragged: starts a drag, returning the payload (resolved against the node's data). */
+    var dragPayload: (() -> Any?)? = null
+        internal set
+
+    /** Whether the node can be dragged right now (`dragIf`): Compose state, so it follows the data. */
+    var draggable: Boolean by mutableStateOf(false)
+        internal set
+
+    /** Set for nodes that take drops: runs the drop actions with the dragged payload. */
+    var onDrop: ((payload: Any?) -> Unit)? = null
+        internal set
+
+    /** Set on a text field: the text it shows, how long it may be, and what editing and submitting do. */
+    var input: InputState? = null
+        internal set
+
     val hidden: Boolean get() = hiddenByBinding || hiddenBySwitch
     val isImage: Boolean get() = widget is Widget.Image
 
     internal val bindings = mutableListOf<(Any?) -> Unit>()
     internal var managesChildren = false
     internal var imageKey: String? = null
+}
+
+/** What a text field needs from the tree. */
+class InputState(
+    val placeholder: String,
+    val maxLength: Int,
+    val onChange: (String) -> Unit,
+    val onSubmit: (String) -> Unit,
+) {
+    var text: String by mutableStateOf("")
+        internal set
 }

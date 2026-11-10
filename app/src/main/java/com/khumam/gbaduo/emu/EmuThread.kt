@@ -128,6 +128,7 @@ class EmuThread(
     private var gameWideHook = false
     private var wideRequested = WideView.OFF
     private val wideFallback = WideFallback()
+    private var wideFellBack = false
     private var wideProbed = WideView.OFF
     private var gameErrorLogCountdown = 0
 
@@ -384,6 +385,10 @@ class EmuThread(
         if (target != wideProbed) {
             wideProbed = target
             NativeCore.setWideProbe(if (target == WideView.OFF) 0 else target.width, if (target == WideView.OFF) 0 else target.height)
+        }
+        if (wideFallback.active != wideFellBack) {
+            wideFellBack = wideFallback.active
+            Log.i(TAG, "wide view ${if (wideFellBack) "fell back" else "back"}: shown=${NativeCore.wideShown()} coverage=${NativeCore.wideCoverage()} match=${NativeCore.wideMatch()}")
         }
         val wanted = if (wideFallback.active) WideView.OFF else target
         gameView.setSizeZoom(target != WideView.OFF)

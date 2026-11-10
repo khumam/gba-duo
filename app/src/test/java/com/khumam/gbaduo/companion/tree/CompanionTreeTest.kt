@@ -345,4 +345,71 @@ class CompanionTreeTest {
         assertEquals(0, calls)
         assertEquals(1, warnings.size)
     }
+
+    @Test
+    fun aDropRunsTheTargetsActionsWithTheDraggedPayload() {
+        val t = tree(
+            """{"type":"column","children":[
+                 {"type":"list","items":"${'$'}party","template":{"type":"box","drag":{"from":"{@index}","name":"{name}"},
+                   "onDrop":[{"set":{"to":"{@index}","moved":"{drag.name}"}},{"call":"swap","args":["{drag.from}","{@index}"]}]}}]}""",
+        )
+        val calls = mutableListOf<String>()
+        t.onCall = { name, args -> calls += "$name $args" }
+        t.update(mapOf("party" to listOf(mapOf("name" to "A"), mapOf("name" to "B"))))
+        val list = t.root.children[0]
+        val first = list.children[1]
+        val second = list.children[2]
+        assertEquals(mapOf("from" to 0L, "name" to "A"), first.dragPayload!!.invoke())
+        second.onDrop!!.invoke(first.dragPayload!!.invoke())
+        assertEquals(1L, t.ui["to"])
+        assertEquals("A", t.ui["moved"])
+        assertEquals(listOf("swap [0, 1]"), calls)
+    }
+
+    @Test
+    fun draggingAndDropOverAreStyleStates() {
+        val t = tree("""{"type":"box","id":"a","drag":"x","onDrop":{"set":{"k":1}}}""", "#a:dragging { opacity: .5; } #a:drop-over { opacity: .8; }")
+        assertEquals(1f, t.root.computed!!.opacity)
+        t.setDragging(t.root, true)
+        assertEquals(.5f, t.root.computed!!.opacity)
+        t.setDragging(t.root, false)
+        t.setDropOver(t.root, true)
+        assertEquals(.8f, t.root.computed!!.opacity)
+    }
+
+    @Test
+    fun anInputKeepsItsTextInUiStateAndSubmitsIt() {
+        val t = tree("""{"type":"input","state":"name","placeholder":"Name","maxLength":5,"onSubmit":[{"call":"rename","args":["{text}"]},{"set":{"submitted":"{text}"}}]}""")
+        val events = mutableListOf<String>()
+        t.onCall = { name, args -> events += "$name $args" }
+        t.update(emptyMap<String, Any?>())
+        val input = t.root.input!!
+        assertEquals("Name", input.placeholder)
+        input.onChange("{hp}abcdef") // typed text is kept as typed, cut to maxLength
+        assertEquals("{hp}a", t.ui["name"])
+        assertEquals("{hp}a", input.text)
+        input.onSubmit(input.text)
+        assertEquals(listOf("rename [{hp}a]"), events)
+        assertEquals("{hp}a", t.ui["submitted"])
+        t.perform(listOf(Action.Set(mapOf("name" to ""))))
+        assertEquals("", input.text) // a `set` clears the field
+    }
+
+    @Test
+    fun dragIfLimitsDraggingToItemsWhereTheBindingIsTruthy() {
+        val t = tree(
+            """{"type":"list","items":"${'$'}items","template":{"type":"box","drag":"{id}","dragIf":"${'$'}canEquip"}}""",
+        )
+        t.update(mapOf("items" to listOf(mapOf("id" to "7", "canEquip" to true), mapOf("id" to "9", "canEquip" to false))))
+        val list = t.root
+        val first = list.children[1]
+        val second = list.children[2]
+        assertTrue(first.draggable)
+        assertFalse(second.draggable)
+        assertEquals("7", first.dragPayload!!.invoke())
+        // the data changes: the first slot is no longer assignable
+        t.update(mapOf("items" to listOf(mapOf("id" to "7", "canEquip" to false), mapOf("id" to "9", "canEquip" to true))))
+        assertFalse(first.draggable)
+        assertTrue(second.draggable)
+    }
 }

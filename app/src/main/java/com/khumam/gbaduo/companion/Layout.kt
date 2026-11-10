@@ -14,7 +14,10 @@ data class PageEntry(val name: String, val child: Widget)
  * Hooks every widget accepts: `id`, `class` (space-separated), `style`
  * (inline CSS; also holds the legacy widget keys converted to CSS), `classIf`
  * (class -> binding path), `bindStyle` (property -> `{binding}` template) and
- * `onClick` (what tapping it does).
+ * `onClick` (what tapping it does), `drag` (makes it draggable by a long press; the value is
+ * the payload, `{binding}` placeholders resolved when the drag starts; `dragIf` limits it to data
+ * where that binding is truthy) and `onDrop` (what
+ * dropping a dragged widget on it does; the payload is `{drag}` in its actions).
  */
 data class WidgetMeta(
     val id: String? = null,
@@ -23,6 +26,11 @@ data class WidgetMeta(
     val classIf: Map<String, String> = emptyMap(),
     val bindStyle: Map<String, String> = emptyMap(),
     val onClick: List<Action> = emptyList(),
+    val draggable: Boolean = false,
+    val drag: Any? = null,
+    val onDrop: List<Action> = emptyList(),
+    /** Binding path: when set, the widget can be dragged only while it is truthy (e.g. only items that can be equipped). */
+    val dragIf: String? = null,
 ) {
     companion object {
         val NONE = WidgetMeta()
@@ -72,6 +80,20 @@ sealed class Widget {
     ) : Widget()
     data class Image(val src: String, val size: Int, override val visibleIf: String?, override val meta: WidgetMeta = WidgetMeta.NONE) : Widget()
     data class Spacer(val size: Int, override val visibleIf: String?, override val meta: WidgetMeta = WidgetMeta.NONE) : Widget()
+    /**
+     * A text field. Each edit sets UI key [state] (`$ui.<state>`, `ui.<state>` in Lua) to the text, so a pack can
+     * read it, and the field shows that key's value (a `set` can fill or clear it). The keyboard's Done key runs
+     * [onSubmit] with the text as `{text}`.
+     */
+    data class Input(
+        val state: String,
+        val placeholder: String,
+        val maxLength: Int,
+        val onSubmit: List<Action>,
+        override val visibleIf: String?,
+        override val meta: WidgetMeta = WidgetMeta.NONE,
+    ) : Widget()
+
     data class ItemList(
         val itemsPath: String,
         val template: Widget,
@@ -208,6 +230,14 @@ object LayoutParser {
                 legacyPx("size", "width", "height")
                 Widget.Spacer(obj.optInt("size", 8), visibleIf)
             }
+            "input" -> {
+                val state = obj.optString("state", "input")
+                if (!Actions.isValidKey(state)) throw InvalidLayoutException("input: invalid state name '$state'")
+                val submitWarnings = mutableListOf<String>()
+                val onSubmit = Actions.parse(JsonTree.convertValue(obj.opt("onSubmit")), submitWarnings)
+                submitWarnings.forEach { warnings += CssWarning("layout.json (input): onSubmit: $it") }
+                Widget.Input(state, obj.optString("placeholder", ""), obj.optInt("maxLength", 200).coerceAtLeast(1), onSubmit, visibleIf)
+            }
             "list" -> {
                 val templateObj = obj.optJSONObject("template")
                     ?: throw InvalidLayoutException("list needs a 'template'")
@@ -273,9 +303,15 @@ object LayoutParser {
         val actionWarnings = mutableListOf<String>()
         val onClick = Actions.parse(JsonTree.convertValue(obj.opt("onClick")), actionWarnings)
         actionWarnings.forEach { warnings += CssWarning("$source: onClick: $it") }
+        val dropWarnings = mutableListOf<String>()
+        val onDrop = Actions.parse(JsonTree.convertValue(obj.opt("onDrop")), dropWarnings)
+        dropWarnings.forEach { warnings += CssWarning("$source: onDrop: $it") }
+        val draggable = obj.has("drag") && !obj.isNull("drag")
+        val drag = if (draggable) JsonTree.convertValue(obj.opt("drag")) else null
+        val dragIf = if (draggable && obj.has("dragIf")) bindingKey(obj.getString("dragIf")) else null
         val id = if (obj.has("id")) obj.getString("id") else null
-        if (id == null && classes.isEmpty() && inline.isEmpty() && classIf.isEmpty() && bindStyle.isEmpty() && onClick.isEmpty()) return WidgetMeta.NONE
-        return WidgetMeta(id, classes, inline, classIf, bindStyle, onClick)
+        if (id == null && classes.isEmpty() && inline.isEmpty() && classIf.isEmpty() && bindStyle.isEmpty() && onClick.isEmpty() && !draggable && onDrop.isEmpty()) return WidgetMeta.NONE
+        return WidgetMeta(id, classes, inline, classIf, bindStyle, onClick, draggable, drag, onDrop, dragIf)
     }
 
     private fun stringMap(obj: JSONObject?): Map<String, String> {
@@ -294,6 +330,7 @@ object LayoutParser {
         is Widget.Image -> copy(meta = meta)
         is Widget.Spacer -> copy(meta = meta)
         is Widget.ItemList -> copy(meta = meta)
+        is Widget.Input -> copy(meta = meta)
         is Widget.Box -> copy(meta = meta)
     }
 

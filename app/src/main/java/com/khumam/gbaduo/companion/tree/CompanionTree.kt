@@ -6,6 +6,7 @@ import com.khumam.gbaduo.companion.Actions
 import com.khumam.gbaduo.companion.Binding
 import com.khumam.gbaduo.companion.ScopedValues
 import com.khumam.gbaduo.companion.Widget
+import com.khumam.gbaduo.companion.WidgetMeta
 import com.khumam.gbaduo.companion.style.ComputedStyle
 import com.khumam.gbaduo.companion.style.CssParser
 import com.khumam.gbaduo.companion.style.CssWarning
@@ -158,13 +159,7 @@ class CompanionTree(
     }
 
     /** For `:pressed`. */
-    fun setPressed(node: CompanionNode, pressed: Boolean) {
-        val states = if (pressed) node.style.states + PseudoState.PRESSED else node.style.states - PseudoState.PRESSED
-        if (states == node.style.states) return
-        node.style.states = states
-        markDirty(node)
-        flush()
-    }
+    fun setPressed(node: CompanionNode, pressed: Boolean) = setState(node, PseudoState.PRESSED, pressed)
 
     // ---- building ---------------------------------------------------------------
 
@@ -179,6 +174,7 @@ class CompanionTree(
         is Widget.Image -> "image"
         is Widget.Spacer -> "spacer"
         is Widget.ItemList -> "list"
+        is Widget.Input -> "input"
         is Widget.Box -> "box"
     }
 
@@ -204,6 +200,7 @@ class CompanionTree(
         attach(node, parent)
         bindCommon(node, widget)
         if (meta.onClick.isNotEmpty()) bindClick(node, meta.onClick)
+        if (meta.draggable || meta.onDrop.isNotEmpty()) bindDragDrop(node, meta)
 
         when (widget) {
             is Widget.Column -> widget.children.forEach { inflate(it, node) }
@@ -219,6 +216,7 @@ class CompanionTree(
             is Widget.Spacer -> Unit
             is Widget.Bar -> buildBar(node, widget)
             is Widget.ItemList -> buildList(node, widget)
+            is Widget.Input -> buildInput(node, widget)
             is Widget.Tabs -> buildTabs(node, widget)
             is Widget.Pages -> buildPages(node, widget)
         }
@@ -254,6 +252,68 @@ class CompanionTree(
         var context: Any? = null
         node.bindings += { ctx -> context = ctx }
         node.onClick = { perform(actions, context) }
+    }
+
+    /** The binding context of a drop: the dragged payload as `{drag}`, then the drop target's own data. */
+    private fun dropContext(payload: Any?, target: Any?): Any? =
+        ScopedValues(item = mapOf("drag" to payload), index = (target as? ScopedValues)?.index ?: 0, root = target)
+
+    private fun bindDragDrop(node: CompanionNode, meta: WidgetMeta) {
+        var context: Any? = null
+        node.bindings += { ctx ->
+            context = ctx
+            if (meta.draggable) node.draggable = meta.dragIf?.let { Binding.isTruthy(Binding.resolve(it, ctx)) } ?: true
+        }
+        if (meta.draggable) node.dragPayload = { payloadValue(meta.drag, context) }
+        if (meta.onDrop.isNotEmpty()) node.onDrop = { payload -> perform(meta.onDrop, dropContext(payload, context)) }
+    }
+
+    /** A drag payload with its `{binding}` placeholders resolved, inside objects and lists too. */
+    private fun payloadValue(value: Any?, context: Any?): Any? = when (value) {
+        is Map<*, *> -> value.entries.associate { (k, v) -> k to payloadValue(v, context) }
+        is List<*> -> value.map { payloadValue(it, context) }
+        else -> actionValue(value, context)
+    }
+
+    /** For `:dragging` (the widget being dragged). */
+    fun setDragging(node: CompanionNode, dragging: Boolean) = setState(node, PseudoState.DRAGGING, dragging)
+
+    /** For `:drop-over` (the widget a drag is over, if it takes drops). */
+    fun setDropOver(node: CompanionNode, over: Boolean) = setState(node, PseudoState.DROP_OVER, over)
+
+    private fun setState(node: CompanionNode, state: PseudoState, on: Boolean) {
+        val states = if (on) node.style.states + state else node.style.states - state
+        if (states == node.style.states) return
+        node.style.states = states
+        markDirty(node)
+        flush()
+    }
+
+    private fun buildInput(node: CompanionNode, widget: Widget.Input) {
+        var context: Any? = null
+        val input = InputState(
+            placeholder = widget.placeholder,
+            maxLength = widget.maxLength,
+            onChange = { text -> setUiValue(widget.state, text.take(widget.maxLength)) },
+            onSubmit = { text ->
+                val target = context
+                perform(widget.onSubmit, ScopedValues(item = mapOf("text" to text), index = (target as? ScopedValues)?.index ?: 0, root = target))
+            },
+        )
+        input.text = uiState[widget.state]?.toString().orEmpty()
+        node.input = input
+        node.bindings += { ctx ->
+            context = ctx
+            input.text = uiState[widget.state]?.toString().orEmpty()
+        }
+    }
+
+    /** Sets one UI key to [value] as it is (no `{binding}` expansion: this is what the player typed). */
+    private fun setUiValue(key: String, value: Any?) {
+        if (key in uiState && uiState[key] == value) return
+        uiState[key] = value
+        rebind()
+        onUiChange(ui)
     }
 
     private fun setBound(node: CompanionNode, declarations: List<Declaration>) {

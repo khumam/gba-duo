@@ -8,6 +8,7 @@ import android.util.Log
 import android.view.KeyEvent
 import com.khumam.gbaduo.companion.android.ComposeHostOwner
 import com.khumam.gbaduo.companion.android.companionView
+import com.khumam.gbaduo.companion.android.setTextEntry
 import com.khumam.gbaduo.companion.android.setUpForCompanion
 
 /**
@@ -44,6 +45,7 @@ class CompanionActivity : Activity() {
         session = s
         s.activity = this
         window.setUpForCompanion()
+        s.controller.onTextFocus = { editing -> window.setTextEntry(editing) }
         setContentView(companionView(this, owner, s.controller))
     }
 
@@ -67,6 +69,7 @@ class CompanionActivity : Activity() {
         session?.onKey?.invoke(event) == true || super.dispatchKeyEvent(event)
 
     override fun onDestroy() {
+        session?.controller?.onTextFocus = {}
         owner.destroy()
         session?.let { if (it.activity === this) it.activity = null }
         super.onDestroy()

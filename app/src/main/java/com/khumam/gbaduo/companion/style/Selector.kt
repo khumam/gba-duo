@@ -228,6 +228,8 @@ class Selector private constructor(
             "pressed" -> Pseudo.State(PseudoState.PRESSED).takeIf { arg == null }
             "active" -> Pseudo.State(PseudoState.ACTIVE).takeIf { arg == null }
             "disabled" -> Pseudo.State(PseudoState.DISABLED).takeIf { arg == null }
+            "dragging" -> Pseudo.State(PseudoState.DRAGGING).takeIf { arg == null }
+            "drop-over" -> Pseudo.State(PseudoState.DROP_OVER).takeIf { arg == null }
             else -> null
         }
 

@@ -7,6 +7,7 @@ import android.view.Display
 import android.view.KeyEvent
 import com.khumam.gbaduo.companion.android.ComposeHostOwner
 import com.khumam.gbaduo.companion.android.companionView
+import com.khumam.gbaduo.companion.android.setTextEntry
 import com.khumam.gbaduo.companion.android.setUpForCompanion
 
 /**
@@ -29,10 +30,12 @@ class CompanionPresentation(
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window?.setUpForCompanion()
+        controller.onTextFocus = { editing -> window?.setTextEntry(editing) }
         setContentView(companionView(context, owner, controller))
     }
 
     override fun onStop() {
+        controller.onTextFocus = {}
         owner.destroy()
         super.onStop()
     }

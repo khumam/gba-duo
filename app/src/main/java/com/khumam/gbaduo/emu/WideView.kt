@@ -121,7 +121,7 @@ class WideFallback {
         const val UNUSABLE_FRAMES = 10
         const val MIN_DWELL_FRAMES = 30
         const val CLEARLY_WRONG_MATCH = 0.5f
-        const val CLEARLY_WRONG_FRAMES = 3
+        const val CLEARLY_WRONG_FRAMES = 8
         const val LOW_COVERAGE = 0.15f
         const val HIGH_COVERAGE = 0.30f
     }

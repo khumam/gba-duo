@@ -50,6 +50,7 @@ Every widget in `layout.json` accepts:
 | `style` | Inline CSS (object or string); beats stylesheet rules | `"style": { "padding": "8px" }` or `"style": "padding: 8px"` |
 | `classIf` | Adds a class while a binding is truthy | `"classIf": { "low": "$hpLow" }` |
 | `bindStyle` | CSS values from bindings, re-applied each tick; beats `style` | `"bindStyle": { "--type": "{typeColor}" }` |
+| `drag`, `dragIf`, `onDrop` | Draggable by a long press with this payload (only where the `dragIf` binding is truthy); what dropping something on it does ([details](companion-pages.md#drag-and-drop)) | `"drag": "{@index}"` |
 | `onClick` | What tapping it does: set UI state, change page, call Lua ([details](companion-pages.md)) | `"onClick": { "navigate": "detail" }` |
 
 Element names for selectors are the widget types, plus parts the renderer generates:
@@ -109,7 +110,7 @@ bar > label  { font-size: 9px; }
 | `type`, `*`, `.class`, `#id`, compounds (`.mon.fainted`) | |
 | Descendant `A B` and child `A > B` | |
 | `:root`, `:empty`, `:first-child`, `:last-child`, `:nth-child()`, `:nth-last-child()` | `odd`, `even`, `3`, `2n+1`, `-n+3` |
-| `:pressed`, `:active`, `:disabled` | `:pressed` = held down (tabs and widgets with `onClick`); `:active` = selected tab |
+| `:pressed`, `:active`, `:disabled`, `:dragging`, `:drop-over` | `:pressed` = held down (tabs and widgets with `onClick`); `:active` = selected tab; `:dragging` = being dragged (`drag`); `:drop-over` = a drag is over it (`onDrop`) |
 
 Cascade: built-in styles < pack stylesheets (by specificity, then source order)
 < inline `style` < `bindStyle`. `!important` is ignored. Not supported: sibling

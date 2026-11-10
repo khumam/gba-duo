@@ -275,6 +275,9 @@ static void probe_wide(void) {
     bool have = gbaduo_game_enabled() && gbaduo_game_wide(width, height, left, top, g_state.wideMatch, &world);
     if (have) {
         g_state.wideMatch = wide_seam_match(&world, (const uint32_t*) g_state.videoBuffer, WIDE_FRAME_W, 0, 0, false);
+        /* The frame sits where paint_wide_margins() would put it (moved toward a map edge), so a room that
+         * covers enough when painted also covers enough here and the app can leave the fallback. */
+        wide_clamp_frame(&world, width, height, &left, &top);
         g_state.wideCoverage = wide_coverage(&world, left, top, width, height);
     } else {
         g_state.wideMatch = 0.0f;
@@ -361,7 +364,10 @@ Java_com_khumam_gbaduo_emu_NativeCore_setWide(JNIEnv* env, jobject thiz, jint wi
  * while the picture is the game's own 240x160 the core keeps asking game.lua whether there is a world to show. */
 JNIEXPORT void JNICALL
 Java_com_khumam_gbaduo_emu_NativeCore_setWideProbe(JNIEnv* env, jobject thiz, jint width, jint height) {
-    unsigned w = width > WIDE_FRAME_W ? (unsigned) width : 0u;
+    /* Wanted when the picture would be bigger than the game's own in either direction: a square screen's extra wide
+     * view is 240 wide and only taller. */
+    bool wanted = width > WIDE_FRAME_W || height > WIDE_FRAME_H;
+    unsigned w = wanted ? (width > WIDE_FRAME_W ? (unsigned) width : WIDE_FRAME_W) : 0u;
     unsigned h = height >= WIDE_FRAME_H ? (unsigned) height : WIDE_FRAME_H;
     if (w == g_state.wideProbeW && h == g_state.wideProbeH) return;
     g_state.wideProbeW = w;
