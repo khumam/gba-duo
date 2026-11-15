@@ -1392,6 +1392,7 @@ bool gbaduo_script_load(const char* source, const char* packDir) {
 
 bool gbaduo_game_load(const char* source, const char* packDir) {
     activate(SCRIPT_GAME);
+    wide_forget(); /* chunk layers keep unpacked ROM chunks by address: another game, other data */
     return load_active(source, packDir);
 }
 
@@ -1525,6 +1526,30 @@ static bool read_layers(lua_State* L, struct WideWorld* w) {
             return false;
         }
         struct WideLayer* l = &w->layers[i];
+        lua_getfield(L, -1, "chunks");
+        bool chunked = !lua_isnil(L, -1);
+        lua_pop(L, 1);
+        if (chunked) {
+            l->tileMode = 1;
+            if (!world_field(L, "chunks", 0, UINT32_MAX, &v)) { lua_pop(L, 1); return false; }
+            l->chunks = (uint32_t) v;
+            if (!world_field(L, "chunkW", 1, 64, &v)) { lua_pop(L, 1); return false; }
+            l->chunkW = (int) v;
+            if (!world_field(L, "chunkH", 1, 64, &v)) { lua_pop(L, 1); return false; }
+            l->chunkH = (int) v;
+            if (!world_field(L, "tiles", 0, UINT32_MAX, &v)) { lua_pop(L, 1); return false; }
+            l->tiles = (uint32_t) v;
+            if (!world_field_or(L, "chunkCodec", 0, 1, 0, &v)) { lua_pop(L, 1); return false; }
+            l->chunkCodec = (int) v;
+            if (!world_field_or(L, "dx", INT32_MIN, INT32_MAX, 0, &v)) { lua_pop(L, 1); return false; }
+            l->dx = (int) v;
+            if (!world_field_or(L, "dy", INT32_MIN, INT32_MAX, 0, &v)) { lua_pop(L, 1); return false; }
+            l->dy = (int) v;
+            if (!world_field_or(L, "trimBounds", 0, 1, 0, &v)) { lua_pop(L, 1); return false; }
+            l->trimBounds = (int) v;
+            lua_pop(L, 1);
+            continue;
+        }
 #define LAYER_FIELD(name, lo, hi, dst) if (!world_field(L, name, lo, hi, &v)) { lua_pop(L, 1); return false; } dst = v
         LAYER_FIELD("grid", 0, UINT32_MAX, l->grid);
         LAYER_FIELD("stride", INT32_MIN, INT32_MAX, l->stride);
@@ -1570,11 +1595,16 @@ static bool read_markers(lua_State* L, struct WideWorld* w) {
     }
     for (int i = 0; i < n; i++) {
         lua_rawgeti(L, -1, i + 1);
-        lua_Integer x, y, kind, tiles = 0, palette = 0, mw = 0, mh = 0, flip = 0;
+        lua_Integer x, y, kind, tiles = 0, palette = 0, mw = 0, mh = 0, flip = 0, vflip = 0, bpp = 4;
         bool ok = lua_istable(L, -1) && world_field(L, "x", INT32_MIN, INT32_MAX, &x) &&
                   world_field(L, "y", INT32_MIN, INT32_MAX, &y) && world_field(L, "kind", 1, WIDE_MARKER_KIND_COUNT - 1, &kind) &&
                   world_field_or(L, "tiles", 0, UINT32_MAX, 0, &tiles) && world_field_or(L, "palette", 0, UINT32_MAX, 0, &palette) &&
-                  world_field_or(L, "w", 0, 64, 0, &mw) && world_field_or(L, "h", 0, 64, 0, &mh) && world_field_or(L, "hflip", 0, 1, 0, &flip);
+                  world_field_or(L, "w", 0, 64, 0, &mw) && world_field_or(L, "h", 0, 64, 0, &mh) && world_field_or(L, "hflip", 0, 1, 0, &flip) &&
+                  world_field_or(L, "vflip", 0, 1, 0, &vflip) && world_field_or(L, "bpp", 4, 8, 4, &bpp);
+        if (ok && bpp != 4 && bpp != 8) {
+            set_error("a marker's 'bpp' is 4 or 8");
+            ok = false;
+        }
         if (ok && tiles != 0 && (palette == 0 || mw < 8 || mh < 8 || (mw & 7) || (mh & 7))) {
             set_error("a marker with 'tiles' needs 'palette' and 'w', 'h' (multiples of 8, 8 to 64)");
             ok = false;
@@ -1593,6 +1623,8 @@ static bool read_markers(lua_State* L, struct WideWorld* w) {
         w->markers[i].w = (int) mw;
         w->markers[i].h = (int) mh;
         w->markers[i].hflip = (int) flip;
+        w->markers[i].vflip = (int) vflip;
+        w->markers[i].bpp8 = bpp == 8;
     }
     w->markerCount = n;
     lua_pop(L, 1);
@@ -1634,6 +1666,25 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
     INT_FIELD("palette", 0, UINT32_MAX, w.palette);
     if (!read_markers(L, &w)) return false;
     if (!read_overlay(L, &w)) return false;
+    lua_getfield(L, -1, "bounds");
+    if (!lua_isnil(L, -1)) {
+        lua_Integer bx, by, bw, bh;
+        bool ok = lua_istable(L, -1) && world_field(L, "x", INT32_MIN / 2, INT32_MAX / 2, &bx) &&
+                  world_field(L, "y", INT32_MIN / 2, INT32_MAX / 2, &by) && world_field(L, "w", 1, 1 << 20, &bw) &&
+                  world_field(L, "h", 1, 1 << 20, &bh);
+        lua_pop(L, 1);
+        if (!ok) {
+            if (!g_script.lastError[0]) set_error("field 'bounds' needs { x, y, w, h }");
+            return false;
+        }
+        w.hasBounds = 1;
+        w.bx0 = (int32_t) bx;
+        w.by0 = (int32_t) by;
+        w.bx1 = (int32_t) (bx + bw);
+        w.by1 = (int32_t) (by + bh);
+    } else {
+        lua_pop(L, 1);
+    }
     lua_getfield(L, -1, "layers");
     if (lua_istable(L, -1)) {
         bool ok = read_layers(L, &w);

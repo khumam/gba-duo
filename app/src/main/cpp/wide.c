@@ -2,6 +2,10 @@
 
 #include "bus.h"
 
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <string.h>
+
 #define MAX_CELLS 1024
 /* Showing needs a good match, hiding a clearly bad one (hysteresis): a crowded edge (NPCs and the player standing on the
  * seam columns are no part of the world) sits around 0.85 without the world being wrong. */
@@ -20,6 +24,10 @@ static bool layers_valid(const struct WideWorld* w) {
     if (w->layerCount < 1 || w->layerCount > WIDE_MAX_LAYERS) return false;
     for (int i = 0; i < w->layerCount; i++) {
         const struct WideLayer* l = &w->layers[i];
+        if (l->tileMode == 1) {
+            if (l->chunkW < 1 || l->chunkW > 64 || l->chunkH < 1 || l->chunkH > 64 || (l->chunkCodec != 0 && l->chunkCodec != 1)) return false;
+            continue;
+        }
         if (l->gridW < 1 || l->gridW > MAX_CELLS || l->gridH < 1 || l->gridH > MAX_CELLS ||
             l->stride < l->gridW || l->stride > MAX_CELLS || (l->cellBytes != 0 && l->cellBytes != 2 && l->cellBytes != 4) ||
             l->idShift < 0 || l->idShift > 4) {
@@ -56,6 +64,212 @@ static int32_t floor_div(int32_t a, int32_t b) {
 
 static int32_t floor_mod(int32_t a, int32_t b) {
     return a - floor_div(a, b) * b;
+}
+
+/* ---- chunked 8bpp tilemap layers ---------------------------------------------------------------------------------- */
+
+#define CHUNK_BYTES 2048 /* 32 x 32 u16 tile entries */
+#define CHUNK_SLOTS 128
+#define CHUNK_PROBE 8
+
+struct ChunkCache {
+    uint32_t key[CHUNK_SLOTS];   /* the chunk's bus address, 0: free */
+    uint8_t ok[CHUNK_SLOTS];
+    uint8_t data[CHUNK_SLOTS][CHUNK_BYTES];
+    unsigned evict;
+};
+
+static _Thread_local struct ChunkCache* t_chunks;
+static atomic_uint g_chunkGeneration;       /* bumped by wide_forget; a thread's cache older than that is emptied before use */
+static _Thread_local unsigned t_chunkGeneration;
+
+void wide_forget(void) {
+    atomic_fetch_add(&g_chunkGeneration, 1u);
+}
+
+/* An MSB-first bit reader over u32 words read from the bus (what the game's own unpacker does with r6/sl). */
+struct PackBits {
+    uint32_t src;
+    uint32_t word;
+    uint32_t buf;
+    int left;
+    bool bad;
+};
+
+static uint32_t pack_bit(struct PackBits* b) {
+    if (b->left == 0) {
+        if (b->word >= 4096) { /* a chunk never packs to more than 16 KB: a runaway stream */
+            b->bad = true;
+            return 0;
+        }
+        b->buf = gbaduo_bus_read32(b->src + b->word * 4u);
+        b->word++;
+        b->left = 32;
+    }
+    uint32_t bit = b->buf >> 31;
+    b->buf <<= 1;
+    b->left--;
+    return bit;
+}
+
+static uint32_t pack_get(struct PackBits* b, int n) {
+    uint32_t v = 0;
+    for (int i = 0; i < n && !b->bad; i++) v = (v << 1) | pack_bit(b);
+    return v;
+}
+
+/* An Elias-gamma style number: 1, then (value bit, continue bit) pairs. */
+static uint32_t pack_gamma(struct PackBits* b) {
+    uint32_t v = 1;
+    for (int i = 0; i < 24 && !b->bad; i++) {
+        v = v * 2 + pack_bit(b);
+        if (pack_bit(b) == 0) return v;
+    }
+    b->bad = true;
+    return v;
+}
+
+/* Webfoot's packer (The Legacy of Goku II's routine at IWRAM 0x03000000, copied there from ROM 0x087FD6BC): literals of r3
+ * bits plus a base, matches by gamma-coded length and distance (with a repeat-last-distance code), short matches, a
+ * 256-byte raw block, and the end code. Verified bit for bit against the chunks the game itself keeps. */
+static bool pack_unpack(uint32_t src, uint8_t* out) {
+    struct PackBits b = { src, 0, 0, 0, false };
+    int n = 0, litBits = 8, shift = 8;
+    uint32_t litBase = 0, dist = 1;
+#define COPY(count) do { uint32_t cnt_ = (count); if (dist < 1 || dist > (uint32_t) n) return false; \
+        while (cnt_-- && n < CHUNK_BYTES) { out[n] = out[n - (int) dist]; n++; } } while (0)
+    while (n < CHUNK_BYTES && !b.bad) {
+        if (pack_bit(&b)) {
+            out[n++] = (uint8_t) (pack_get(&b, litBits) + litBase);
+            continue;
+        }
+        if (pack_bit(&b)) {
+            uint32_t len = pack_gamma(&b);
+            if (len == 2) {
+                len = pack_gamma(&b);
+                COPY(len);
+                continue;
+            }
+            len -= 3;
+            dist = pack_get(&b, shift) + (shift < 32 ? len << shift : 0u);
+            len = pack_gamma(&b);
+            if (dist >= 0x10000u) len += 3;
+            else if (dist >= 0x37FFu) len += 2;
+            else if (dist >= 0x27Fu) len += 1;
+            else if (dist <= 0x7Fu) len += 4;
+            COPY(len);
+            continue;
+        }
+        if (pack_bit(&b) == 0) {
+            uint32_t v = pack_get(&b, 7);
+            if (v == 0) {
+                v = pack_get(&b, 2);
+                if (v == 0) break;
+                shift = (int) pack_get(&b, (int) v + 3);
+                if (shift > 32) return false;
+                continue;
+            }
+            dist = v;
+            COPY(pack_get(&b, 2) + 2);
+            continue;
+        }
+        int v = (int) pack_get(&b, 4) - 1;
+        if (v == 0) {
+            out[n++] = 0;
+            continue;
+        }
+        if (v > 0) {
+            if (v > n) return false;
+            out[n] = out[n - v];
+            n++;
+            continue;
+        }
+        if (pack_bit(&b) == 0) {
+            litBase = 0;
+            if (pack_bit(&b)) {
+                litBits = 8;
+            } else {
+                litBits = 7;
+                litBase = pack_get(&b, 8);
+            }
+            continue;
+        }
+        do {
+            for (int i = 0; i < 256 && n < CHUNK_BYTES; i++) out[n++] = (uint8_t) pack_get(&b, 8);
+        } while (pack_bit(&b) && n < CHUNK_BYTES && !b.bad);
+    }
+#undef COPY
+    return !b.bad && n == CHUNK_BYTES;
+}
+
+/* The 2048 bytes of the Webfoot chunk at [ptr] (u32 kind, u32 size, data: kind 0 raw, otherwise packed), or NULL. The packed
+ * chunk lives in ROM and never changes, so the decoded copy is kept (per thread, 128 chunks). */
+static const uint8_t* chunk_unpacked(uint32_t ptr) {
+    if (!t_chunks) {
+        t_chunks = (struct ChunkCache*) calloc(1, sizeof(*t_chunks));
+        if (!t_chunks) return NULL;
+    }
+    struct ChunkCache* c = t_chunks;
+    unsigned generation = atomic_load(&g_chunkGeneration);
+    if (t_chunkGeneration != generation) {
+        memset(c->key, 0, sizeof(c->key));
+        t_chunkGeneration = generation;
+    }
+    unsigned h = (unsigned) (((ptr >> 2) * 2654435761u) >> 25) % CHUNK_SLOTS;
+    for (int p = 0; p < CHUNK_PROBE; p++) {
+        unsigned s = (h + (unsigned) p) % CHUNK_SLOTS;
+        if (c->key[s] == ptr) return c->ok[s] ? c->data[s] : NULL;
+        if (c->key[s] == 0) {
+            h = s;
+            goto fill;
+        }
+    }
+    h = (h + (c->evict++ % CHUNK_PROBE)) % CHUNK_SLOTS;
+fill:
+    c->key[h] = ptr;
+    uint32_t kind = gbaduo_bus_read32(ptr), size = gbaduo_bus_read32(ptr + 4);
+    bool ok = false;
+    if (size == CHUNK_BYTES) {
+        if (kind == 0) {
+            for (uint32_t i = 0; i < CHUNK_BYTES; i += 4) {
+                uint32_t v = gbaduo_bus_read32(ptr + 8 + i);
+                memcpy(c->data[h] + i, &v, 4);
+            }
+            ok = true;
+        } else if (kind == 1 || kind == 2) {
+            ok = pack_unpack(ptr + 8, c->data[h]);
+        }
+    }
+    c->ok[h] = ok;
+    return ok ? c->data[h] : NULL;
+}
+
+/* The tile entry of chunk layer [l] at world pixel ([wx], [wy]) and the pixel inside it; false where there is no chunk. */
+static bool chunk_entry(const struct WideLayer* l, int32_t wx, int32_t wy, uint16_t* entry, int* tx, int* ty) {
+    int32_t lx = wx + l->dx, ly = wy + l->dy;
+    int32_t cx = floor_div(lx, 256), cy = floor_div(ly, 256);
+    if (cx < 0 || cx >= l->chunkW || cy < 0 || cy >= l->chunkH) return false;
+    uint32_t ptr = gbaduo_bus_read32(l->chunks + ((uint32_t) cy * (uint32_t) l->chunkW + (uint32_t) cx) * 4u);
+    if (ptr == 0) return false;
+    int px = (int) (lx - cx * 256), py = (int) (ly - cy * 256);
+    uint32_t off = (uint32_t) (((py >> 3) * 32 + (px >> 3)) * 2);
+    if (l->chunkCodec == 1) {
+        const uint8_t* d = chunk_unpacked(ptr);
+        if (!d) return false;
+        *entry = (uint16_t) (d[off] | d[off + 1] << 8);
+    } else {
+        *entry = gbaduo_bus_read16(ptr + off);
+    }
+    *tx = px & 7;
+    *ty = py & 7;
+    return true;
+}
+
+/* The palette index of one pixel of an 8bpp tile entry. */
+static int tile8_index(const struct WideLayer* l, uint16_t entry, int tx, int ty) {
+    int x = (entry & 0x400) ? 7 - tx : tx;
+    int y = (entry & 0x800) ? 7 - ty : ty;
+    return gbaduo_bus_read8(l->tiles + (uint32_t) (entry & 0x3FF) * 64u + (uint32_t) y * 8u + (uint32_t) x);
 }
 
 /* The palette index of pixel ([tx], [ty]) of the tile [entry] names, or 0 for transparent;
@@ -97,6 +311,13 @@ static uint32_t layered_pixel(const struct WideWorld* w, const uint32_t pal[256]
         const struct WideLayer* l = &w->layers[i];
         uint16_t entry;
         int tx, ty;
+        if (l->tileMode == 1) {
+            if (!chunk_entry(l, wx, wy, &entry, &tx, &ty)) continue;
+            inside = true;
+            int index8 = tile8_index(l, entry, tx, ty);
+            if (index8 != 0) return pal[index8];
+            continue;
+        }
         if (!layer_entry(l, wx, wy, &entry, &tx, &ty)) continue;
         inside = true;
         int x = (entry & 0x400) ? 7 - tx : tx;
@@ -217,20 +438,36 @@ static void span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int
     }
 }
 
-/* [n] (1..8) pixels of a layered world, inside one 8-pixel tile column: per layer, one set of bus reads. */
+/* [n] (1..8) pixels of a layered world, inside one 8-pixel tile column of every layer (wide_row splits the spans there):
+ * per layer, one set of bus reads. */
 static void layered_span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int32_t wx, int n, uint32_t* out) {
     uint32_t rows[WIDE_MAX_LAYERS] = {0};
+    uint8_t rows8[WIDE_MAX_LAYERS][8];
     uint16_t entries[WIDE_MAX_LAYERS] = {0};
+    int tx0[WIDE_MAX_LAYERS] = {0};
     bool has[WIDE_MAX_LAYERS] = {false};
     bool inside = false;
-    int tx0 = 0;
     for (int i = 0; i < w->layerCount; i++) {
         const struct WideLayer* l = &w->layers[i];
         int tx, ty;
+        if (l->tileMode == 1) {
+            if (!chunk_entry(l, wx, wy, &entries[i], &tx, &ty)) continue;
+            has[i] = true;
+            inside = true;
+            tx0[i] = tx;
+            int y = (entries[i] & 0x800) ? 7 - ty : ty;
+            uint32_t base = l->tiles + (uint32_t) (entries[i] & 0x3FF) * 64u + (uint32_t) y * 8u;
+            uint32_t lo = gbaduo_bus_read32(base), hi = gbaduo_bus_read32(base + 4);
+            for (int k = 0; k < 4; k++) {
+                rows8[i][k] = (uint8_t) (lo >> (8 * k));
+                rows8[i][4 + k] = (uint8_t) (hi >> (8 * k));
+            }
+            continue;
+        }
         if (!layer_entry(l, wx, wy, &entries[i], &tx, &ty)) continue;
         has[i] = true;
         inside = true;
-        tx0 = tx;
+        tx0[i] = tx;
         int y = (entries[i] & 0x800) ? 7 - ty : ty;
         rows[i] = gbaduo_bus_read32(l->tiles + (uint32_t) (entries[i] & 0x3FF) * 32u + (uint32_t) y * 4u);
     }
@@ -238,7 +475,16 @@ static void layered_span(const struct WideWorld* w, const uint32_t* pal, int32_t
         uint32_t color = inside ? pal[0] : 0;
         for (int i = w->layerCount - 1; i >= 0; i--) {
             if (!has[i]) continue;
-            int index = row_index(rows[i], entries[i], tx0 + k);
+            if (w->layers[i].tileMode == 1) {
+                int x = (entries[i] & 0x400) ? 7 - (tx0[i] + k) : tx0[i] + k;
+                int index8 = rows8[i][x & 7];
+                if (index8 != 0) {
+                    color = pal[index8];
+                    break;
+                }
+                continue;
+            }
+            int index = row_index(rows[i], entries[i], tx0[i] + k);
             if (index != 0) {
                 color = pal[(entries[i] >> 12) * 16 + index];
                 break;
@@ -253,6 +499,11 @@ static void wide_row(const struct WideWorld* w, const uint32_t* pal, int32_t wy,
     if (w->layerCount != 0) {
         while (n > 0) {
             int inTile = 8 - (int) ((uint32_t) wx & 7u);
+            for (int i = 0; i < w->layerCount; i++) { /* a chunk layer's tiles line up with its own origin, not the world's */
+                if (w->layers[i].tileMode != 1) continue;
+                int t = 8 - (int) ((uint32_t) (wx + w->layers[i].dx) & 7u);
+                if (t < inTile) inTile = t;
+            }
             int m = n < inTile ? n : inTile;
             layered_span(w, pal, wy, wx, m, out);
             wx += m;
@@ -289,19 +540,26 @@ static void paint_sprite_marker(const struct WideMarker* m, const struct WideWor
     int64_t ox = (int64_t) left + ((int64_t) m->x - w->x);
     int64_t oy = (int64_t) top + ((int64_t) m->y - w->y);
     if (ox + m->w <= 0 || oy + m->h <= 0 || ox >= pictureW || oy >= pictureH) return;
-    uint32_t pal[16];
-    for (int i = 1; i < 16; i++) pal[i] = wide_color(gbaduo_bus_read16(m->palette + (uint32_t) i * 2u));
+    uint32_t pal[256];
+    int colors = m->bpp8 ? 256 : 16;
+    for (int i = 1; i < colors; i++) pal[i] = wide_color(gbaduo_bus_read16(m->palette + (uint32_t) i * 2u));
     int tilesPerRow = m->w / 8;
     for (int sy = 0; sy < m->h; sy++) {
         int py = (int) oy + sy;
         if (py < 0 || py >= pictureH) continue;
+        int ry = m->vflip ? m->h - 1 - sy : sy;
         for (int sx = 0; sx < m->w; sx++) {
             int px = (int) ox + sx;
             if (px < 0 || px >= pictureW || marker_in_frame(px, py, left, top)) continue;
             int tx = m->hflip ? m->w - 1 - sx : sx;
-            uint32_t tile = (uint32_t) ((sy >> 3) * tilesPerRow + (tx >> 3));
-            uint8_t b = gbaduo_bus_read8(m->tiles + tile * 32u + (uint32_t) (sy & 7) * 4u + (uint32_t) ((tx & 7) >> 1));
-            int index = (tx & 1) ? b >> 4 : b & 0x0F;
+            uint32_t tile = (uint32_t) ((ry >> 3) * tilesPerRow + (tx >> 3));
+            int index;
+            if (m->bpp8) {
+                index = gbaduo_bus_read8(m->tiles + tile * 64u + (uint32_t) (ry & 7) * 8u + (uint32_t) (tx & 7));
+            } else {
+                uint8_t b = gbaduo_bus_read8(m->tiles + tile * 32u + (uint32_t) (ry & 7) * 4u + (uint32_t) ((tx & 7) >> 1));
+                index = (tx & 1) ? b >> 4 : b & 0x0F;
+            }
             if (index == 0) continue;
             buf[(size_t) py * (size_t) stride + (size_t) px] = pal[index];
         }
@@ -488,7 +746,64 @@ static bool defined_bounds(const struct WideWorld* w, struct WideBounds* b) {
     return false; /* not reached for a single grid */
 }
 
+/* The bounding box (layer pixels) of the non-empty tiles of chunk layer [l], kept per thread while the same layer is asked for. */
+struct TrimCache {
+    uint32_t chunks;
+    int chunkW, chunkH, codec;
+    unsigned generation;
+    bool valid, empty;
+    int64_t x0, y0, x1, y1;
+};
+static _Thread_local struct TrimCache t_trim;
+
+static bool trimmed_bounds(const struct WideLayer* l, struct WideBounds* b) {
+    unsigned generation = atomic_load(&g_chunkGeneration);
+    struct TrimCache* t = &t_trim;
+    if (!t->valid || t->chunks != l->chunks || t->chunkW != l->chunkW || t->chunkH != l->chunkH || t->codec != l->chunkCodec ||
+        t->generation != generation) {
+        t->valid = true;
+        t->chunks = l->chunks;
+        t->chunkW = l->chunkW;
+        t->chunkH = l->chunkH;
+        t->codec = l->chunkCodec;
+        t->generation = generation;
+        t->empty = true;
+        t->x0 = t->y0 = INT64_MAX;
+        t->x1 = t->y1 = INT64_MIN;
+        for (int cy = 0; cy < l->chunkH; cy++) {
+            for (int cx = 0; cx < l->chunkW; cx++) {
+                uint32_t ptr = gbaduo_bus_read32(l->chunks + ((uint32_t) cy * (uint32_t) l->chunkW + (uint32_t) cx) * 4u);
+                if (ptr == 0) continue;
+                const uint8_t* d = l->chunkCodec == 1 ? chunk_unpacked(ptr) : NULL;
+                for (int k = 0; k < 1024; k++) {
+                    uint16_t e = d ? (uint16_t) (d[k * 2] | d[k * 2 + 1] << 8) : gbaduo_bus_read16(ptr + (uint32_t) k * 2u);
+                    if ((e & 0x3FF) == 0) continue;
+                    int64_t px = (int64_t) cx * 256 + (k & 31) * 8, py = (int64_t) cy * 256 + (k >> 5) * 8;
+                    t->empty = false;
+                    if (px < t->x0) t->x0 = px;
+                    if (py < t->y0) t->y0 = py;
+                    if (px + 8 > t->x1) t->x1 = px + 8;
+                    if (py + 8 > t->y1) t->y1 = py + 8;
+                }
+            }
+        }
+    }
+    if (t->empty) return false;
+    b->x0 = t->x0 - l->dx;
+    b->y0 = t->y0 - l->dy;
+    b->x1 = t->x1 - l->dx;
+    b->y1 = t->y1 - l->dy;
+    return true;
+}
+
 static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
+    if (w->hasBounds) {
+        b->x0 = w->bx0;
+        b->y0 = w->by0;
+        b->x1 = w->bx1;
+        b->y1 = w->by1;
+        return true;
+    }
     if (w->layerCount == 0) {
         if (!defined_bounds(w, b)) return false;
         if (!w->finite) { /* the border shows only [overscan] px past the defined cells */
@@ -497,6 +812,15 @@ static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
             b->x1 += w->overscan;
             b->y1 += w->overscan;
         }
+        return true;
+    }
+    if (w->layers[0].tileMode == 1 && w->layers[0].trimBounds && trimmed_bounds(&w->layers[0], b)) return true;
+    if (w->layers[0].tileMode == 1) { /* the bottom chunk layer is the ground: the map ends where it does */
+        const struct WideLayer* g = &w->layers[0];
+        b->x0 = -(int64_t) g->dx;
+        b->y0 = -(int64_t) g->dy;
+        b->x1 = (int64_t) g->chunkW * 256 - g->dx;
+        b->y1 = (int64_t) g->chunkH * 256 - g->dy;
         return true;
     }
     b->x0 = 0;
@@ -513,7 +837,9 @@ static bool world_bounds(const struct WideWorld* w, struct WideBounds* b) {
 /* A single grid with an [overscan]: the margin is black past the defined cells' rectangle grown by it. */
 static void blank_beyond_overscan(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom) {
     struct WideBounds m;
-    if (w->layerCount != 0 || w->finite || w->overscan <= 0 || !world_bounds(w, &m)) return;
+    bool layeredBounds = w->layerCount != 0 && (w->hasBounds || (w->layers[0].tileMode == 1 && w->layers[0].trimBounds));
+    if (!layeredBounds && (w->layerCount != 0 || w->finite || w->overscan <= 0)) return;
+    if (!world_bounds(w, &m)) return;
     int total = left + WIDE_FRAME_W + right;
     for (int row = 0; row < top + WIDE_FRAME_H + bottom; row++) {
         int64_t wy = (int64_t) w->y + (row - top);

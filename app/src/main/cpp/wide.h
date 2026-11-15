@@ -36,6 +36,8 @@ struct WideMarker {
     uint32_t tiles, palette;    /* bus addresses of a sprite's tile data and palette; tiles 0: a diamond */
     int w, h;                   /* a sprite's size in pixels */
     int hflip;                  /* 1: a sprite mirrored left to right */
+    int vflip;                  /* 1: mirrored top to bottom */
+    int bpp8;                   /* 1: 8bpp tiles (64 bytes each, in 1D order) and [palette] holds 256 colours; 0: 4bpp */
 };
 
 /**
@@ -51,6 +53,16 @@ struct WideLayer {
     uint32_t special;           /* u16 table for cells >= 0x4000 (id = table[cell - 0x4000]); 0: none; u16 cells only */
     uint32_t metatiles;         /* metatiles + id * 8 */
     uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */
+    /* A chunked 8bpp tilemap layer instead (tileMode 1, e.g. Webfoot's DBZ games): the map is chunkW x chunkH chunks of
+     * 32x32 u16 tile entries (256x256 px), reached through a table of u32 bus addresses, one per chunk (row-major, 0 =
+     * no chunk). A tile entry is bits 0-9 tile, 10 h-flip, 11 v-flip; [tiles] is 8bpp data, 64 bytes a tile, and the
+     * colour is palette[index] (no banks, index 0 clear). The layer's pixel is the world pixel plus (dx, dy). */
+    int tileMode;               /* 0: the metatile grid above; 1: chunks */
+    uint32_t chunks;            /* bus address of the u32 chunk pointers */
+    int chunkW, chunkH;         /* chunks across and down: 1..64 */
+    int chunkCodec;             /* 0: a chunk is 2048 raw bytes at its pointer; 1: Webfoot's packed chunk (u32 kind, u32 size, data), decoded once and kept */
+    int dx, dy;                 /* layer pixel = world pixel + (dx, dy) */
+    int trimBounds;             /* 1 (on the bottom layer): the map is the bounding box of this layer's non-empty tiles (tile 0 is empty), not its chunk grid. A room smaller than the picture then stays centred with black around it */
 };
 
 /**
@@ -89,12 +101,17 @@ struct WideWorld {
     int metatileLayers;         /* 2 (the default, also 0): a metatile is 8 u16 entries, bottom layer then top; 3: 12 entries (24 bytes), bottom, middle, top (pokeemerald-expansion's triple-layer metatiles). The top-most layer with a pixel wins */
     uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */
     uint32_t palette;           /* 16 banks x 16 BGR555 */
+    int hasBounds;              /* 1: the map is this rectangle of world pixels (x0, y0 inclusive, x1, y1 exclusive) whatever the grids hold: the picture stops scrolling at its edge (see wide_clamp_frame) */
+    int32_t bx0, by0, bx1, by1;
     int layerCount;             /* 0: the single grid above; 1..3: [layers] instead, bottom first (the rest above is ignored) */
     struct WideLayer layers[WIDE_MAX_LAYERS]; /* the top layer wins where its pixel is not colour 0; outside the grids it is black */
     struct WideOverlay overlay; /* painted over the margins' ground, under the markers */
     int markerCount;            /* 0..WIDE_MAX_MARKERS */
     struct WideMarker markers[WIDE_MAX_MARKERS]; /* painted by wide_paint over the margins, never over the frame */
 };
+
+/** Forgets the unpacked chunks kept for chunk layers (a new game was loaded: the same addresses may hold other data). */
+void wide_forget(void);
 
 /** True when the world's sizes are in range (1..1024 cells each way, split >= 0). */
 bool wide_world_valid(const struct WideWorld* w);

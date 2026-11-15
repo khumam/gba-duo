@@ -72,7 +72,8 @@ table, every field an integer (bus addresses are plain numbers):
 | `metatileLayers` (optional, 2) | `3`: a metatile is 12 u16 entries (24 bytes): bottom, middle, top layer (4 tile entries each), as pokeemerald-expansion's triple-layer metatiles; the top-most layer with a pixel wins. `2`: bottom and top only |
 | `tiles` | 4bpp tile data, 32 bytes a tile (normally VRAM `0x06000000`) |
 | `palette` | 16 banks of 16 BGR555 colours (normally `0x05000000`) |
-| `markers` (optional) | up to 64 icons painted over the margins, never over the game's own frame: `{ x, y, kind }` with `x`, `y` a world pixel (same space as the world's `x`, `y`) and `kind` 1 NPC (white), 2 trainer or enemy (red), 3 item (yellow) or 4 door/warp (cyan), drawn as a diamond centred on `x`, `y`. Add `tiles`, `palette`, `w`, `h` (and optionally `hflip`) to draw a sprite instead: `tiles` and `palette` are bus addresses of 4bpp tile data in the GBA's 1D order and of 16 BGR555 colours (index 0 clear), `w` x `h` the size in pixels (multiples of 8, 8 to 64), and `x`, `y` the sprite's top-left. A sprite made of several OAM pieces is several markers. Works for single-grid and layered worlds. A bad entry or more than 64 is an error like any other bad field |
+| `bounds` (optional) | `{ x, y, w, h }`: the map is this rectangle of world pixels, whatever the grids hold. The picture stops scrolling at its edge and the frame slides toward it, as with `finite` (and it replaces the grids' own extent, which can be bigger than the map: DBZ's chunk grid has half-empty edge chunks) |
+| `markers` (optional) | up to 64 icons painted over the margins, never over the game's own frame: `{ x, y, kind }` with `x`, `y` a world pixel (same space as the world's `x`, `y`) and `kind` 1 NPC (white), 2 trainer or enemy (red), 3 item (yellow) or 4 door/warp (cyan), drawn as a diamond centred on `x`, `y`. Add `tiles`, `palette`, `w`, `h` (and optionally `hflip`) to draw a sprite instead: `tiles` and `palette` are bus addresses of 4bpp tile data in the GBA's 1D order and of 16 BGR555 colours (index 0 clear), `w` x `h` the size in pixels (multiples of 8, 8 to 64), and `x`, `y` the sprite's top-left. `bpp = 8` makes the tiles 8bpp (64 bytes a tile, same 1D order) and `palette` 256 colours (the OBJ palette is `0x05000200`; index 0 still clear), and `vflip` mirrors top to bottom. A sprite made of several OAM pieces is several markers. Works for single-grid and layered worlds. A bad entry or more than 64 is an error like any other bad field |
 
 A metatile is 8 u16 tile entries: bottom layer TL, TR, BL, BR, then top layer TL, TR, BL, BR.
 A tile entry: bits 0-9 tile, 10 h-flip, 11 v-flip, 12-15 palette bank. A pixel is the top
@@ -102,6 +103,28 @@ on its top and bottom edges) are predicted and compared with what the emulator d
 the same, so the game's own shadows and fades don't hide the margins). They show after four frames in a row at 80% or better and hide after four below 55% (in between nothing changes, so a crowded edge does not flicker them),
 and they come back after four good ones. So a wrong world looks like "no wide view", not like
 garbage. NPCs and the player are not part of the world, so they don't appear in the margins.
+
+### Chunked 8bpp tilemap layers (`chunks`)
+
+A game that draws its map with plain 8bpp tile entries instead of metatiles (Webfoot's Dragon Ball Z: The Legacy of Goku II) puts
+`chunks` in a layer instead of `grid` / `metatiles`. The map is a rectangle of **chunks**, each 32x32 u16 tile entries (256x256 px),
+reached through a table of u32 bus addresses, one per chunk, row-major (a 0 pointer is an empty chunk):
+
+| Layer field | Meaning |
+|---|---|
+| `chunks` | bus address of the u32 chunk pointers |
+| `chunkW`, `chunkH` | the map's size in chunks (1 to 64) |
+| `chunkCodec` (optional, 0) | `0`: a chunk is 2048 bytes of entries at its pointer, read live. `1`: Webfoot's packed chunk (u32 kind, u32 size = 2048, then the data; kind 0 raw, 1 and 2 packed with the game's own bit-stream coder). GBADuo unpacks it itself, once per chunk, and keeps the result (the chunk is read-only ROM data; the copies are dropped when a game loads) |
+| `tiles` | **8bpp** tile data, 64 bytes a tile (the background's character base) |
+| `trimBounds` (optional, 0) | `1` on the bottom layer: the map is the bounding box of its non-empty tiles (tile 0 is empty), not its chunk grid: the picture stops at that edge, and a room smaller than the picture stays centred with black around it. The box is worked out once and kept |
+| `dx`, `dy` (optional, 0) | the layer's pixel is the world pixel plus (`dx`, `dy`): layers of a game that scroll them against each other, or sit at an offset |
+
+A tile entry is bits 0-9 tile, 10 h-flip, 11 v-flip (no palette banks: the colour is `palette[index]` of the world's 256-colour
+`palette`, index 0 clear). Layers go bottom first as before. The map's edge for Wide view's clamp is the bottom layer's chunks,
+`(-dx, -dy)` to `(chunkW * 256 - dx, chunkH * 256 - dy)`. A game that streams the map through a small window of VRAM
+(the usual 32x32 tile torus) usually keeps the whole map packed in ROM, so a chunk layer can show every part of it, not only what
+the game has loaded. `dragon-ball-z-legacy-of-goku-2-companion/game.lua` is the example: the game's layer objects and their ROM
+descriptors give the chunk tables, the camera and the BG scroll registers give `x`, `y` and each layer's `dx`, `dy`.
 
 ### A blended background over the world (`overlay`)
 

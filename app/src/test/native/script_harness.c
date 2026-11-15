@@ -820,6 +820,75 @@ static void ambient_hook_reads_the_look(void) {
     gbaduo_game_unload();
 }
 
+static void wide_chunk_layers_are_read_and_checked(void) {
+    struct WideWorld w;
+    memset(&w, 0, sizeof(w));
+    gload("function wide() return { x = 5, y = -6, palette = 0x05000000, layers = {\n"
+          "  { chunks = 0x08001000, chunkW = 5, chunkH = 4, chunkCodec = 1, tiles = 0x06000000, dx = 192, dy = 190, trimBounds = 1 },\n"
+          "  { chunks = 0x08002000, chunkW = 2, chunkH = 2, tiles = 0x06004000 } } } end\n");
+    CHECK(gbaduo_game_wide(480, 320, 120, 80, 1.0f, &w));
+    CHECK(w.layerCount == 2 && w.x == 5 && w.y == -6);
+    CHECK(w.layers[0].tileMode == 1 && w.layers[0].chunks == 0x08001000u && w.layers[0].chunkW == 5 && w.layers[0].chunkH == 4);
+    CHECK(w.layers[0].chunkCodec == 1 && w.layers[0].dx == 192 && w.layers[0].dy == 190 && w.layers[0].tiles == 0x06000000u);
+    CHECK(w.layers[1].tileMode == 1 && w.layers[1].chunkCodec == 0 && w.layers[1].dx == 0 && w.layers[1].dy == 0);
+    CHECK(w.layers[0].trimBounds == 1 && w.layers[1].trimBounds == 0);
+    CHECK(wide_world_valid(&w));
+    /* a chunk layer needs its size, and the sizes and codec are range checked */
+    const char* bad[] = {
+        "{ chunks = 0x08001000, chunkH = 4, tiles = 0 }",
+        "{ chunks = 0x08001000, chunkW = 0, chunkH = 4, tiles = 0 }",
+        "{ chunks = 0x08001000, chunkW = 65, chunkH = 4, tiles = 0 }",
+        "{ chunks = 0x08001000, chunkW = 2, chunkH = 2, chunkCodec = 2, tiles = 0 }",
+        "{ chunks = 0x08001000, chunkW = 2, chunkH = 2 }",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        char src[400];
+        snprintf(src, sizeof(src), "function wide() return { x = 0, y = 0, palette = 0, layers = { %s } } end", bad[i]);
+        gload(src);
+        CHECK(!gbaduo_game_wide(480, 320, 120, 80, 1.0f, &w));
+    }
+    gbaduo_game_unload();
+}
+
+static void wide_sprite_marker_bpp_and_vflip_are_read(void) {
+    struct WideWorld w;
+    memset(&w, 0, sizeof(w));
+    gload("function wide() return { x = 0, y = 0, grid = 0, gridW = 1, gridH = 1, idMask = 0, border = 0, borderW = 1, borderH = 1,\n"
+          "  metatiles = 0, metatiles2 = 0, split = 0, tiles = 0, palette = 0,\n"
+          "  markers = { { x = 1, y = 2, kind = 1, tiles = 0x06010000, palette = 0x05000200, w = 32, h = 16, bpp = 8, vflip = 1 },\n"
+          "              { x = 3, y = 4, kind = 1, tiles = 0x06010000, palette = 0x05000200, w = 8, h = 8 } } } end\n");
+    CHECK(gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    CHECK(w.markerCount == 2 && w.markers[0].bpp8 == 1 && w.markers[0].vflip == 1 && w.markers[0].w == 32);
+    CHECK(w.markers[1].bpp8 == 0 && w.markers[1].vflip == 0);
+    gload("function wide() return { x = 0, y = 0, grid = 0, gridW = 1, gridH = 1, idMask = 0, border = 0, borderW = 1, borderH = 1,\n"
+          "  metatiles = 0, metatiles2 = 0, split = 0, tiles = 0, palette = 0,\n"
+          "  markers = { { x = 1, y = 2, kind = 1, tiles = 0x06010000, palette = 0x05000200, w = 8, h = 8, bpp = 6 } } } end\n");
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    gbaduo_game_unload();
+}
+
+static void wide_bounds_are_read_and_checked(void) {
+    struct WideWorld w;
+    memset(&w, 0, sizeof(w));
+    const char* head = "function wide() return { x = 0, y = 0, grid = 0, gridW = 1, gridH = 1, idMask = 0, border = 0, borderW = 1, borderH = 1,\n"
+                       "  metatiles = 0, metatiles2 = 0, split = 0, tiles = 0, palette = 0, bounds = ";
+    char src[512];
+    snprintf(src, sizeof(src), "%s{ x = -8, y = 4, w = 1024, h = 512 } } end\n", head);
+    gload(src);
+    CHECK(gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    CHECK(w.hasBounds == 1 && w.bx0 == -8 && w.by0 == 4 && w.bx1 == 1016 && w.by1 == 516);
+    snprintf(src, sizeof(src), "%s{ x = 0, y = 0, w = 0, h = 8 } } end\n", head);
+    gload(src);
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    snprintf(src, sizeof(src), "%s{ x = 0, y = 0, h = 8 } } end\n", head);
+    gload(src);
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    snprintf(src, sizeof(src), "%s5 } end\n", head);
+    gload(src);
+    CHECK(!gbaduo_game_wide(320, 160, 40, 0, 1.0f, &w));
+    gbaduo_game_unload();
+}
+
 static void wide_nil_is_hidden_not_error(void) {
     struct WideWorld w;
     gload("function wide() return nil end\n");
@@ -906,6 +975,9 @@ int main(void) {
     unloading_one_leaves_the_other();
     game_load_failure_leaves_companion_alone();
     has_hooks_only_when_defined();
+    wide_chunk_layers_are_read_and_checked();
+    wide_sprite_marker_bpp_and_vflip_are_read();
+    wide_bounds_are_read_and_checked();
     frame_receives_view();
     writes_refused_outside_frame();
     frame_writes_need_the_window();

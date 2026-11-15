@@ -172,6 +172,44 @@ static uint32_t rnd(uint32_t* seed) {
 }
 
 /* A busy world: random tiles, flips, banks, layers and palette; paint must equal wide_pixel pixel by pixel. */
+/* An 8bpp, vertically mirrored sprite marker: 64 bytes a tile, 256 colours, index 0 clear. */
+static void sprite_markers_8bpp_and_vflip(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    enum { SPR = 0x02008000u, SPRPAL = 0x02009000u, STR = 400, LEFT = 80 };
+    poke16(PALETTE, 0x7C00);
+    solid_tile(1, 0);
+    for (int i = 0; i < 4; i++) { poke16(METATILES + 8 + (uint32_t) i * 2, 1); poke16(METATILES + (uint32_t) i * 2, 1); }
+    for (int i = 0; i < 64; i++) poke16(GRID + (uint32_t) i * 2, 0);
+    poke16(BORDER, 0);
+    poke16(SPRPAL + 2 * 200, 0x001F);                      /* index 200 red */
+    poke16(SPRPAL + 2 * 3, 0x03E0);                        /* index 3 green */
+    for (int i = 0; i < 256; i++) poke8(SPR + (uint32_t) i, 0);
+    /* 16x16: tiles TL, TR, BL, BR (64 bytes each). TL pixel (0,0) = 200, (1,0) = 3; BL pixel (0,7) (sprite row 15 of 0..15 -> y 8) = 3 */
+    poke8(SPR, 200);
+    poke8(SPR + 1, 3);
+    poke8(SPR + 64 * 2 + 0, 3);                            /* BL tile, pixel (0,0): sprite (0, 8) */
+    poke8(SPR + 64 + 7, 200);                              /* TR tile, pixel (7,0): sprite (15, 0) */
+    struct WideWorld w = {
+        .x = 0, .y = 0, .grid = GRID, .gridW = 8, .gridH = 8, .idMask = 0x3FF,
+        .border = BORDER, .borderW = 1, .borderH = 1, .undefinedId = -1,
+        .metatiles = METATILES, .metatiles2 = METATILES2, .split = 512, .tiles = TILES, .palette = PALETTE,
+    };
+    static uint32_t buf[STR * 160];
+    w.markerCount = 1;
+    w.markers[0] = (struct WideMarker){ .x = -60, .y = 100, .kind = 1, .tiles = SPR, .palette = SPRPAL, .w = 16, .h = 16, .bpp8 = 1 };
+    wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
+    int ox = LEFT - 60, oy = 100;
+    CHECK(buf[oy * STR + ox] == wide_color(0x001F));        /* (0,0) index 200 */
+    CHECK(buf[oy * STR + ox + 1] == wide_color(0x03E0));    /* (1,0) index 3 */
+    CHECK(buf[(oy + 8) * STR + ox] == wide_color(0x03E0));  /* the bottom-left tile, 2 tiles on in 1D order */
+    CHECK(buf[oy * STR + ox + 15] == wide_color(0x001F));   /* the right tile's pixel (7,0) */
+    w.markers[0].vflip = 1;
+    wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
+    CHECK(buf[(oy + 15) * STR + ox] == wide_color(0x001F)); /* row 0 is now the bottom row */
+    CHECK(buf[(oy + 7) * STR + ox] == wide_color(0x03E0));  /* sprite row 8 lands on row 7 */
+    CHECK(buf[oy * STR + ox] != wide_color(0x001F));
+}
+
 static void paint_equals_pixelwise_reference(void) {
     struct WideWorld w = fixture();
     uint32_t seed = 12345u;
@@ -719,6 +757,275 @@ static void sprite_markers_draw_their_tiles(void) {
     wide_paint(&w, buf, STR, LEFT, 80, 0, 0);
 }
 
+/* ---- chunked 8bpp tilemap layers (Webfoot's DBZ games) ---- */
+
+enum { CHUNK_RAW = 0x02010000u, CHUNK_PACK = 0x02020000u, CHUNK_TABLE = 0x02030000u };
+
+static void poke32(uint32_t a, uint32_t v) { poke16(a, (uint16_t) v); poke16(a + 2, (uint16_t) (v >> 16)); }
+
+/* A bit writer for packed chunks: bits MSB first into u32 words stored at [addr]. */
+struct BitWriter { uint32_t addr, cur; int n, words; };
+static void bw_bit(struct BitWriter* b, int bit) {
+    b->cur = (b->cur << 1) | (uint32_t) (bit & 1);
+    if (++b->n == 32) {
+        poke32(b->addr + (uint32_t) b->words * 4u, b->cur);
+        b->words++;
+        b->n = 0;
+        b->cur = 0;
+    }
+}
+static void bw_bits(struct BitWriter* b, uint32_t v, int n) { for (int i = n - 1; i >= 0; i--) bw_bit(b, (int) (v >> i) & 1); }
+static void bw_flush(struct BitWriter* b) { while (b->n != 0) bw_bit(b, 0); }
+
+/* 8bpp tile [t] filled with palette index [t]; palette index t = marker_color(t). */
+static void solid_tile8(int t) {
+    for (int i = 0; i < 64; i++) poke8(TILES + (uint32_t) t * 64 + (uint32_t) i, (uint8_t) t);
+    poke16(PALETTE + (uint32_t) t * 2, marker_color(t + 20));
+}
+
+/* A chunk header + packed data at [at]: kind 1, 2048 bytes. */
+static void packed_header(uint32_t at) { poke32(at, 1); poke32(at + 4, 2048); }
+
+static struct WideWorld chunk_world(uint32_t table, int w, int h, int codec, int dx, int dy) {
+    struct WideWorld world;
+    memset(&world, 0, sizeof(world));
+    world.palette = PALETTE;
+    world.layerCount = 1;
+    world.layers[0] = (struct WideLayer){ .tileMode = 1, .chunks = table, .chunkW = w, .chunkH = h, .chunkCodec = codec,
+                                          .tiles = TILES, .dx = dx, .dy = dy };
+    return world;
+}
+
+static void raw_chunk_layer_reads_entries_through_the_table(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    for (int t = 1; t <= 8; t++) solid_tile8(t);
+    /* chunk (0,0): entry k = tile 1 + k % 3, chunk (1,0): every entry tile 5 h-flipped; chunk (0,1) has no pointer */
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_RAW + (uint32_t) k * 2, (uint16_t) (1 + k % 3));
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_RAW + 0x800 + (uint32_t) k * 2, (uint16_t) (5 | 0x400));
+    poke32(CHUNK_TABLE, CHUNK_RAW);
+    poke32(CHUNK_TABLE + 4, CHUNK_RAW + 0x800);
+    poke32(CHUNK_TABLE + 8, 0);
+    poke32(CHUNK_TABLE + 12, CHUNK_RAW);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 2, 2, 0, 0, 0);
+    CHECK(wide_world_valid(&w));
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(marker_color(21)));      /* tile 1 */
+    CHECK(wide_pixel(&w, 8, 0) == wide_color(marker_color(22)));      /* tile 2 */
+    CHECK(wide_pixel(&w, 16, 0) == wide_color(marker_color(23)));
+    CHECK(wide_pixel(&w, 24, 0) == wide_color(marker_color(21)));
+    CHECK(wide_pixel(&w, 8, 8) == wide_color(marker_color(20 + 1 + 33 % 3)));
+    CHECK(wide_pixel(&w, 256, 0) == wide_color(marker_color(25)));    /* chunk (1,0) */
+    CHECK(wide_pixel(&w, 100, 300) == 0);                             /* chunk (0,1): no pointer, outside */
+    CHECK(wide_pixel(&w, 300, 300) == wide_color(marker_color(21)));  /* chunk (1,1) shares chunk (0,0)'s data */
+    CHECK(wide_pixel(&w, -1, 0) == 0 && wide_pixel(&w, 512, 0) == 0 && wide_pixel(&w, 0, 512) == 0); /* beyond the map */
+}
+
+static void packed_chunk_with_raw_blocks_and_a_repeat_match_decodes(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    wide_forget();
+    for (int t = 1; t <= 8; t++) solid_tile8(t);
+    /* chunk A: bit pattern 0,0,1 + get(4) = 0 + bit 1 = eight 256-byte raw blocks; entry k = tile 1 + k % 4 */
+    packed_header(CHUNK_PACK);
+    struct BitWriter b = { CHUNK_PACK + 8, 0, 0, 0 };
+    bw_bits(&b, 0, 1); bw_bits(&b, 0, 1); bw_bits(&b, 1, 1); bw_bits(&b, 0, 4); bw_bits(&b, 1, 1);
+    for (int blk = 0; blk < 8; blk++) {
+        for (int i = 0; i < 256; i++) {
+            int byte = blk * 256 + i;
+            bw_bits(&b, (byte & 1) ? 0 : (uint32_t) (1 + (byte / 2) % 4), 8);
+        }
+        bw_bit(&b, blk < 7);
+    }
+    bw_flush(&b);
+    /* chunk B: four literal bytes (1,0,2,0), then short matches (distance 4, length 5) repeat them: tiles 1,2,1,2... */
+    packed_header(CHUNK_PACK + 0x1000);
+    struct BitWriter c = { CHUNK_PACK + 0x1000 + 8, 0, 0, 0 };
+    const int lits[4] = { 1, 0, 2, 0 };
+    for (int i = 0; i < 4; i++) { bw_bit(&c, 1); bw_bits(&c, (uint32_t) lits[i], 8); }
+    for (int i = 0; i < 2048 / 5 + 1; i++) { bw_bit(&c, 0); bw_bit(&c, 0); bw_bit(&c, 0); bw_bits(&c, 4, 7); bw_bits(&c, 3, 2); }
+    bw_flush(&c);
+    poke32(CHUNK_TABLE, CHUNK_PACK);
+    poke32(CHUNK_TABLE + 4, CHUNK_PACK + 0x1000);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 2, 1, 1, 0, 0);
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(marker_color(21)));      /* A: k 0 -> tile 1 */
+    CHECK(wide_pixel(&w, 8, 0) == wide_color(marker_color(22)));      /* k 1 -> tile 2 */
+    CHECK(wide_pixel(&w, 24, 0) == wide_color(marker_color(24)));     /* k 3 -> tile 4 */
+    CHECK(wide_pixel(&w, 32, 0) == wide_color(marker_color(21)));     /* k 4 -> tile 1 again */
+    CHECK(wide_pixel(&w, 256, 0) == wide_color(marker_color(21)));    /* B: tile 1 */
+    CHECK(wide_pixel(&w, 264, 0) == wide_color(marker_color(22)));    /* tile 2 */
+    CHECK(wide_pixel(&w, 256 + 8 * 31, 8 * 31) == wide_color(marker_color(21 + ((31 * 32 + 31) % 2))));  /* a late cell, made by matches */
+    /* a stream that cannot be a chunk draws nothing instead of garbage */
+    poke32(CHUNK_PACK + 0x2000, 1);
+    poke32(CHUNK_PACK + 0x2004, 2048);
+    for (int i = 0; i < 64; i++) poke32(CHUNK_PACK + 0x2008 + (uint32_t) i * 4, 0xFFFFFFFFu);
+    poke32(CHUNK_TABLE, CHUNK_PACK + 0x2000);
+    wide_forget();
+    CHECK(wide_pixel(&w, 0, 0) == 0);
+    poke32(CHUNK_PACK + 0x3000, 7);   /* an unknown kind */
+    poke32(CHUNK_PACK + 0x3004, 2048);
+    poke32(CHUNK_TABLE, CHUNK_PACK + 0x3000);
+    wide_forget();
+    CHECK(wide_pixel(&w, 0, 0) == 0);
+    poke32(CHUNK_PACK + 0x4000, 0);   /* kind 0: raw data after the header */
+    poke32(CHUNK_PACK + 0x4004, 2048);
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_PACK + 0x4008 + (uint32_t) k * 2, 6);
+    poke32(CHUNK_TABLE, CHUNK_PACK + 0x4000);
+    wide_forget();
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(marker_color(26)));
+}
+
+static void chunk_layer_is_transparent_at_index_zero_over_a_lower_layer(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    for (int t = 1; t <= 8; t++) solid_tile8(t);
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_RAW + (uint32_t) k * 2, 3);              /* ground: tile 3 */
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_RAW + 0x800 + (uint32_t) k * 2, (uint16_t) (k % 2 ? 0 : 4)); /* top: tile 4 or clear (tile 0 = index 0) */
+    poke32(CHUNK_TABLE, CHUNK_RAW);
+    poke32(CHUNK_TABLE + 0x100, CHUNK_RAW + 0x800);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 1, 1, 0, 0, 0);
+    w.layerCount = 2;
+    w.layers[1] = w.layers[0];
+    w.layers[1].chunks = CHUNK_TABLE + 0x100;
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(marker_color(24)));   /* top, tile 4 */
+    CHECK(wide_pixel(&w, 8, 0) == wide_color(marker_color(23)));   /* top is index 0: the ground, tile 3 */
+}
+
+static void chunk_layer_offsets_move_the_layer_and_spans_follow_them(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    for (int t = 1; t <= 8; t++) solid_tile8(t);
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_RAW + (uint32_t) k * 2, (uint16_t) (1 + k % 7));
+    poke32(CHUNK_TABLE, CHUNK_RAW);
+    poke32(CHUNK_TABLE + 4, CHUNK_RAW);
+    poke32(CHUNK_TABLE + 8, CHUNK_RAW);
+    poke32(CHUNK_TABLE + 12, CHUNK_RAW);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 2, 2, 0, 3, 5);   /* layer pixel = world pixel + (3, 5) */
+    w.layerCount = 2;
+    w.layers[1] = w.layers[0];
+    w.layers[1].dx = 0;
+    w.layers[1].dy = 0;
+    w.x = -17;
+    w.y = 7;
+    /* a wide_paint over a picture must equal the one-pixel reference, whatever each layer's alignment */
+    enum { PW = 400, PH = 160 };
+    static uint32_t buf[PW * PH];
+    int left = 80, right = 80;
+    wide_paint(&w, buf, PW, left, right, 0, 0);
+    int bad = 0;
+    for (int y = 0; y < PH; y++) {
+        for (int x = 0; x < PW; x++) {
+            if (x >= left && x < left + 240) continue;
+            if (buf[y * PW + x] != wide_pixel(&w, w.x - left + x, w.y + y)) bad++;
+        }
+    }
+    CHECK(bad == 0);
+    /* the layer pixel is world + dx: at world x -3 the layer's own x is 0, so its first tile is tile 1 */
+    struct WideWorld one = chunk_world(CHUNK_TABLE, 2, 2, 0, 3, 5);
+    CHECK(wide_pixel(&one, -3, -5) == wide_color(marker_color(21)));
+    CHECK(wide_pixel(&one, -4, -5) == 0);
+    CHECK(wide_pixel(&one, 4, -5) == wide_color(marker_color(21)));  /* layer x 7 is still the first tile */
+    CHECK(wide_pixel(&one, 5, -5) == wide_color(marker_color(22)));  /* layer x 8 starts the second */
+}
+
+static void chunk_layer_validity_bounds_and_clamp(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 2, 2, 0, 64, 32);
+    CHECK(wide_world_valid(&w));
+    w.layers[0].chunkW = 0;
+    CHECK(!wide_world_valid(&w));
+    w.layers[0].chunkW = 65;
+    CHECK(!wide_world_valid(&w));
+    w.layers[0].chunkW = 2;
+    w.layers[0].chunkCodec = 2;
+    CHECK(!wide_world_valid(&w));
+    w.layers[0].chunkCodec = 1;
+    CHECK(wide_world_valid(&w));
+    /* the map is the ground layer's chunks, from world (-64, -32) to (448, 480): near an edge the frame slides */
+    w.x = -50;
+    w.y = 100;
+    int left = 80, top = 0;
+    wide_clamp_frame(&w, 400, 160, &left, &top);
+    CHECK(left == 14);                    /* the picture's left edge stops at -64 */
+    CHECK(top == 0);
+    w.x = 200;
+    left = 80;
+    wide_clamp_frame(&w, 400, 160, &left, &top);
+    CHECK(left == 200 - (448 - 400));     /* its right edge stops at 448 */
+    w.x = 100;
+    CHECK(wide_coverage(&w, 80, 0, 400, 160) == 1.0f);
+}
+
+static void explicit_bounds_override_the_grids_for_clamp_and_coverage(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 5, 5, 1, 192, 192);   /* the chunk grid spans -192..1088 */
+    w.hasBounds = 1;
+    w.bx0 = 0; w.by0 = 0; w.bx1 = 1024; w.by1 = 1024;
+    w.x = 20; w.y = 500;
+    int left = 120, top = 80;
+    wide_clamp_frame(&w, 480, 320, &left, &top);
+    CHECK(left == 20);                    /* the picture's left edge stops at world 0 */
+    CHECK(top == 80);
+    w.x = 700; w.y = 800;
+    left = 120; top = 80;
+    wide_clamp_frame(&w, 480, 320, &left, &top);
+    CHECK(left == 700 - (1024 - 480));    /* right edge stops at 1024 */
+    CHECK(top == 800 - (1024 - 320));
+    w.x = 20; w.y = 500;
+    CHECK(wide_coverage(&w, 120, 80, 480, 320) < 1.0f);   /* margin to the left of 0 is outside */
+    w.x = 400; w.y = 400;
+    CHECK(wide_coverage(&w, 120, 80, 480, 320) == 1.0f);
+    w.hasBounds = 0;
+    w.x = 20; w.y = 500;
+    left = 120; top = 80;
+    wide_clamp_frame(&w, 480, 320, &left, &top);
+    CHECK(left == 120);                   /* without bounds the chunk grid (from -192) allows it */
+}
+
+static void trimmed_bounds_follow_the_ground_tiles(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    wide_forget();
+    for (int t = 1; t <= 8; t++) solid_tile8(t);
+    /* a 2x2 chunk map whose tiles fill only layer pixels x 40..119, y 24..87 of chunk (0,0): 10 x 8 tiles of tile 1 */
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_RAW + (uint32_t) k * 2, 0);
+    for (int ty = 3; ty < 11; ty++) for (int tx = 5; tx < 15; tx++) poke16(CHUNK_RAW + (uint32_t) (ty * 32 + tx) * 2, 1);
+    poke32(CHUNK_TABLE, CHUNK_RAW);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 2, 2, 0, 16, 8);
+    w.layers[0].trimBounds = 1;
+    /* world bounds = layer box minus (dx, dy): x 24..104, y 16..80; the picture is bigger than that, so the map stays centred */
+    w.x = 30; w.y = 20;
+    int left = 120, top = 80;
+    wide_clamp_frame(&w, 480, 320, &left, &top);
+    CHECK(left == 30 - ((24 + 104 - 480) / 2));   /* origin = lo + (hi - lo - size) / 2 */
+    CHECK(top == 20 - ((16 + 80 - 320) / 2));
+    /* with the camera far away the frame is still clamped into the picture, not pinned to a corner */
+    w.x = -50;
+    left = 120;
+    wide_clamp_frame(&w, 480, 320, &left, &top);
+    CHECK(left == -50 - ((24 + 104 - 480) / 2) || left == 0);
+    /* margins are black outside the map */
+    enum { PW = 480, PH = 320 };
+    static uint32_t buf[PW * PH];
+    for (int i = 0; i < PW * PH; i++) buf[i] = 0xDEADBEEFu;
+    w.x = 30; w.y = 20;
+    wide_paint(&w, buf, PW, 120, 120, 80, 80);
+    CHECK(buf[10 * PW + 10] == 0);        /* far corner: outside the map */
+    CHECK(buf[(80 + 5) * PW + 5] == 0);   /* left margin, left of the map */
+    /* layer pixel (40, 24) = world (24, 16) is the map's first tile; with the frame centred it lands at picture x 120 + (24 - 30) */
+    CHECK(buf[(80 + 16 - 20 + 4) * PW + (120 + 24 - 30 + 4)] != 0xDEADBEEFu);
+}
+
+static void chunk_cache_is_cleared_by_wide_forget(void) {
+    fake_reset(GBADUO_BUS_GBA);
+    wide_forget();
+    for (int t = 1; t <= 8; t++) solid_tile8(t);
+    poke32(CHUNK_PACK, 0);
+    poke32(CHUNK_PACK + 4, 2048);
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_PACK + 8 + (uint32_t) k * 2, 2);
+    poke32(CHUNK_TABLE, CHUNK_PACK);
+    struct WideWorld w = chunk_world(CHUNK_TABLE, 1, 1, 1, 0, 0);
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(marker_color(22)));
+    for (int k = 0; k < 1024; k++) poke16(CHUNK_PACK + 8 + (uint32_t) k * 2, 3);
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(marker_color(22)));    /* a packed chunk is ROM: the kept copy is used */
+    wide_forget();
+    CHECK(wide_pixel(&w, 0, 0) == wide_color(marker_color(23)));    /* a new game: read again */
+}
+
 int main(void) {
     color_matches_mgba();
     pixel_reads_bottom_then_top_then_backdrop();
@@ -733,6 +1040,7 @@ int main(void) {
     paint_fills_only_margins();
     markers_paint_only_outside_the_frame();
     sprite_markers_draw_their_tiles();
+    sprite_markers_8bpp_and_vflip();
     paint_equals_pixelwise_reference();
     paint_survives_garbage_addresses();
     seam_match_is_one_on_its_own_picture();
@@ -748,6 +1056,14 @@ int main(void) {
     hysteresis_hides_after_four_bad_frames();
     hysteresis_shows_after_four_good_frames();
     no_world_hides_at_once();
+    raw_chunk_layer_reads_entries_through_the_table();
+    packed_chunk_with_raw_blocks_and_a_repeat_match_decodes();
+    chunk_layer_is_transparent_at_index_zero_over_a_lower_layer();
+    chunk_layer_offsets_move_the_layer_and_spans_follow_them();
+    chunk_layer_validity_bounds_and_clamp();
+    explicit_bounds_override_the_grids_for_clamp_and_coverage();
+    trimmed_bounds_follow_the_ground_tiles();
+    chunk_cache_is_cleared_by_wide_forget();
     printf("wide: %d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
