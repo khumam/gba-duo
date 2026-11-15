@@ -191,10 +191,13 @@ class LibraryActivity : Activity() {
         }
         gameTitle.apply {
             centered = true
-            setTextSizeSp(if (compact) 20f else 26f)
-            shadowPx = Pixel.dp(this@LibraryActivity, 3f)
+            // The title is something you read, not a label: the body face, no outline and no hard shadow.
+            paint.typeface = Fonts.body(this@LibraryActivity, 600)
+            strokeWidthPx = 0f
+            shadowPx = 0f
+            setTextSizeSp(if (compact) 18f else 22f)
             // Long names shrink to fit before they're cut off.
-            minTextSizePx = 14f * resources.displayMetrics.scaledDensity
+            minTextSizePx = 13f * resources.displayMetrics.scaledDensity
         }
         if (compact) {
             val gutter = Pixel.dp(this, 16f).toInt()
@@ -242,9 +245,11 @@ class LibraryActivity : Activity() {
         }
         splitTitle.apply {
             centered = true
-            setTextSizeSp(if (compact) 14f else 18f)
-            shadowPx = Pixel.dp(this@LibraryActivity, 2f)
-            minTextSizePx = 10f * resources.displayMetrics.scaledDensity
+            paint.typeface = Fonts.body(this@LibraryActivity, 600)   // the same readable face, no outline and no shadow
+            strokeWidthPx = 0f
+            shadowPx = 0f
+            setTextSizeSp(if (compact) 14f else 17f)
+            minTextSizePx = 11f * resources.displayMetrics.scaledDensity
         }
         findViewById<View>(R.id.game_list_box).background = PixelBoxDrawable(this, Pixel.CREAM, shadowDp = 4f, borderDp = 3f)
         // Inside the box's border (3dp) and its hard shadow (4dp, right and bottom).

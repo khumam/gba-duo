@@ -1599,6 +1599,30 @@ static bool read_markers(lua_State* L, struct WideWorld* w) {
     return true;
 }
 
+/* The optional `overlay` table ({ map, tiles, scrollX, scrollY, eva, evb }) of the world table on top of the stack. */
+static bool read_overlay(lua_State* L, struct WideWorld* w) {
+    lua_getfield(L, -1, "overlay");
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return true;
+    }
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        set_error("field 'overlay' must be a table");
+        return false;
+    }
+    lua_Integer v;
+    bool ok = world_field(L, "map", 0, UINT32_MAX, &v);
+    if (ok) { w->overlay.map = (uint32_t) v; ok = world_field(L, "tiles", 0, UINT32_MAX, &v); }
+    if (ok) { w->overlay.tiles = (uint32_t) v; ok = world_field(L, "scrollX", -0x10000, 0x10000, &v); }
+    if (ok) { w->overlay.scrollX = (int) v; ok = world_field(L, "scrollY", -0x10000, 0x10000, &v); }
+    if (ok) { w->overlay.scrollY = (int) v; ok = world_field(L, "eva", 0, 16, &v); }
+    if (ok) { w->overlay.eva = (int) v; ok = world_field(L, "evb", 0, 16, &v); }
+    if (ok) { w->overlay.evb = (int) v; w->overlay.present = 1; }
+    lua_pop(L, 1);
+    return ok;
+}
+
 /* The world table on top of the stack into [out]; false (error set) for a bad field. */
 static bool read_world(lua_State* L, struct WideWorld* out) {
     lua_Integer v;
@@ -1609,6 +1633,7 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
     INT_FIELD("y", INT32_MIN, INT32_MAX, w.y);
     INT_FIELD("palette", 0, UINT32_MAX, w.palette);
     if (!read_markers(L, &w)) return false;
+    if (!read_overlay(L, &w)) return false;
     lua_getfield(L, -1, "layers");
     if (lua_istable(L, -1)) {
         bool ok = read_layers(L, &w);
@@ -1636,6 +1661,8 @@ static bool read_world(lua_State* L, struct WideWorld* out) {
     INT_FIELD("metatiles", 0, UINT32_MAX, w.metatiles);
     INT_FIELD("metatiles2", 0, UINT32_MAX, w.metatiles2);
     INT_FIELD("split", INT32_MIN, INT32_MAX, w.split);
+    if (!world_field_or(L, "metatileLayers", 2, 3, 2, &v)) return false;
+    w.metatileLayers = (int) v;
     INT_FIELD("tiles", 0, UINT32_MAX, w.tiles);
 #undef INT_FIELD
     *out = w;

@@ -68,7 +68,8 @@ table, every field an integer (bus addresses are plain numbers):
 | `undefinedId` (optional, none) | a cell with this id is outside the map: use the border |
 | `finite` (optional, 0) | `1`: the grid is the whole world, like a layered world's: near its edge the wide picture stops scrolling and the game's frame moves toward the edge, so the margins never run past the grid, and what is outside it is black, not the border (a grid smaller than the picture stays still, the empty part split evenly). `0`: the border repeats forever |
 | `overscan` (optional, 0) | with `finite` 0: `> 0` limits the repeating border to this many px beyond the defined cells. The wide picture stops scrolling there and the game's frame moves toward the edge; farther out is black. `0`: the border repeats without limit |
-| `metatiles`, `metatiles2`, `split` | ids below `split` read from `metatiles`, the rest from `metatiles2` (16 bytes each) |
+| `metatiles`, `metatiles2`, `split` | ids below `split` read from `metatiles`, the rest from `metatiles2` (16 bytes each, 24 with `metatileLayers = 3`) |
+| `metatileLayers` (optional, 2) | `3`: a metatile is 12 u16 entries (24 bytes): bottom, middle, top layer (4 tile entries each), as pokeemerald-expansion's triple-layer metatiles; the top-most layer with a pixel wins. `2`: bottom and top only |
 | `tiles` | 4bpp tile data, 32 bytes a tile (normally VRAM `0x06000000`) |
 | `palette` | 16 banks of 16 BGR555 colours (normally `0x05000000`) |
 | `markers` (optional) | up to 64 icons painted over the margins, never over the game's own frame: `{ x, y, kind }` with `x`, `y` a world pixel (same space as the world's `x`, `y`) and `kind` 1 NPC (white), 2 trainer or enemy (red), 3 item (yellow) or 4 door/warp (cyan), drawn as a diamond centred on `x`, `y`. Add `tiles`, `palette`, `w`, `h` (and optionally `hflip`) to draw a sprite instead: `tiles` and `palette` are bus addresses of 4bpp tile data in the GBA's 1D order and of 16 BGR555 colours (index 0 clear), `w` x `h` the size in pixels (multiples of 8, 8 to 64), and `x`, `y` the sprite's top-left. A sprite made of several OAM pieces is several markers. Works for single-grid and layered worlds. A bad entry or more than 64 is an error like any other bad field |
@@ -98,9 +99,25 @@ The top layer's pixel wins unless it is colour 0, then the bottom layer's, else 
 
 The app checks your answer against the game: the 16 columns on the frame's edges (and, in XL, the 16 rows
 on its top and bottom edges) are predicted and compared with what the emulator drew (a colour within about 40 per channel counts as
-the same, so the game's own shadows and fades don't hide the margins). Below 85% for four frames in a row the margins hide,
+the same, so the game's own shadows and fades don't hide the margins). They show after four frames in a row at 80% or better and hide after four below 55% (in between nothing changes, so a crowded edge does not flicker them),
 and they come back after four good ones. So a wrong world looks like "no wide view", not like
 garbage. NPCs and the player are not part of the world, so they don't appear in the margins.
+
+### A blended background over the world (`overlay`)
+
+Some games draw a background over the picture with alpha blending (The Minish Cap's drifting cloud shadows are BG3 at
+4/16 over the ground). The world does not describe it, so the margins would lack it and the effect would stop at the
+frame's edge. Return `overlay` beside `layers` (or the single grid) and the margins get it too:
+
+| Field | Meaning |
+|---|---|
+| `map` | bus address of the background's screenblock: 32x32 u16 text entries (256x256 px, wrapping) |
+| `tiles` | bus address of its 4bpp tile data (the background's character base) |
+| `scrollX`, `scrollY` | the background's scroll registers; screen pixel (x, y) shows map pixel ((x + scrollX) & 255, (y + scrollY) & 255) |
+| `eva`, `evb` | 0 to 16: this much of the overlay plus this much of the ground (BLDALPHA); colour 0 is clear |
+
+Read the registers from `0x04000000` each frame (see `zelda-the-minish-cap-companion/game.lua`, `clouds()`), and return
+`nil` when the game is not blending that background (indoors).
 
 ### Turning Wide view on and off
 

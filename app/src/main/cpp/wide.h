@@ -54,6 +54,19 @@ struct WideLayer {
 };
 
 /**
+ * A wrapping 256x256 background the game blends over its picture (The Minish Cap's drifting cloud shadows: BG3 at alpha
+ * 4/16 over the ground), painted over the margins so they carry it too. Its pixel [x, y] of the screen is the map's
+ * ((x + scrollX) & 255, (y + scrollY) & 255); colour 0 is clear.
+ */
+struct WideOverlay {
+    int present;                /* 0: none */
+    uint32_t map;               /* the screenblock: 32x32 u16 text entries (tile, flips, palette bank) */
+    uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile (the background's character base) */
+    int scrollX, scrollY;       /* the background's scroll registers */
+    int eva, evb;               /* 0..16: this much of the overlay plus this much of the ground (BLDALPHA) */
+};
+
+/**
  * A tile-and-metatile world (the Gen 3 Pokémon overworld). Every address is on the GBA bus.
  * A grid cell is one 16x16 px metatile; a metatile is 8 u16 tile entries: bottom layer
  * TL, TR, BL, BR, then top layer TL, TR, BL, BR (tile entry bits: 0-9 tile, 10 h-flip,
@@ -73,10 +86,12 @@ struct WideWorld {
     uint32_t metatiles;         /* ids below split: metatiles + id * 16 */
     uint32_t metatiles2;        /* the rest: metatiles2 + (id - split) * 16 */
     int split;
+    int metatileLayers;         /* 2 (the default, also 0): a metatile is 8 u16 entries, bottom layer then top; 3: 12 entries (24 bytes), bottom, middle, top (pokeemerald-expansion's triple-layer metatiles). The top-most layer with a pixel wins */
     uint32_t tiles;             /* 4bpp tile data, 32 bytes a tile */
     uint32_t palette;           /* 16 banks x 16 BGR555 */
     int layerCount;             /* 0: the single grid above; 1..3: [layers] instead, bottom first (the rest above is ignored) */
     struct WideLayer layers[WIDE_MAX_LAYERS]; /* the top layer wins where its pixel is not colour 0; outside the grids it is black */
+    struct WideOverlay overlay; /* painted over the margins' ground, under the markers */
     int markerCount;            /* 0..WIDE_MAX_MARKERS */
     struct WideMarker markers[WIDE_MAX_MARKERS]; /* painted by wide_paint over the margins, never over the frame */
 };

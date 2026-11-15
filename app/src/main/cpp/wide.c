@@ -3,7 +3,10 @@
 #include "bus.h"
 
 #define MAX_CELLS 1024
-#define GOOD_MATCH 0.85f
+/* Showing needs a good match, hiding a clearly bad one (hysteresis): a crowded edge (NPCs and the player standing on the
+ * seam columns are no part of the world) sits around 0.85 without the world being wrong. */
+#define GOOD_MATCH 0.80f
+#define BAD_MATCH 0.55f
 #define HIDE_AFTER_BAD 4
 #define SHOW_AFTER_GOOD 4
 #define SEAM_COLUMNS 8
@@ -128,18 +131,21 @@ uint32_t wide_pixel(const struct WideWorld* w, int32_t wx, int32_t wy) {
         uint16_t cell = gbaduo_bus_read16(w->border + ((uint32_t) by * (uint32_t) w->borderW + (uint32_t) bx) * 2u);
         id = cell & w->idMask;
     }
-    uint32_t base = id < w->split ? w->metatiles + (uint32_t) id * 16u
-                                  : w->metatiles2 + (uint32_t) (id - w->split) * 16u;
+    int nl = w->metatileLayers == 3 ? 3 : 2;
+    uint32_t stride = (uint32_t) nl * 8u;
+    uint32_t base = id < w->split ? w->metatiles + (uint32_t) id * stride
+                                  : w->metatiles2 + (uint32_t) (id - w->split) * stride;
 
     int quadrant = (py >> 3) * 2 + (px >> 3);
     int tx = px & 7;
     int ty = py & 7;
-    uint16_t top = gbaduo_bus_read16(base + (uint32_t) (4 + quadrant) * 2u);
-    uint16_t bottom = gbaduo_bus_read16(base + (uint32_t) quadrant * 2u);
 
-    int bank;
-    int index = tile_index(w, top, tx, ty, &bank);
-    if (index == 0) index = tile_index(w, bottom, tx, ty, &bank);
+    int bank = 0;
+    int index = 0;
+    for (int layer = nl - 1; layer >= 0 && index == 0; layer--) {
+        uint16_t entry = gbaduo_bus_read16(base + (uint32_t) (layer * 4 + quadrant) * 2u);
+        index = tile_index(w, entry, tx, ty, &bank);
+    }
     if (index == 0) bank = 0;
     return wide_color(gbaduo_bus_read16(w->palette + ((uint32_t) bank * 16u + (uint32_t) index) * 2u));
 }
@@ -184,23 +190,27 @@ static void span(const struct WideWorld* w, const uint32_t* pal, int32_t wy, int
         int32_t by = floor_mod(cy - w->borderShift, w->borderH);
         id = gbaduo_bus_read16(w->border + ((uint32_t) by * (uint32_t) w->borderW + (uint32_t) bx) * 2u) & w->idMask;
     }
-    uint32_t base = id < w->split ? w->metatiles + (uint32_t) id * 16u
-                                  : w->metatiles2 + (uint32_t) (id - w->split) * 16u;
+    int nl = w->metatileLayers == 3 ? 3 : 2;
+    uint32_t stride = (uint32_t) nl * 8u;
+    uint32_t base = id < w->split ? w->metatiles + (uint32_t) id * stride
+                                  : w->metatiles2 + (uint32_t) (id - w->split) * stride;
 
     int quadrant = (py >> 3) * 2 + (px >> 3);
     int ty = py & 7;
     int tx0 = px & 7;
-    uint16_t top = gbaduo_bus_read16(base + (uint32_t) (4 + quadrant) * 2u);
-    uint16_t bottom = gbaduo_bus_read16(base + (uint32_t) quadrant * 2u);
-    uint32_t topRow = tile_row(w, top, ty);
-    uint32_t bottomRow = tile_row(w, bottom, ty);
+    uint16_t entries[3];
+    uint32_t rows[3];
+    for (int layer = 0; layer < nl; layer++) {
+        entries[layer] = gbaduo_bus_read16(base + (uint32_t) (layer * 4 + quadrant) * 2u);
+        rows[layer] = tile_row(w, entries[layer], ty);
+    }
 
     for (int i = 0; i < n; i++) {
-        int index = row_index(topRow, top, tx0 + i);
-        int bank = top >> 12;
-        if (index == 0) {
-            index = row_index(bottomRow, bottom, tx0 + i);
-            bank = bottom >> 12;
+        int index = 0;
+        int bank = 0;
+        for (int layer = nl - 1; layer >= 0 && index == 0; layer--) {
+            index = row_index(rows[layer], entries[layer], tx0 + i);
+            bank = entries[layer] >> 12;
         }
         if (index == 0) bank = 0;
         out[i] = pal[bank * 16 + index];
@@ -324,6 +334,28 @@ static void paint_markers(const struct WideWorld* w, uint32_t* buf, int stride, 
     }
 }
 
+/* The overlay over [n] pixels of [line], whose first pixel is at screen x [sx] on screen row [sy]. */
+static void overlay_row(const struct WideWorld* w, const uint32_t* pal, int sx, int sy, int n, uint32_t* line) {
+    const struct WideOverlay* o = &w->overlay;
+    int my = (sy + o->scrollY) & 255;
+    for (int k = 0; k < n; k++) {
+        int mx = (sx + k + o->scrollX) & 255;
+        uint16_t entry = gbaduo_bus_read16(o->map + (uint32_t) ((my >> 3) * 32 + (mx >> 3)) * 2u);
+        int tx = mx & 7, ty = my & 7;
+        if (entry & 0x400) tx = 7 - tx;
+        if (entry & 0x800) ty = 7 - ty;
+        uint8_t b = gbaduo_bus_read8(o->tiles + (uint32_t) (entry & 0x3FF) * 32u + (uint32_t) ty * 4u + (uint32_t) (tx >> 1));
+        int idx = (tx & 1) ? b >> 4 : b & 0x0F;
+        if (idx == 0) continue;
+        uint32_t over = pal[(entry >> 12) * 16 + idx], ground = line[k], res = 0;
+        for (int shift = 0; shift < 24; shift += 8) {
+            uint32_t v = (((over >> shift) & 0xFF) * (uint32_t) o->eva + ((ground >> shift) & 0xFF) * (uint32_t) o->evb) / 16u;
+            res |= (v > 255u ? 255u : v) << shift;
+        }
+        line[k] = res;
+    }
+}
+
 void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, int right, int top, int bottom) {
     bool valid = wide_world_valid(w);
     uint32_t pal[256];
@@ -345,8 +377,13 @@ void wide_paint(const struct WideWorld* w, uint32_t* buf, int stride, int left, 
         if (inFrame) {
             wide_row(w, pal, wy, w->x - left, left, line, true);
             wide_row(w, pal, wy, w->x + WIDE_FRAME_W, right, line + left + WIDE_FRAME_W, true);
+            if (w->overlay.present) {
+                overlay_row(w, pal, -left, row - top, left, line);
+                overlay_row(w, pal, WIDE_FRAME_W, row - top, right, line + left + WIDE_FRAME_W);
+            }
         } else {
             wide_row(w, pal, wy, w->x - left, total, line, true);
+            if (w->overlay.present) overlay_row(w, pal, -left, row - top, total, line);
         }
     }
     blank_beyond_overscan(w, buf, stride, left, right, top, bottom);
@@ -545,6 +582,9 @@ bool wide_gate_step(struct WideGate* g, bool haveWorld, float match) {
             g->shown = true;
             g->good = 0;
         }
+    } else if (match >= BAD_MATCH) {
+        g->good = 0;
+        if (g->shown) g->bad = 0;
     } else {
         g->good = 0;
         if (g->shown && ++g->bad >= HIDE_AFTER_BAD) {
