@@ -98,6 +98,7 @@ class LibraryActivity : Activity() {
     /** Game codes the Packs filter matches: installed packs (any source) plus the catalog's, upper-case. */
     private var filterPackCodes: Set<String> = emptySet()
     private var filter: LibraryFilter = LibraryFilter.All
+    private var marks = GameMarks()
     private var splitMode = false
     private var pickPackFor: GameStorage? = null
 
@@ -138,6 +139,8 @@ class LibraryActivity : Activity() {
         findViewById<PixelButton>(R.id.split_play).setOnClickListener { play() }
         findViewById<PixelButton>(R.id.split_pack).setOnClickListener { selectedEntry()?.let(::showCompanionMenu) }
         findViewById<PixelButton>(R.id.split_settings).setOnClickListener { selectedEntry()?.let(::openGameSettings) }
+        findViewById<PixelButton>(R.id.split_favorite).setOnClickListener { toggleFavorite() }
+        findViewById<PixelButton>(R.id.favorite_button).setOnClickListener { toggleFavorite() }
         filterButton.setOnClickListener { cycleFilter(1) }
         viewButton.setOnClickListener { toggleView() }
 
@@ -222,6 +225,10 @@ class LibraryActivity : Activity() {
                 textSize = 14f
                 (layoutParams as LinearLayout.LayoutParams).marginStart = gap
             }
+            findViewById<PixelButton>(R.id.favorite_button).apply {
+                textSize = 14f
+                (layoutParams as LinearLayout.LayoutParams).marginStart = gap
+            }
         }
         // The empty / scanning box: 560dp, or the screen width minus a margin when narrower.
         empty.layoutParams = empty.layoutParams.apply {
@@ -254,7 +261,7 @@ class LibraryActivity : Activity() {
         findViewById<View>(R.id.game_list_box).background = PixelBoxDrawable(this, Pixel.CREAM, shadowDp = 4f, borderDp = 3f)
         // Inside the box's border (3dp) and its hard shadow (4dp, right and bottom).
         Pixel.dp(this, 3f).toInt().let { edge -> Pixel.dp(this, 7f).toInt().let { far -> findViewById<View>(R.id.game_list_box).setPadding(edge, edge, far, far) } }
-        listOf(R.id.split_play to Pixel.YELLOW, R.id.split_pack to Pixel.CREAM, R.id.split_settings to Pixel.CREAM).forEach { (id, fill) ->
+        listOf(R.id.split_play to Pixel.YELLOW, R.id.split_pack to Pixel.CREAM, R.id.split_settings to Pixel.CREAM, R.id.split_favorite to Pixel.CREAM).forEach { (id, fill) ->
             findViewById<PixelButton>(id).apply {
                 style(fill)
                 textSize = if (compact) 11f else 13f
@@ -264,6 +271,7 @@ class LibraryActivity : Activity() {
         findViewById<PixelButton>(R.id.play).style(Pixel.YELLOW)
         findViewById<PixelButton>(R.id.pack_button).style(Pixel.CREAM)
         findViewById<PixelButton>(R.id.game_settings_button).style(Pixel.CREAM)
+        findViewById<PixelButton>(R.id.favorite_button).style(Pixel.CREAM)
 
         pointer.apply { typeface = displayBold; textSize = 18f; setTextColor(Pixel.PINK); setShadowLayer(0.01f, 2f, 2f, Pixel.INK) }
 
@@ -330,6 +338,7 @@ class LibraryActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_DOWN -> if (splitMode) carousel.step(1) else return super.onKeyDown(keyCode, event)
             KeyEvent.KEYCODE_BUTTON_L2 -> if (event.repeatCount == 0) cycleFilter(-1)
             KeyEvent.KEYCODE_BUTTON_R2 -> if (event.repeatCount == 0) cycleFilter(1)
+            KeyEvent.KEYCODE_BUTTON_THUMBR -> if (event.repeatCount == 0) toggleFavorite()
             KeyEvent.KEYCODE_BUTTON_SELECT -> if (event.repeatCount == 0) toggleView()
             KeyEvent.KEYCODE_DPAD_LEFT -> carousel.step(-1)
             KeyEvent.KEYCODE_DPAD_RIGHT -> carousel.step(1)
@@ -365,6 +374,7 @@ class LibraryActivity : Activity() {
         tagPack.text = getString(if (carousel.hasPackUpdate(entry)) R.string.tag_pack_update else R.string.tag_pack)
         tagPack.visibility = if (carousel.hasPack(entry)) View.VISIBLE else View.GONE
         fileName.text = entry.fileName
+        renderFavorite(entry)
         gameList.select(index)
         splitCart.apply {
             title = gameTitle.text.toString()
@@ -382,7 +392,7 @@ class LibraryActivity : Activity() {
 
     private fun cycleFilter(direction: Int) {
         if (allEntries.isEmpty()) return
-        val next = ShelfFilter.cycle(filter, allEntries, filterPackCodes, direction)
+        val next = ShelfFilter.cycle(filter, allEntries, filterPackCodes, direction, marks)
         if (next == filter) return
         filter = next
         prefs.edit().putString(KEY_FILTER, next.id).apply()
@@ -392,7 +402,7 @@ class LibraryActivity : Activity() {
 
     /** Puts [filter]'s games on the shelf, keeping [keep] selected if it's among them, else the first game. */
     private fun showFiltered(keep: String?) {
-        val shown = ShelfFilter.apply(allEntries, filter, filterPackCodes)
+        val shown = ShelfFilter.apply(allEntries, filter, filterPackCodes, marks)
         val target = shown.firstOrNull { it.fileName == keep } ?: shown.firstOrNull()
         gameList.submit(shown)
         carousel.submit(shown, packCodes, packUpdateCodes, keepFileName = target?.fileName)
@@ -408,9 +418,29 @@ class LibraryActivity : Activity() {
     private fun renderFilter() {
         filterButton.text = when (val f = filter) {
             LibraryFilter.All -> getString(R.string.filter_all)
+            LibraryFilter.Recent -> getString(R.string.filter_recent)
+            LibraryFilter.Favorites -> getString(R.string.filter_favorites)
             LibraryFilter.Packs -> getString(R.string.filter_packs)
             is LibraryFilter.OfPlatform -> f.platform.label
         }
+    }
+
+    /** Adds or removes the selected game from Favorites; on the Favorites shelf, the last one removed sends you back to All. */
+    private fun toggleFavorite() {
+        val entry = selectedEntry() ?: return
+        marks = GameMarksStore.setFavorite(this, entry.fileName, !marks.isFavorite(entry.fileName))
+        renderFavorite(entry)
+        if (filter == LibraryFilter.Favorites) {
+            val valid = ShelfFilter.valid(filter, allEntries, filterPackCodes, marks)
+            if (valid != filter) { filter = valid; prefs.edit().putString(KEY_FILTER, valid.id).apply(); renderFilter() }
+            showFiltered(keep = entry.fileName)
+        }
+    }
+
+    private fun renderFavorite(entry: RomEntry) {
+        val text = getString(if (marks.isFavorite(entry.fileName)) R.string.favorite_remove else R.string.favorite_add)
+        findViewById<PixelButton>(R.id.favorite_button).text = text
+        findViewById<PixelButton>(R.id.split_favorite).text = text
     }
 
     private fun renderViewMode() {
@@ -450,10 +480,11 @@ class LibraryActivity : Activity() {
             if (generation != refreshGeneration) return@background // a newer refresh superseded this one
             val (entries, codes, updateCodes) = result.getOrDefault(Triple(emptyList<RomEntry>(), emptySet(), emptySet()))
             allEntries = entries
+            marks = GameMarksStore.load(this)   // played games move up Recent between visits
             packCodes = codes
             filterPackCodes = codes.map { it.uppercase() }.toSet() + packUpdates.catalogGameCodes()
             packUpdateCodes = updateCodes
-            val valid = ShelfFilter.valid(filter, entries, filterPackCodes)
+            val valid = ShelfFilter.valid(filter, entries, filterPackCodes, marks)
             if (valid != filter) { filter = valid; renderFilter() }
             showFiltered(keep = selectedEntry()?.fileName ?: prefs.getString(KEY_LAST_SELECTED, null))
             updateHud(entries)
@@ -527,6 +558,7 @@ class LibraryActivity : Activity() {
             hint("Y", getString(R.string.hint_pack))
             if (!compact) hint("X", getString(R.string.hint_game_settings))
             hint("L2 R2", getString(R.string.hint_filter))
+            if (!compact) hint("R3", getString(R.string.hint_favorite))
             if (!compact) hint("SELECT", getString(R.string.hint_view))
             if (!compact) hint("L R", getString(R.string.hint_jump))
         } else if (canAddFolder) {

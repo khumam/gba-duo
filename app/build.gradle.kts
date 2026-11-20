@@ -72,6 +72,9 @@ android {
 
 dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // .7z ROM archives (RomArchive); xz is its LZMA/LZMA2 codec.
+    implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.tukaani:xz:1.10")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("com.google.android.material:material:1.12.0")
 

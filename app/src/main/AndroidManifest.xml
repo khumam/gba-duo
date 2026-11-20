@@ -66,6 +66,7 @@
         <activity android:name=".settings.GameSettingsActivity" android:exported="false" />
         <activity android:name=".settings.CoverActivity" android:exported="false" />
         <activity android:name=".settings.ScrapingActivity" android:exported="false" />
+        <activity android:name=".settings.CompanionScreenActivity" android:exported="false" />
         <activity android:name=".settings.ProvidersActivity" android:exported="false" />
         <activity android:name=".settings.ArtworkFolderActivity" android:exported="false" />
         <activity android:name=".settings.SteamGridDbActivity" android:exported="false" />

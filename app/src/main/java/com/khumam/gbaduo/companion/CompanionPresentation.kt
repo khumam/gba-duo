@@ -3,6 +3,7 @@ package com.khumam.gbaduo.companion
 import android.app.Presentation
 import android.content.Context
 import android.os.Bundle
+import android.view.View
 import android.view.Display
 import android.view.KeyEvent
 import com.khumam.gbaduo.companion.android.ComposeHostOwner
@@ -21,8 +22,10 @@ import com.khumam.gbaduo.companion.android.setUpForCompanion
 class CompanionPresentation(
     context: Context,
     display: Display,
-    private val controller: CompanionController,
+    private val controller: CompanionController?,
     private val onKey: (KeyEvent) -> Boolean,
+    /** Shown instead of the companion screen when [controller] is null ([CompanionMode.BLANK_ART]). */
+    private val blank: ((Context) -> View)? = null,
 ) : Presentation(context, display) {
 
     private val owner = ComposeHostOwner()
@@ -30,12 +33,16 @@ class CompanionPresentation(
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window?.setUpForCompanion()
-        controller.onTextFocus = { editing -> window?.setTextEntry(editing) }
-        setContentView(companionView(context, owner, controller))
+        if (controller != null) {
+            controller.onTextFocus = { editing -> window?.setTextEntry(editing) }
+            setContentView(companionView(context, owner, controller))
+        } else {
+            setContentView(blank?.invoke(context) ?: View(context))
+        }
     }
 
     override fun onStop() {
-        controller.onTextFocus = {}
+        controller?.onTextFocus = {}
         owner.destroy()
         super.onStop()
     }

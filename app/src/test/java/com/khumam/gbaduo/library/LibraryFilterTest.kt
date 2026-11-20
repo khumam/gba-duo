@@ -54,4 +54,32 @@ class LibraryFilterTest {
         for (f in listOf(LibraryFilter.All, LibraryFilter.Packs, of(Platform.GBC))) assertEquals(f, LibraryFilter.byId(f.id))
         assertEquals(LibraryFilter.All, LibraryFilter.byId("junk"))
     }
+
+    @Test fun recentListsPlayedGamesNewestFirstAndFavoritesTheMarkedOnes() {
+        val marks = GameMarks(favorites = setOf("c"), played = mapOf("a" to 100L, "b" to 200L))
+        assertEquals(listOf(gbc, gba), ShelfFilter.apply(entries, LibraryFilter.Recent, packs, marks))
+        assertEquals(listOf(gb), ShelfFilter.apply(entries, LibraryFilter.Favorites, packs, marks))
+    }
+
+    @Test fun cycleSkipsEmptyRecentAndFavoritesButVisitsThemWhenSet() {
+        assertEquals(LibraryFilter.Packs, ShelfFilter.cycle(LibraryFilter.All, entries, packs, 1))
+        val marks = GameMarks(favorites = setOf("a"), played = mapOf("a" to 1L))
+        assertEquals(LibraryFilter.Recent, ShelfFilter.cycle(LibraryFilter.All, entries, packs, 1, marks))
+        assertEquals(LibraryFilter.Favorites, ShelfFilter.cycle(LibraryFilter.Recent, entries, packs, 1, marks))
+        assertEquals(LibraryFilter.All, ShelfFilter.valid(LibraryFilter.Favorites, entries, packs))
+    }
+
+    @Test fun marksKeepOnlyTheNewestPlays() {
+        var marks = GameMarks()
+        repeat(GameMarks.MAX_RECENT + 5) { marks = marks.withPlayed("g$it", it.toLong()) }
+        assertEquals(GameMarks.MAX_RECENT, marks.played.size)
+        assertEquals(false, "g0" in marks.played)
+        assertEquals(true, "g${GameMarks.MAX_RECENT + 4}" in marks.played)
+        assertEquals(false, marks.withFavorite("x", true).withFavorite("x", false).isFavorite("x"))
+    }
+
+    @Test fun idsRoundTripForNewFilters() {
+        assertEquals(LibraryFilter.Recent, LibraryFilter.byId("recent"))
+        assertEquals(LibraryFilter.Favorites, LibraryFilter.byId("favorites"))
+    }
 }

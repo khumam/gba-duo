@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.content.Context
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -24,6 +25,8 @@ import com.khumam.gbaduo.companion.WritePermission
 import com.khumam.gbaduo.companion.WritePermissionControl
 import com.khumam.gbaduo.companion.WideMode
 import com.khumam.gbaduo.companion.CompanionActivity
+import com.khumam.gbaduo.companion.CompanionBlankView
+import com.khumam.gbaduo.companion.CompanionMode
 import com.khumam.gbaduo.companion.CompanionController
 import com.khumam.gbaduo.companion.CompanionPlacement
 import com.khumam.gbaduo.companion.CompanionPresentation
@@ -43,6 +46,7 @@ import com.khumam.gbaduo.emu.ShaderChoice
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.emu.TiltShiftSettings
 import com.khumam.gbaduo.library.GameTitle
+import com.khumam.gbaduo.library.GameMarksStore
 import com.khumam.gbaduo.library.RomArchive
 import com.khumam.gbaduo.library.RomHeader
 import com.khumam.gbaduo.library.RomIndex
@@ -126,6 +130,7 @@ class PlayerActivity : Activity() {
             return
         }
         val romBytes = rom.bytes
+        GameMarksStore.recordPlayed(this, romFileName)   // feeds the home screen's Recent filter
 
         // Everything about this game lives in one folder keyed by platform + ROM CRC.
         // mGBA's own CRC32 is over the same bytes, so this matches NativeCore.crc32().
@@ -248,8 +253,20 @@ class PlayerActivity : Activity() {
         val displayManager = getSystemService(DisplayManager::class.java)
         val gameDisplay = display?.displayId ?: CompanionPlacement.MAIN_DISPLAY
         val presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).map { it.displayId }
+        val placement = CompanionPlacement.choose(gameDisplay, presentationDisplays)
+        // With a second screen, the player may want it left alone or just dark; one screen keeps the on-demand overlay.
+        if (placement !is CompanionPlacement.Target.Overlay) {
+            when (CompanionSettings.mode(this)) {
+                CompanionMode.OFF -> return
+                CompanionMode.BLANK_ART -> {
+                    showBlankCompanion(placement, displayManager, header, crc32)
+                    return
+                }
+                CompanionMode.ACTIVE -> Unit
+            }
+        }
         val controller = CompanionController(this, header.title, header.gameCode, crc32)
-        when (val target = CompanionPlacement.choose(gameDisplay, presentationDisplays)) {
+        when (val target = placement) {
             is CompanionPlacement.Target.Presentation -> {
                 val display = displayManager.getDisplay(target.displayId) ?: return
                 val presentation = CompanionPresentation(this, display, controller, onKey = ::handleKeyEvent)
@@ -376,6 +393,26 @@ class PlayerActivity : Activity() {
             .setOnDismissListener { consentDialog = null }
             .setCancelable(false)
             .show()
+    }
+
+    /** [CompanionMode.BLANK_ART]: a black second screen with the faded cartridge, no pack and no touch. */
+    private fun showBlankCompanion(target: CompanionPlacement.Target, displayManager: DisplayManager, header: RomHeader, crc32: Long) {
+        val blank: (Context) -> View = { ctx -> CompanionBlankView(ctx, GameTitle.display(intent.getStringExtra(EXTRA_ROM_FILE_NAME).orEmpty(), header.title), header.gameCode, header.platform, crc32) }
+        when (target) {
+            is CompanionPlacement.Target.Presentation -> {
+                val display = displayManager.getDisplay(target.displayId) ?: return
+                val presentation = CompanionPresentation(this, display, null, onKey = ::handleKeyEvent, blank = blank)
+                try {
+                    presentation.show()
+                    companionPresentation = presentation
+                } catch (e: WindowManager.InvalidDisplayException) {
+                    Log.w("PlayerActivity", "Second screen unavailable, leaving it blank", e)
+                }
+            }
+            is CompanionPlacement.Target.Activity ->
+                companionActivity = CompanionActivity.show(this, target.displayId, null, onKey = ::handleKeyEvent, onBecameTop = ::keepFocusOnGame, blank = blank)
+            CompanionPlacement.Target.Overlay -> Unit
+        }
     }
 
     /**

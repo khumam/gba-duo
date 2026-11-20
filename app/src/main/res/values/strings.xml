@@ -124,7 +124,13 @@
     <string name="scale_off">Off: full size picture</string>
     <string name="shader_follow_default">Default (%1$s)</string>
     <string name="filter_all">All</string>
+    <string name="quick_menu_title">Paused</string>
     <string name="filter_packs">Packs</string>
+    <string name="filter_recent">Recent</string>
+    <string name="filter_favorites">Favorites</string>
+    <string name="favorite_add">Favorite</string>
+    <string name="favorite_remove">Unfavorite</string>
+    <string name="hint_favorite">Favorite</string>
     <string name="view_list">List</string>
     <string name="view_shelf">Shelf</string>
     <string name="hint_filter">Filter</string>
@@ -165,6 +171,17 @@
         <item quantity="one">%d pt</item>
         <item quantity="other">%d pts</item>
     </plurals>
+    <string name="companion_title">Companion screen</string>
+    <string name="companion_summary">What the second screen shows</string>
+    <string name="companion_intro">Choose what the second screen does while a game runs. The next game you start uses it.</string>
+    <string name="companion_active">Active</string>
+    <string name="companion_active_summary">The game\'s companion pack, as usual</string>
+    <string name="companion_blank">Blank with art</string>
+    <string name="companion_blank_summary">Black, with the game\'s cartridge faded in the middle. No touch</string>
+    <string name="companion_off">Off</string>
+    <string name="companion_off_summary">Leave the second screen to other apps, like YouTube</string>
+    <string name="companion_selected">\u2713 %1$s</string>
+    <string name="companion_note">With one screen, the companion still opens over the game from the quick menu. Off and Blank also turn off pack features that run through the companion, like Wide view.</string>
     <string name="scraping_title">Scraping</string>
     <string name="scraping_summary">Find covers for your games</string>
     <plurals name="scraping_summary_count">

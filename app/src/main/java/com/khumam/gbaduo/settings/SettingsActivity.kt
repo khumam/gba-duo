@@ -8,6 +8,7 @@ import android.widget.Toast
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.achievements.HardcoreMode
 import com.khumam.gbaduo.achievements.RetroAchievements
+import com.khumam.gbaduo.companion.CompanionMode
 import com.khumam.gbaduo.companion.CompanionSettings
 import com.khumam.gbaduo.emu.AspectRatio
 import com.khumam.gbaduo.emu.AspectSettings
@@ -43,6 +44,7 @@ class SettingsActivity : PixelPage() {
     private lateinit var tiltSummary: TextView
     private lateinit var scaleSummary: TextView
     private lateinit var perfSummary: TextView
+    private lateinit var companionSummary: TextView
 
     private val raListener: (RetroAchievements.State) -> Unit = { state ->
         raSummary.text = when (state) {
@@ -82,6 +84,10 @@ class SettingsActivity : PixelPage() {
             getString(R.string.scale_title), getString(R.string.scale_off)) { toggleScale() }.second
         perfSummary = menuCard(R.drawable.ic_settings, Pixel.MINT,
             getString(R.string.perf_title), getString(R.string.perf_summary)) { choosePerf() }.second
+        companionSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
+            getString(R.string.companion_title), getString(R.string.companion_summary)) {
+            startActivity(Intent(this, CompanionScreenActivity::class.java))
+        }.second
         scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
             getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
             startActivity(Intent(this, ScrapingActivity::class.java))
@@ -115,6 +121,11 @@ class SettingsActivity : PixelPage() {
         tiltSummary.text = getString(R.string.shader_summary_current, TiltShiftSettings.default(this).displayName)
         perfSummary.text = getString(R.string.shader_summary_current, PerfOverlaySettings.default(this).displayName)
         renderScale()
+        companionSummary.text = getString(when (CompanionSettings.mode(this)) {
+            CompanionMode.OFF -> R.string.companion_off
+            CompanionMode.BLANK_ART -> R.string.companion_blank
+            CompanionMode.ACTIVE -> R.string.companion_active
+        })
         val artCount = Artwork.store(this).count()
         scrapingSummary.text = if (artCount == 0) getString(R.string.scraping_summary)
         else resources.getQuantityString(R.plurals.scraping_summary_count, artCount, artCount)

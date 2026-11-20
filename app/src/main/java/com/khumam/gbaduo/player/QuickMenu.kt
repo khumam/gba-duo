@@ -1,6 +1,6 @@
 package com.khumam.gbaduo.player
 
-import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Context
 import com.khumam.gbaduo.R
 import com.khumam.gbaduo.emu.EmuThread
@@ -29,7 +29,7 @@ class QuickMenu(
     private var shader = initialShader
     private var tilt = initialTilt
     private var integerScaling = initialIntegerScaling
-    private var dialog: AlertDialog? = null
+    private var dialog: Dialog? = null
 
     /** Shows the companion over the game; set only when it has no screen of its own (see CompanionOverlay). */
     var onShowCompanion: (() -> Unit)? = null
@@ -54,10 +54,9 @@ class QuickMenu(
             add(context.getString(R.string.quit) to onQuit)
         }
 
-        dialog = AlertDialog.Builder(context)
-            .setItems(entries.map { it.first }.toTypedArray()) { _, which -> entries[which].second() }
-            .setOnCancelListener { emu.paused = false }
-            .show()
+        dialog = PixelMenuDialog(context, context.getString(R.string.quick_menu_title), entries)
+            .apply { setOnCancelListener { emu.paused = false } }
+            .also { it.show() }
     }
 
     private fun cycleFfSpeed() {
@@ -104,12 +103,15 @@ class QuickMenu(
             paths += it.absolutePath
         }
 
-        dialog = AlertDialog.Builder(context)
-            .setItems(labels.toTypedArray()) { _, which ->
+        val rows = labels.mapIndexed { which, label ->
+            label to {
                 emu.requestState(paths[which], save)
                 emu.paused = false
             }
-            .setOnCancelListener { emu.paused = false }
-            .show()
+        }
+        val title = context.getString(if (save) R.string.save_state else R.string.load_state)
+        dialog = PixelMenuDialog(context, title, rows)
+            .apply { setOnCancelListener { emu.paused = false } }
+            .also { it.show() }
     }
 }

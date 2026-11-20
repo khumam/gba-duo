@@ -8,6 +8,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
+import org.apache.commons.compress.utils.SeekableInMemoryByteChannel
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -33,13 +36,46 @@ class RomArchiveTest {
         return out.toByteArray()
     }
 
+    private fun sevenZ(vararg entries: Pair<String, ByteArray>): ByteArray {
+        val channel = SeekableInMemoryByteChannel()
+        SevenZOutputFile(channel).use { out ->
+            for ((name, bytes) in entries) {
+                out.putArchiveEntry(SevenZArchiveEntry().apply { this.name = name; size = bytes.size.toLong() })
+                out.write(bytes)
+                out.closeArchiveEntry()
+            }
+        }
+        return channel.array().copyOf(channel.size().toInt())
+    }
+
+    @Test
+    fun extractsTheRomInsideA7z() {
+        val rom = gbaRom("AMTE")
+        val archive = sevenZ("readme.txt" to "hi".toByteArray(), "Metroid Fusion.gba" to rom)
+
+        val extracted = RomArchive.readRom("Metroid Fusion.7z", ByteArrayInputStream(archive))!!
+
+        assertEquals("Metroid Fusion.gba", extracted.fileName)
+        assertArrayEquals(rom, extracted.bytes)
+        assertEquals(RomIndex.crc32Of(rom), RomArchive.crc32("Metroid Fusion.7z", ByteArrayInputStream(archive)))
+        assertEquals(RomHeader.SIZE, RomArchive.readHeader("Metroid Fusion.7z", ByteArrayInputStream(archive))!!.bytes.size.coerceAtMost(RomHeader.SIZE))
+    }
+
+    @Test
+    fun a7zWithoutARomOrCorruptGivesNull() {
+        assertNull(RomArchive.readRom("x.7z", ByteArrayInputStream(sevenZ("readme.txt" to "hi".toByteArray()))))
+        assertNull(RomArchive.readRom("x.7z", ByteArrayInputStream(ByteArray(64) { 1 })))
+    }
+
     @Test
     fun listsZipsAlongsideRoms() {
         assertTrue(RomArchive.isLibraryFileName("game.zip"))
         assertTrue(RomArchive.isLibraryFileName("GAME.ZIP"))
         assertTrue(RomArchive.isLibraryFileName("game.gba"))
         assertTrue(RomArchive.isLibraryFileName("game.gbc"))
-        assertFalse(RomArchive.isLibraryFileName("game.7z"))
+        assertTrue(RomArchive.isLibraryFileName("game.7z"))
+        assertTrue(RomArchive.isLibraryFileName("GAME.7Z"))
+        assertFalse(RomArchive.isLibraryFileName("game.rar"))
         assertFalse(RomArchive.isLibraryFileName("notes.txt"))
         assertTrue(RomArchive.isArchiveName("game.zip"))
         assertFalse(RomArchive.isArchiveName("game.gba"))

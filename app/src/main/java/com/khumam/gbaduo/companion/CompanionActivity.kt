@@ -3,9 +3,11 @@ package com.khumam.gbaduo.companion
 import android.app.Activity
 import android.app.ActivityOptions
 import android.content.Intent
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
 import com.khumam.gbaduo.companion.android.ComposeHostOwner
 import com.khumam.gbaduo.companion.android.companionView
 import com.khumam.gbaduo.companion.android.setTextEntry
@@ -25,9 +27,10 @@ class CompanionActivity : Activity() {
 
     /** One game's link to its companion activity. Main thread only. */
     class Session internal constructor(
-        internal val controller: CompanionController,
+        internal val controller: CompanionController?,
         internal val onKey: (KeyEvent) -> Boolean,
         internal val onBecameTop: () -> Unit,
+        internal val blank: ((Context) -> View)? = null,
     ) {
         internal var activity: CompanionActivity? = null
     }
@@ -45,8 +48,12 @@ class CompanionActivity : Activity() {
         session = s
         s.activity = this
         window.setUpForCompanion()
-        s.controller.onTextFocus = { editing -> window.setTextEntry(editing) }
-        setContentView(companionView(this, owner, s.controller))
+        if (s.controller != null) {
+            s.controller.onTextFocus = { editing -> window.setTextEntry(editing) }
+            setContentView(companionView(this, owner, s.controller))
+        } else {
+            setContentView(s.blank?.invoke(this) ?: View(this))
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -88,12 +95,13 @@ class CompanionActivity : Activity() {
         fun show(
             from: Activity,
             displayId: Int,
-            controller: CompanionController,
+            controller: CompanionController?,
             onKey: (KeyEvent) -> Boolean,
             onBecameTop: () -> Unit,
+            blank: ((Context) -> View)? = null,
         ): Session? {
             current?.let(::close)
-            val session = Session(controller, onKey, onBecameTop)
+            val session = Session(controller, onKey, onBecameTop, blank)
             current = session
             val intent = Intent(from, CompanionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId)

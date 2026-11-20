@@ -172,6 +172,13 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:text="@string/game_settings" />
+
+                <com.khumam.gbaduo.library.ui.PixelButton
+                    android:id="@+id/split_favorite"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/favorite_add" />
             </LinearLayout>
 
             <FrameLayout
@@ -276,6 +283,13 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="16dp"
                 android:text="@string/game_settings" />
+
+            <com.khumam.gbaduo.library.ui.PixelButton
+                android:id="@+id/favorite_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="@string/favorite_add" />
         </LinearLayout>
 
         <!-- Control hints, HUD style. -->

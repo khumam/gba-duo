@@ -1,10 +1,12 @@
 package com.khumam.gbaduo.library
 
+import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import org.apache.commons.compress.utils.SeekableInMemoryByteChannel
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /**
- * Lets the library and player treat a `.zip` holding a ROM like the ROM itself.
+ * Lets the library and player treat a `.zip` or `.7z` holding a ROM like the ROM itself.
  * The core gets ROM bytes (it's built without mGBA's own zip support), so the
  * ROM is unpacked here; its CRC32 is the ROM's, not the archive's, so a zipped
  * game keeps the saves, game folder and pack match of the bare one. Pure, no
@@ -15,7 +17,12 @@ object RomArchive {
     /** A ROM file's name (the entry's, for an archive) and some or all of its bytes. */
     class Rom(val fileName: String, val bytes: ByteArray)
 
-    fun isArchiveName(name: String): Boolean = name.substringAfterLast('.', "").lowercase() == "zip"
+    fun isArchiveName(name: String): Boolean = name.substringAfterLast('.', "").lowercase() in ARCHIVE_EXTENSIONS
+
+    private val ARCHIVE_EXTENSIONS = setOf("zip", "7z")
+
+    /** Cap on what the 7z decoder may allocate (LZMA dictionary etc.), in KB; keeps a hostile archive from OOMing the app. */
+    private const val SEVEN_Z_MEMORY_LIMIT_KB = 256 * 1024
 
     /**
      * What the library lists: bare ROMs and zips (which may turn out to hold none).
@@ -69,6 +76,7 @@ object RomArchive {
      */
     private fun <T> withRom(fileName: String, input: InputStream, block: (String, InputStream, Long) -> T): T? {
         if (!isArchiveName(fileName)) return block(fileName, input, -1L)
+        if (fileName.substringAfterLast('.').lowercase() == "7z") return withSevenZRom(input, block)
         val zip = ZipInputStream(input)
         while (true) {
             val entry = zip.nextEntry ?: return null
@@ -88,5 +96,30 @@ object RomArchive {
             read += n
         }
         return buffer.copyOf(read)
+    }
+
+    /**
+     * 7z needs random access, so the (small, compressed) archive is held in memory
+     * rather than streamed. A corrupt or oversized archive reads as "no ROM".
+     */
+    private fun <T> withSevenZRom(input: InputStream, block: (String, InputStream, Long) -> T): T? {
+        val archive = try {
+            SevenZFile.builder()
+                .setSeekableByteChannel(SeekableInMemoryByteChannel(input.readBytes()))
+                .setMaxMemoryLimitKb(SEVEN_Z_MEMORY_LIMIT_KB)
+                .get()
+        } catch (e: java.io.IOException) {
+            return null
+        }
+        archive.use { sevenZ ->
+            while (true) {
+                val entry = sevenZ.nextEntry ?: return null
+                val name = entry.name.substringAfterLast('/')
+                if (entry.isDirectory || name.startsWith("._") || entry.name.startsWith("__MACOSX/")) continue
+                if (RomHeader.isRomFileName(name)) {
+                    return block(name, sevenZ.getInputStream(entry), entry.size)
+                }
+            }
+        }
     }
 }
