@@ -83,27 +83,32 @@ class CartridgeView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        val shadow = if (selectedCart) dp(9f) else dp(6f)
+        val shadow = if (Pixel.FLAT) 0f else if (selectedCart) dp(9f) else dp(6f)
         val pad = ring + dp(2f)
-        val availW = width - pad * 2 - shadow
+        // Without the shadow's width as spare room on the right, the "pack" sticker (which pokes out past the shell)
+        // would be clipped by the view; a small margin on both sides keeps it whole and the shell centred.
+        val side = if (Pixel.FLAT) dp(7f) else 0f
+        val availW = width - pad * 2 - shadow - side * 2
         val availH = height - pad * 2 - shadow
         // Every shell is portrait, so a cover (usually 3:4 or square) fills the label.
         val aspect = SHELL_ASPECT
         var w = availW
         var h = w / aspect
         if (h > availH) { h = availH; w = h * aspect }
-        val left = pad + (availW - w) / 2
+        val left = pad + side + (availW - w) / 2
         val top = pad + (availH - h) / 2
         bodyBounds.set(left, top, left + w, top + h)
         buildBody(bodyBounds)
 
         // Hard shadow, then the yellow ring when selected, then the shell.
-        canvas.save()
-        canvas.translate(shadow, shadow)
-        paint.style = Paint.Style.FILL
-        paint.color = Pixel.INK
-        canvas.drawPath(body, paint)
-        canvas.restore()
+        if (shadow > 0f) {
+            canvas.save()
+            canvas.translate(shadow, shadow)
+            paint.style = Paint.Style.FILL
+            paint.color = Pixel.INK
+            canvas.drawPath(body, paint)
+            canvas.restore()
+        }
 
         if (selectedCart) {
             paint.style = Paint.Style.STROKE
@@ -183,7 +188,8 @@ class CartridgeView @JvmOverloads constructor(
         val t = dp(2f)
         for (i in 0 until 3) {
             val y = b.top + b.height() * (0.045f + i * 0.03f)
-            canvas.drawRect(b.left + b.width() * 0.16f, y, b.right - b.width() * 0.3f, y + t, paint)
+            // Clear of the stepped top-left corner (two steps, 18% of the width) and its outline.
+            canvas.drawRect(b.left + b.width() * 0.25f, y, b.right - b.width() * 0.22f, y + t, paint)
         }
     }
 

@@ -125,7 +125,7 @@ class OutlineText @JvmOverloads constructor(
     var accentColor = Pixel.YELLOW
     /** Outline width outside the glyphs (the stroke is drawn centred, so twice this). */
     var strokeWidthPx = Pixel.dp(context, 0.8f)
-    var shadowPx = Pixel.dp(context, 3f)
+    var shadowPx = if (Pixel.FLAT) 0f else Pixel.dp(context, 3f)
     var centered = false
     /** When set, a line too long for the width shrinks down to this size before it ellipsizes. */
     var minTextSizePx = 0f

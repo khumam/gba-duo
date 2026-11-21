@@ -238,7 +238,13 @@ class LibraryActivity : Activity() {
             width = minOf(Pixel.dp(this@LibraryActivity, 560f), resources.displayMetrics.widthPixels - Pixel.dp(this@LibraryActivity, 48f)).toInt()
         }
 
-        hud.apply { background = ColorDrawable(Pixel.INK); typeface = display; textSize = 12f; letterSpacing = 0.06f }
+        hud.apply {
+            background = ColorDrawable(Pixel.INK); typeface = display; textSize = 12f; letterSpacing = 0.06f
+            // As tall as the buttons beside it (Filter, List/Shelf, Settings), text centred.
+            minHeight = Pixel.dp(this@LibraryActivity, 44f).toInt()
+            gravity = android.view.Gravity.CENTER
+            setPadding(Pixel.dp(this@LibraryActivity, 14f).toInt(), 0, Pixel.dp(this@LibraryActivity, 14f).toInt(), 0)
+        }
         findViewById<PixelButton>(R.id.open_settings).apply {
             style(Pixel.CREAM)
             textSize = 13f
@@ -261,9 +267,10 @@ class LibraryActivity : Activity() {
             setTextSizeSp(if (compact) 14f else 17f)
             minTextSizePx = 11f * resources.displayMetrics.scaledDensity
         }
-        findViewById<View>(R.id.game_list_box).background = PixelBoxDrawable(this, Pixel.CREAM, shadowDp = 4f, borderDp = 3f)
-        // Inside the box's border (3dp) and its hard shadow (4dp, right and bottom).
-        Pixel.dp(this, 3f).toInt().let { edge -> Pixel.dp(this, 7f).toInt().let { far -> findViewById<View>(R.id.game_list_box).setPadding(edge, edge, far, far) } }
+        val listBox = PixelBoxDrawable(this, Pixel.CREAM, shadowDp = 4f, borderDp = 3f)
+        findViewById<View>(R.id.game_list_box).background = listBox
+        // Inside the box's border (3dp) and its hard shadow, if the style has one (right and bottom).
+        Pixel.dp(this, 3f).toInt().let { edge -> findViewById<View>(R.id.game_list_box).setPadding(edge, edge, edge + listBox.shadow.toInt(), edge + listBox.shadow.toInt()) }
         // The four actions are pictures, not words; the words stay for screen readers.
         listOf(
             Triple(R.id.split_play, Pixel.YELLOW, R.drawable.ic_play),
@@ -339,7 +346,10 @@ class LibraryActivity : Activity() {
 
         pointer.apply { typeface = displayBold; textSize = 18f; setTextColor(Pixel.PINK); setShadowLayer(0.01f, 2f, 2f, Pixel.INK) }
 
-        tagPlatform.apply { background = ColorDrawable(Pixel.INK); typeface = display; textSize = 12f; setTextColor(Pixel.YELLOW); letterSpacing = 0.1f }
+        tagPlatform.apply {
+            background = PixelBoxDrawable(this@LibraryActivity, Pixel.INK, shadowDp = 0f, borderDp = 2f)
+            typeface = display; textSize = 12f; setTextColor(Pixel.YELLOW); letterSpacing = 0.1f
+        }
         tagCode.apply {
             background = PixelBoxDrawable(this@LibraryActivity, Pixel.YELLOW_SOFT, shadowDp = 0f, borderDp = 2f)
             typeface = Fonts.body(this@LibraryActivity, 600); textSize = 12f; setTextColor(Pixel.INK)
@@ -347,6 +357,15 @@ class LibraryActivity : Activity() {
         tagPack.apply {
             background = PixelBoxDrawable(this@LibraryActivity, Pixel.PINK, shadowDp = 0f, borderDp = 2f)
             typeface = display; textSize = 11f; setTextColor(Pixel.INK); letterSpacing = 0.06f
+        }
+        // The three pills are one size: the same height and width (longer text, such as "pack update", grows it),
+        // the same side padding, the text centred in each.
+        listOf(tagPlatform, tagCode, tagPack).forEach {
+            it.minHeight = Pixel.dp(this, TAG_HEIGHT_DP).toInt()
+            it.minWidth = Pixel.dp(this, TAG_MIN_WIDTH_DP).toInt()
+            it.gravity = android.view.Gravity.CENTER
+            it.includeFontPadding = false
+            it.setPadding(Pixel.dp(this, 10f).toInt(), 0, Pixel.dp(this, 10f).toInt(), 0)
         }
         fileName.apply { typeface = body; textSize = 12f; setTextColor(Pixel.INK_SOFT) }
 
@@ -869,6 +888,8 @@ class LibraryActivity : Activity() {
         private const val BLINK_MS = 530L
         private const val SHELF_DEBOUNCE_MS = 120L
         private const val ACTION_SIZE_DP = 44f
+        private const val TAG_HEIGHT_DP = 26f
+        private const val TAG_MIN_WIDTH_DP = 58f
         private const val SPLIT_ACTION_SIZE_DP = 42f
         private const val COMPACT_WIDTH_DP = 700
         private const val WIDE_HUD_DP = 1000

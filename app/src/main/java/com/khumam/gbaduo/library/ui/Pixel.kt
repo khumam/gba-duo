@@ -16,6 +16,12 @@ import android.util.TypedValue
  * shadows with no blur, flat brand colours.
  */
 object Pixel {
+    /**
+     * No offset shadow under boxes, buttons, cartridges and titles: the flat, cleaner look. Set to false for the
+     * original hard-shadow style. Pressed buttons darken instead of moving into their shadow.
+     */
+    const val FLAT = true
+
     const val CREAM = 0xFFFDF6E1.toInt()
     const val GRID = 0x47D6C48C            // rgb(214 196 140 / 0.28)
     const val INK = 0xFF241A45.toInt()
@@ -82,7 +88,7 @@ class PixelBoxDrawable(
     /** Outline colour while focused (DESIGN.md's focus ring is pink). */
     var focusedBorder: Int? = null,
 ) : Drawable() {
-    val shadow = Pixel.dp(context, shadowDp)
+    val shadow = if (Pixel.FLAT) 0f else Pixel.dp(context, shadowDp)
     private val borderW = Pixel.dp(context, borderDp)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
@@ -112,7 +118,7 @@ class PixelBoxDrawable(
         }
         rect.set(b.left.toFloat(), b.top.toFloat(), faceRight, faceBottom)
         paint.style = Paint.Style.FILL
-        paint.color = if (focused) focusedFill ?: fill else fill
+        paint.color = if (focused) focusedFill ?: fill else if (pressed && Pixel.FLAT) shade(fill, -0.14f) else fill
         canvas.drawRect(rect, paint)
         if (borderW > 0) {
             paint.style = Paint.Style.STROKE

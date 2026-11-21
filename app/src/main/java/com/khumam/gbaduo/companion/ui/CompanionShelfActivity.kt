@@ -390,7 +390,7 @@ class CompanionShelfActivity : PixelPage() {
         picture.addView(busyOverlay(card), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         view.addView(picture, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
             // Packs have their hard shadow in the card's padding; the ghost has none but lines up with the packs' faces.
-            if (isImport) setMargins(0, 0, dp(6), dp(6))
+            if (isImport) setMargins(0, 0, box.shadow.toInt(), box.shadow.toInt())
         })
         return view
     }
@@ -698,9 +698,9 @@ class CompanionShelfActivity : PixelPage() {
         private const val MAIN_DISPLAY = 0
         private const val SPIN_MS = 900L
         private const val PULSE_MS = 600L
-        // A card's picture: the card (250 x 136dp) less its padding and hard shadow.
-        private const val PICTURE_WIDTH_DP = 228
-        private const val PICTURE_HEIGHT_DP = 114
+        // A card's picture: the card (250 x 136dp) less its padding and its hard shadow, if the style has one.
+        private val PICTURE_WIDTH_DP = 234 - if (Pixel.FLAT) 0 else 6
+        private val PICTURE_HEIGHT_DP = 120 - if (Pixel.FLAT) 0 else 6
         private const val BUSY_TAG = "busy"
         private const val FADE_FROM = 0.2f
         private const val FADE_IN_MS = 140L
