@@ -24,6 +24,7 @@ import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
 import com.khumam.gbaduo.library.RomLibrary
 import com.khumam.gbaduo.player.AutoState
+import com.khumam.gbaduo.player.PixelMenuDialog
 import com.khumam.gbaduo.library.artwork.Artwork
 import com.khumam.gbaduo.library.ui.Pixel
 import com.khumam.gbaduo.storage.SaveFolder
@@ -59,19 +60,35 @@ class SettingsActivity : PixelPage() {
         RetroAchievements.init(this)
         page(getString(R.string.settings_title))
 
+        // Games: where they come from and how they look on the shelf.
+        group(R.string.settings_group_games, first = true)
         val (folders, foldersText) = menuCard(R.drawable.ic_folders, Pixel.YELLOW,
             getString(R.string.manage_folders), getString(R.string.rom_folders_summary)) {
             startActivity(Intent(this, RomFoldersActivity::class.java))
         }
         foldersSummary = foldersText
+        scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
+            getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
+            startActivity(Intent(this, ScrapingActivity::class.java))
+        }.second
+
+        group(R.string.settings_group_saves)
         savesSummary = menuCard(R.drawable.ic_save, Pixel.CORAL,
             getString(R.string.save_folder_title), getString(R.string.save_folder_summary_none)) {
             startActivity(Intent(this, SaveFolderActivity::class.java))
         }.second
+        autoSaveSummary = menuCard(R.drawable.ic_save, Pixel.MINT,
+            getString(R.string.auto_save_title), getString(R.string.auto_save_off)) { chooseAutoSave() }.second
+        autoLoadSummary = menuCard(R.drawable.ic_save, Pixel.YELLOW,
+            getString(R.string.auto_load_title), getString(R.string.auto_load_off)) { chooseAutoLoad() }.second
+
+        group(R.string.settings_group_controls)
         menuCard(R.drawable.ic_settings, Pixel.MINT,
             getString(R.string.controls_title), getString(R.string.controls_summary)) {
             startActivity(Intent(this, ControllerActivity::class.java))
         }
+
+        group(R.string.settings_group_picture)
         shaderSummary = menuCard(R.drawable.ic_settings, Pixel.YELLOW,
             getString(R.string.shader_title), getString(R.string.shader_summary)) { chooseShader() }.second
         colorSummary = menuCard(R.drawable.ic_settings, Pixel.MINT,
@@ -81,23 +98,17 @@ class SettingsActivity : PixelPage() {
         tiltSummary = menuCard(R.drawable.ic_settings, Pixel.YELLOW,
             getString(R.string.tilt_title), getString(R.string.tilt_summary)) { chooseTilt() }.second
         scaleSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
-            getString(R.string.scale_title), getString(R.string.scale_off)) { toggleScale() }.second
+            getString(R.string.scale_title), getString(R.string.scale_off)) { chooseScale() }.second
         perfSummary = menuCard(R.drawable.ic_settings, Pixel.MINT,
             getString(R.string.perf_title), getString(R.string.perf_summary)) { choosePerf() }.second
+
+        group(R.string.settings_group_companion)
         companionSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
-            getString(R.string.companion_title), getString(R.string.companion_summary)) {
-            startActivity(Intent(this, CompanionScreenActivity::class.java))
-        }.second
-        scrapingSummary = menuCard(R.drawable.ic_settings, Pixel.PINK,
-            getString(R.string.scraping_title), getString(R.string.scraping_summary)) {
-            startActivity(Intent(this, ScrapingActivity::class.java))
-        }.second
-        autoSaveSummary = menuCard(R.drawable.ic_save, Pixel.MINT,
-            getString(R.string.auto_save_title), getString(R.string.auto_save_off)) { toggleAutoSave() }.second
-        autoLoadSummary = menuCard(R.drawable.ic_save, Pixel.YELLOW,
-            getString(R.string.auto_load_title), getString(R.string.auto_load_off)) { toggleAutoLoad() }.second
+            getString(R.string.companion_title), getString(R.string.companion_summary)) { chooseCompanion() }.second
         writesSummary = menuCard(R.drawable.ic_settings, Pixel.PURPLE_LIGHT,
-            getString(R.string.pack_writes_title), getString(R.string.pack_writes_off)) { toggleWrites() }.second
+            getString(R.string.pack_writes_title), getString(R.string.pack_writes_off)) { chooseWrites() }.second
+
+        group(R.string.settings_group_more)
         raSummary = menuCard(R.drawable.ic_trophy, Pixel.MINT,
             getString(R.string.ra_title), getString(R.string.ra_logged_out)) {
             startActivity(Intent(this, RetroAchievementsActivity::class.java))
@@ -121,11 +132,7 @@ class SettingsActivity : PixelPage() {
         tiltSummary.text = getString(R.string.shader_summary_current, TiltShiftSettings.default(this).displayName)
         perfSummary.text = getString(R.string.shader_summary_current, PerfOverlaySettings.default(this).displayName)
         renderScale()
-        companionSummary.text = getString(when (CompanionSettings.mode(this)) {
-            CompanionMode.OFF -> R.string.companion_off
-            CompanionMode.BLANK_ART -> R.string.companion_blank
-            CompanionMode.ACTIVE -> R.string.companion_active
-        })
+        companionSummary.text = getString(companionTitle(CompanionSettings.mode(this)))
         val artCount = Artwork.store(this).count()
         scrapingSummary.text = if (artCount == 0) getString(R.string.scraping_summary)
         else resources.getQuantityString(R.plurals.scraping_summary_count, artCount, artCount)
@@ -138,70 +145,75 @@ class SettingsActivity : PixelPage() {
         startActivity(Intent(this, ShaderActivity::class.java))
     }
 
+    /** A section heading above the cards that follow it. */
+    private fun group(title: Int, first: Boolean = false) {
+        content.addView(label(getString(title)), spaced(if (first) 0 else 24))
+    }
+
+    /**
+     * The settings picker: the in-game menu's panel, the current choice ticked and under the cursor.
+     * Picking saves it; B or Back leaves it as it was.
+     */
+    private fun <T> pick(title: Int, options: List<T>, current: T, name: (T) -> String, onPick: (T) -> Unit) {
+        val rows = options.map { option ->
+            val label = name(option)
+            (if (option == current) getString(R.string.companion_selected, label) else label) to { onPick(option) }
+        }
+        PixelMenuDialog(this, getString(title), rows, focusIndex = options.indexOf(current).coerceAtLeast(0)).show()
+    }
+
     /** The app-wide color correction; a game can still pick its own in Game settings. */
-    private fun chooseColor() {
-        val options = ColorCorrection.entries
-        AlertDialog.Builder(this)
-            .setTitle(R.string.color_title)
-            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(ColorSettings.default(this))) { dialog, which ->
-                ColorSettings.setDefault(this, options[which])
-                colorSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+    private fun chooseColor() = pick(R.string.color_title, ColorCorrection.entries, ColorSettings.default(this), { it.displayName }) {
+        ColorSettings.setDefault(this, it)
+        colorSummary.text = getString(R.string.shader_summary_current, it.displayName)
     }
 
     /** Blur toward the top and bottom of the game picture; the next game started uses it. */
-    private fun chooseTilt() {
-        val options = TiltShift.entries
-        AlertDialog.Builder(this)
-            .setTitle(R.string.tilt_title)
-            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(TiltShiftSettings.default(this))) { dialog, which ->
-                TiltShiftSettings.setDefault(this, options[which])
-                tiltSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+    private fun chooseTilt() = pick(R.string.tilt_title, TiltShift.entries, TiltShiftSettings.default(this), { it.displayName }) {
+        TiltShiftSettings.setDefault(this, it)
+        tiltSummary.text = getString(R.string.shader_summary_current, it.displayName)
     }
 
     /** FPS and CPU readout over the game; the next game started uses it. */
-    private fun choosePerf() {
-        val options = PerfOverlay.entries
-        AlertDialog.Builder(this)
-            .setTitle(R.string.perf_title)
-            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(PerfOverlaySettings.default(this))) { dialog, which ->
-                PerfOverlaySettings.setDefault(this, options[which])
-                perfSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+    private fun choosePerf() = pick(R.string.perf_title, PerfOverlay.entries, PerfOverlaySettings.default(this), { it.displayName }) {
+        PerfOverlaySettings.setDefault(this, it)
+        perfSummary.text = getString(R.string.shader_summary_current, it.displayName)
     }
 
     /** The shape of the game picture, on whichever screen the game runs. */
-    private fun chooseAspect() {
-        val options = AspectRatio.entries
-        AlertDialog.Builder(this)
-            .setTitle(R.string.aspect_title)
-            .setSingleChoiceItems(options.map { it.displayName }.toTypedArray(), options.indexOf(AspectSettings.default(this))) { dialog, which ->
-                AspectSettings.setDefault(this, options[which])
-                aspectSummary.text = getString(R.string.shader_summary_current, options[which].displayName)
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+    private fun chooseAspect() = pick(R.string.aspect_title, AspectRatio.entries, AspectSettings.default(this), { it.displayName }) {
+        AspectSettings.setDefault(this, it)
+        aspectSummary.text = getString(R.string.shader_summary_current, it.displayName)
     }
 
     private fun renderScale() {
         scaleSummary.text = getString(if (ScaleSettings.integer(this)) R.string.scale_on else R.string.scale_off)
     }
 
-    /** Flips at once; the next game started uses it. */
-    private fun toggleScale() {
-        ScaleSettings.setInteger(this, !ScaleSettings.integer(this))
+    /** On or off; the next game started uses it. */
+    private fun chooseScale() = pick(R.string.scale_title, listOf(true, false), ScaleSettings.integer(this),
+        { getString(if (it) R.string.scale_on else R.string.scale_off) }) {
+        ScaleSettings.setInteger(this, it)
         renderScale()
+    }
+
+    /** What the second screen shows while a game runs; the next game started uses it. */
+    private fun chooseCompanion() = pick(R.string.companion_title, listOf(CompanionMode.ACTIVE, CompanionMode.BLANK_ART, CompanionMode.OFF),
+        CompanionSettings.mode(this), { getString(R.string.picker_option_detail, getString(companionTitle(it)), getString(companionSummary(it))) }) {
+        CompanionSettings.setMode(this, it)
+        companionSummary.text = getString(companionTitle(it))
+    }
+
+    private fun companionTitle(mode: CompanionMode) = when (mode) {
+        CompanionMode.OFF -> R.string.companion_off
+        CompanionMode.BLANK_ART -> R.string.companion_blank
+        CompanionMode.ACTIVE -> R.string.companion_active
+    }
+
+    private fun companionSummary(mode: CompanionMode) = when (mode) {
+        CompanionMode.OFF -> R.string.companion_off_summary
+        CompanionMode.BLANK_ART -> R.string.companion_blank_summary
+        CompanionMode.ACTIVE -> R.string.companion_active_summary
     }
 
     private fun renderAutoState() {
@@ -209,13 +221,15 @@ class SettingsActivity : PixelPage() {
         autoLoadSummary.text = getString(if (AutoState.load(this)) R.string.auto_load_on else R.string.auto_load_off)
     }
 
-    private fun toggleAutoSave() {
-        AutoState.setSave(this, !AutoState.save(this))
+    private fun chooseAutoSave() = pick(R.string.auto_save_title, listOf(true, false), AutoState.save(this),
+        { getString(if (it) R.string.auto_save_on else R.string.auto_save_off) }) {
+        AutoState.setSave(this, it)
         renderAutoState()
     }
 
-    private fun toggleAutoLoad() {
-        AutoState.setLoad(this, !AutoState.load(this))
+    private fun chooseAutoLoad() = pick(R.string.auto_load_title, listOf(true, false), AutoState.load(this),
+        { getString(if (it) R.string.auto_load_on else R.string.auto_load_off) }) {
+        AutoState.setLoad(this, it)
         renderAutoState()
     }
 
@@ -227,17 +241,22 @@ class SettingsActivity : PixelPage() {
         })
     }
 
-    /** Off -> on asks first; on -> off is immediate. */
-    private fun toggleWrites() {
+    /** On or off; turning it on still asks first, turning it off is immediate. */
+    private fun chooseWrites() {
         if (HardcoreMode.enabled(this)) {
             Toast.makeText(this, R.string.pack_writes_hardcore, Toast.LENGTH_SHORT).show()
             return
         }
-        if (CompanionSettings.allowWrites(this)) {
-            CompanionSettings.setAllowWrites(this, false)
-            renderWrites()
-            return
+        pick(R.string.pack_writes_title, listOf(true, false), CompanionSettings.allowWrites(this),
+            { getString(if (it) R.string.pack_writes_on else R.string.pack_writes_off) }) { on ->
+            when {
+                !on -> { CompanionSettings.setAllowWrites(this, false); renderWrites() }
+                !CompanionSettings.allowWrites(this) -> confirmWrites()
+            }
         }
+    }
+
+    private fun confirmWrites() {
         AlertDialog.Builder(this)
             .setTitle(R.string.pack_writes_confirm_title)
             .setMessage(R.string.pack_writes_confirm)

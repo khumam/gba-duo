@@ -98,14 +98,31 @@ object RomArchive {
         return buffer.copyOf(read)
     }
 
+    /** All of [input], or null once it passes [max] bytes; the buffer grows as it reads, so a small archive stays small. */
+    private fun readCapped(input: InputStream, max: Int): ByteArray? {
+        val out = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(chunk)
+            if (n < 0) return out.toByteArray()
+            if (out.size() + n > max) return null
+            out.write(chunk, 0, n)
+        }
+    }
+
+    /** Largest .7z read into memory; a lone GBA ROM compresses well under this. */
+    private const val MAX_SEVEN_Z_SIZE = 48 * 1024 * 1024
+
     /**
      * 7z needs random access, so the (small, compressed) archive is held in memory
      * rather than streamed. A corrupt or oversized archive reads as "no ROM".
      */
     private fun <T> withSevenZRom(input: InputStream, block: (String, InputStream, Long) -> T): T? {
+        // A ROM compresses to under its 32 MB; anything far bigger is a multi-game set, not worth holding in memory.
+        val bytes = readCapped(input, MAX_SEVEN_Z_SIZE) ?: return null
         val archive = try {
             SevenZFile.builder()
-                .setSeekableByteChannel(SeekableInMemoryByteChannel(input.readBytes()))
+                .setSeekableByteChannel(SeekableInMemoryByteChannel(bytes))
                 .setMaxMemoryLimitKb(SEVEN_Z_MEMORY_LIMIT_KB)
                 .get()
         } catch (e: java.io.IOException) {

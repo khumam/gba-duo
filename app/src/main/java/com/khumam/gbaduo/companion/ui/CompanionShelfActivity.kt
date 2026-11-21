@@ -55,6 +55,10 @@ class CompanionShelfActivity : PixelPage() {
     private val generation = LoadGeneration()
     private val io = Executors.newSingleThreadExecutor()
     private val imagesIo = Executors.newFixedThreadPool(2)
+    /** Pack downloads, apart from [io] so moving between games never waits on one. Not cut short when the shelf closes. */
+    private val downloads = Executors.newFixedThreadPool(2)
+    /** Per busy key, the games waiting on that download to be given its pack. Guarded by itself. */
+    private val waiting = mutableMapOf<String, MutableList<GameStorage>>()
     private val images by lazy { OverviewImages(OverviewCache(UrlHttp(), File(cacheDir, "overview"))) }
     private lateinit var source: CompanionPackSource
     private lateinit var row: LinearLayout
@@ -165,13 +169,21 @@ class CompanionShelfActivity : PixelPage() {
 
     private val closer = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == ACTION_UPDATE) load(intent) else finish()
+            if (intent.action == ACTION_UPDATE) load(intent) else close()
         }
     }
 
     override fun onStart() {
         super.onStart()
         ContextCompat.registerReceiver(this, closer, IntentFilter(ACTION_CLOSE).apply { addAction(ACTION_UPDATE) }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // Launched just as the library left (a game starting): its close was sent before this could hear it.
+        if (!libraryShown) close()
+    }
+
+    /** Goes at once as far as the library can tell, so its next selection launches a new shelf instead of updating this one. */
+    private fun close() {
+        alive = false
+        finish()
     }
 
     override fun onStop() {
@@ -183,6 +195,8 @@ class CompanionShelfActivity : PixelPage() {
         super.onNewIntent(intent)
         setIntent(intent)
         load(intent)
+        // A hover relaunch (the library thought no shelf was up) moved the controller here too: hand it back.
+        if (!intent.getBooleanExtra(EXTRA_FOCUS, false) && !controllerHere) row.post { returnToLibrary() }
     }
 
     override fun onDestroy() {
@@ -191,6 +205,7 @@ class CompanionShelfActivity : PixelPage() {
         pulse?.cancel()
         io.shutdownNow()
         imagesIo.shutdownNow()
+        downloads.shutdown() // lets a download under way finish and assign its pack
         super.onDestroy()
     }
 
@@ -275,8 +290,11 @@ class CompanionShelfActivity : PixelPage() {
             row.addView(busyRow(getString(R.string.shelf_loading)))
             setStatus(getString(R.string.shelf_status_loading).uppercase(), Pixel.YELLOW, loading = true)
         }
+        // Read now, on the main thread: by the time the worker runs, a newer selection may have changed them.
+        val code = gameCode
+        val checksum = crc
         io.execute {
-            val cards = source.cards(gameCode, crc, game.packId)
+            val cards = source.cards(code, checksum, game.packId)
             val info = source.info()
             runOnUiThread {
                 if (isDestroyed || !generation.isCurrent(token)) return@runOnUiThread
@@ -600,25 +618,21 @@ class CompanionShelfActivity : PixelPage() {
             is CompanionCard.Web -> {
                 if (card.pack.canModifyGame && HardcoreMode.enabled(this)) return toast(getString(R.string.pack_read_only_hardcore))
                 val key = busyKey(card) ?: return
-                if (!busy.add(key)) return
-                showBusy(card, true)
-                io.execute {
-                    val result = source.resolve(card)
-                    runOnUiThread {
-                        if (isDestroyed) return@runOnUiThread
-                        busy.remove(key)
-                        when (result) {
-                            is Fetch.Ok -> {
-                                showBusy(card, false)
-                                assign(game, result.value.id)
-                            }
-                            is Fetch.Failed -> {
-                                showBusy(card, false)
-                                toast(failureText(result.reason))
-                            }
-                        }
+                // Already downloading (for this game or another one the pack covers): this game just joins the wait.
+                val first = synchronized(waiting) {
+                    val games = waiting[key]
+                    if (games != null) {
+                        if (games.none { it.dir == game.dir }) games += game
+                        false
+                    } else {
+                        waiting[key] = mutableListOf(game)
+                        true
                     }
                 }
+                if (!first) return
+                busy.add(key)
+                showBusy(card, true)
+                downloads.execute { download(card, key) }
             }
             CompanionCard.Import -> startActivityForResult(
                 Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip"),
@@ -630,6 +644,24 @@ class CompanionShelfActivity : PixelPage() {
     private fun assign(game: GameStorage, packId: String) {
         game.packId = packId
         reload(game, focus = true)
+    }
+
+    /**
+     * On the download pool: installs [card]'s pack and gives it to every game that asked for it, even if the selection
+     * has moved on or the shelf has closed meanwhile. The screen then catches up with whatever game it shows now.
+     */
+    private fun download(card: CompanionCard.Web, key: String) {
+        val result = source.resolve(card)
+        val games = synchronized(waiting) { waiting.remove(key) }.orEmpty()
+        if (result is Fetch.Ok) games.forEach { it.packId = result.value.id }
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            busy.remove(key)
+            showBusy(card, false)
+            if (result is Fetch.Failed) toast(failureText(result.reason))
+            // The installed pack replaces its web card (and shows "in use" if this is one of the games it went to).
+            storage?.let { reload(it, focus = controllerHere) }
+        }
     }
 
     private fun failureText(reason: Fetch.Reason) = getString(
@@ -670,9 +702,8 @@ class CompanionShelfActivity : PixelPage() {
                     toast(getString(R.string.shelf_imported, it.name))
                     assign(game, it.id)
                 }.onFailure {
-                        showBusy(CompanionCard.Import, false)
-                        toast(getString(R.string.pack_import_failed, it.message))
-                    }
+                    toast(getString(R.string.pack_import_failed, it.message))
+                }
             }
         }
     }
@@ -686,6 +717,9 @@ class CompanionShelfActivity : PixelPage() {
         /** Whether a shelf is up in this process. */
         @Volatile var alive = false
             private set
+
+        /** Set by the library while it is on screen; a shelf starting without it closes. */
+        @Volatile var libraryShown = false
 
         /** Sent by the library when it leaves the screen: the shelf only follows it. */
         const val ACTION_CLOSE = "com.khumam.gbaduo.SHELF_CLOSE"

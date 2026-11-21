@@ -20,13 +20,15 @@ import com.khumam.gbaduo.library.ui.PixelBoxDrawable
 
 /**
  * The in-game menu in the app's look: an ink panel with a purple outline, a Silkscreen title, and
- * rows that light up yellow with a pink outline under D-pad focus. Translucent, so the paused game
- * shows through. A confirms, B and Back cancel.
+ * rows that light up yellow with a pink outline under D-pad focus. Solid, and shown and hidden
+ * without animation. A confirms, B and Back cancel.
  */
 class PixelMenuDialog(
     context: Context,
     private val title: String,
     private val items: List<Pair<String, () -> Unit>>,
+    /** The row that has the cursor when the menu opens. */
+    private val focusIndex: Int = 0,
 ) : Dialog(context) {
 
     private fun dp(v: Float) = Pixel.dp(context, v).toInt()
@@ -39,11 +41,11 @@ class PixelMenuDialog(
             addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             setDimAmount(0.3f)
             setGravity(Gravity.CENTER)
+            setWindowAnimations(0) // no fade or zoom: it is there at once, and gone at once
         }
 
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            // Ink at ~85%: the game still reads through it.
             background = PixelBoxDrawable(context, PANEL_FILL, shadowDp = 5f, borderDp = 3f, border = Pixel.PURPLE_LIGHT, shadowColor = SHADOW)
             val edge = dp(16f)
             setPadding(edge, edge - dp(2f), edge + Pixel.dp(context, 5f).toInt(), edge + Pixel.dp(context, 5f).toInt())
@@ -58,9 +60,9 @@ class PixelMenuDialog(
 
         val rows = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         var first: View? = null
-        items.forEach { (label, action) ->
+        items.forEachIndexed { index, (label, action) ->
             val row = row(label) { dismiss(); action() }
-            if (first == null) first = row
+            if (first == null || index == focusIndex) first = row
             rows.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6f) })
         }
         val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false; addView(rows) }
@@ -74,7 +76,9 @@ class PixelMenuDialog(
             val max = (screen.heightPixels * 0.8f).toInt() - panel.paddingTop - panel.paddingBottom - dp(40f)
             if (scroll.height > max) scroll.layoutParams = scroll.layoutParams.apply { height = max }
         }
-        first?.post { first?.requestFocus() }
+        // From touch: the screen is usually in touch mode (the last input was a tap, or none yet), where a plain
+        // requestFocus is ignored and the first D-pad press would light up the top row instead of this one.
+        first?.post { first?.requestFocusFromTouch() }
     }
 
     private fun row(label: String, onClick: () -> Unit): TextView {
@@ -109,9 +113,10 @@ class PixelMenuDialog(
     }
 
     private companion object {
-        const val PANEL_FILL = 0xD9241A45.toInt()   // INK at 85%
+        // Solid: nothing behind shows through the panel or its rows.
+        const val PANEL_FILL = Pixel.INK
         const val SHADOW = 0x99000000.toInt()
-        const val ROW_FILL = 0x993D2F6E.toInt()      // PURPLE_DARK at 60%
-        const val ROW_BORDER = 0x667B6BB5.toInt()    // PURPLE_LIGHT at 40%
+        const val ROW_FILL = Pixel.PURPLE_DARK
+        const val ROW_BORDER = Pixel.PURPLE
     }
 }

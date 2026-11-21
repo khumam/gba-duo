@@ -2,7 +2,7 @@ package com.khumam.gbaduo.library
 
 import android.app.Activity
 import android.app.ActivityOptions
-import android.app.AlertDialog
+import com.khumam.gbaduo.player.PixelMenuDialog
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
@@ -407,8 +407,14 @@ class LibraryActivity : Activity() {
         super.onPause()
     }
 
+    override fun onStart() {
+        super.onStart()
+        CompanionShelfActivity.libraryShown = true
+    }
+
     override fun onStop() {
         // The shelf only follows the library: it goes when the library leaves (a game starting, settings opening).
+        CompanionShelfActivity.libraryShown = false
         blink.removeCallbacks(shelfPost)
         sendBroadcast(Intent(CompanionShelfActivity.ACTION_CLOSE).setPackage(packageName))
         super.onStop()
@@ -732,8 +738,9 @@ class LibraryActivity : Activity() {
         background(
             work = { library.crc32(entry) ?: error("Could not read ${entry.fileName}") },
             onResult = { result ->
-                // The selection may have moved on while the checksum was read.
-                if (selectedEntry()?.fileName != entry.fileName) return@background
+                // The selection may have moved on while the checksum was read, or the library left (a game started):
+                // a shelf opened now would land on the game's second screen.
+                if (!CompanionShelfActivity.libraryShown || selectedEntry()?.fileName != entry.fileName) return@background
                 result.onSuccess { crc ->
                     val extras = Intent()
                         .putExtra(CompanionShelfActivity.EXTRA_PLATFORM_ID, entry.platform.id)
@@ -814,9 +821,8 @@ class LibraryActivity : Activity() {
         labels += getString(R.string.import_pack)
         labels += getString(R.string.pack_web_get)
 
-        AlertDialog.Builder(this)
-            .setTitle(R.string.companion_pack)
-            .setItems(labels.toTypedArray()) { _, which ->
+        val rows = labels.mapIndexed { which, label ->
+            label to {
                 when (which) {
                     0 -> storage.packId = null
                     labels.size - 2 -> {
@@ -835,7 +841,10 @@ class LibraryActivity : Activity() {
                     else -> storage.packId = matches[which - 1].id
                 }
             }
-            .show()
+        }
+        // The same panel as the in-game menu; the pack in use (else "No pack") has the cursor first.
+        val inUse = matches.indexOfFirst { it.id == assignedId } + 1
+        PixelMenuDialog(this, getString(R.string.companion_pack), rows, focusIndex = inUse).show()
     }
 
     private fun pickPackZip() {

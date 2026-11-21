@@ -85,8 +85,21 @@ class CompanionPackSourceTest {
         val source = source(http)
         source.cards("BPRE", 0L, null)
         fail = false
+        clock = 61_000L
         val cards = source.cards("BPRE", 0L, null)
         assertTrue(cards.any { it is CompanionCard.Web })
+    }
+
+    @Test fun `after a failed fetch the next minute of cards does not hit the web again`() {
+        val http = FakeHttp { throw IOException("offline") }
+        val source = source(http)
+        source.cards("BPRE", 0L, null)
+        clock = 30_000L
+        source.cards("AXVE", 0L, null)
+        assertEquals(1, http.requests)
+        clock = 61_000L
+        source.cards("BPRE", 0L, null)
+        assertEquals(2, http.requests)
     }
 
     @Test fun `a game with no code gets only import`() {

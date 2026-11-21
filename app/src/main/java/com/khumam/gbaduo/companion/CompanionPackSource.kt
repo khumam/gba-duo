@@ -22,6 +22,8 @@ class CompanionPackSource(
     private var cachedAt = 0L
     private var forceFetch = false
     private var offline = false
+    /** When the last fetch failed; until [RETRY_MS] later the shelf uses what it has rather than waiting on the web again. */
+    private var failedAt: Long? = null
 
     fun cards(gameCode: String, crc32: Long, assignedId: String?): List<CompanionCard> {
         val web = PackCatalog.forGame(catalog(), gameCode)
@@ -57,6 +59,8 @@ class CompanionPackSource(
                 offline = false
                 return list
             }
+            // Offline a moment ago: moving between games shouldn't wait on another fetch (and its timeout) each time.
+            failedAt?.takeIf { now() - it < RETRY_MS }?.let { return cached ?: emptyList() }
         }
         val fetched = downloader.catalogJson()
         if (fetched is Fetch.Ok) {
@@ -64,6 +68,7 @@ class CompanionPackSource(
             if (parsed is Fetch.Ok) {
                 forceFetch = false
                 offline = false
+                failedAt = null
                 cached = parsed.value
                 cachedAt = now()
                 save(fetched.value)
@@ -72,6 +77,7 @@ class CompanionPackSource(
         }
         forceFetch = false
         offline = true
+        failedAt = now()
         if (cached == null) readSaved()?.let { (list, at) ->
             cached = list
             cachedAt = at
@@ -100,5 +106,6 @@ class CompanionPackSource(
 
     private companion object {
         const val CACHE_MS = 6 * 60 * 60_000L
+        const val RETRY_MS = 60_000L
     }
 }

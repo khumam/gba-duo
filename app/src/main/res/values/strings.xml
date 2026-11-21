@@ -129,6 +129,13 @@
     <string name="perf_title">Performance overlay</string>
     <string name="perf_summary">Show FPS and CPU over the game</string>
     <string name="scale_title">Integer scaling</string>
+    <string name="settings_group_games">Games</string>
+    <string name="settings_group_saves">Saves</string>
+    <string name="settings_group_controls">Controls</string>
+    <string name="settings_group_picture">Picture</string>
+    <string name="settings_group_companion">Companion</string>
+    <string name="settings_group_more">More</string>
+    <string name="picker_option_detail">%1$s · %2$s</string>
     <string name="scale_on">On: exact pixels, smaller picture</string>
     <string name="scale_off">Off: full size picture</string>
     <string name="shader_follow_default">Default (%1$s)</string>
