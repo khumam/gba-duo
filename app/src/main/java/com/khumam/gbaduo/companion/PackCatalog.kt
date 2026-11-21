@@ -16,6 +16,8 @@ data class CatalogPack(
     val games: List<CatalogGame>,
     val minAppVersion: String?,
     val canModifyGame: Boolean,
+    /** An https image shown on the pack's carousel card; the catalog's optional `overview` field. */
+    val overview: String? = null,
 )
 
 enum class CatalogStatus { NEW, INSTALLED, UPDATE, NEEDS_NEWER_APP }
@@ -66,7 +68,15 @@ object PackCatalog {
             games = games,
             minAppVersion = o.optString("minAppVersion").ifBlank { null },
             canModifyGame = o.optBoolean("canModifyGame", false),
+            overview = overviewUrl(o.optString("overview")),
         )
+    }
+
+    /** The catalog's `overview` is a full https URL or a path in the repo next to companions.json; anything else is no image. */
+    private fun overviewUrl(raw: String): String? = when {
+        raw.startsWith("https://") -> raw
+        raw.isBlank() || "://" in raw || ".." in raw || raw.startsWith("/") -> null
+        else -> URL.substringBeforeLast('/') + "/" + raw
     }
 
     private fun normalize(code: String) = code.trim().uppercase()

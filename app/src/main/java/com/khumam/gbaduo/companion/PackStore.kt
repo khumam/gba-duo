@@ -19,8 +19,21 @@ class PackStore(private val packsDir: File) {
 
     fun byId(id: String): PackManifest? = list().find { it.id == id }
 
+    /**
+     * The picture in the pack's own `overview` folder, if it ships one (a pack imported from a file has no catalog
+     * entry to take a picture from). The first image by name; hidden files, such as macOS's `._` copies, are skipped.
+     */
+    fun overviewImage(manifest: PackManifest): File? =
+        File(packsDir, "${manifest.id}/overview").listFiles { f ->
+            f.isFile && !f.name.startsWith(".") && f.extension.lowercase() in OVERVIEW_TYPES
+        }?.minByOrNull { it.name.lowercase() }
+
     fun layoutFile(manifest: PackManifest): File = File(packsDir, "${manifest.id}/${manifest.layoutFile}")
 
     fun assetFile(manifest: PackManifest, relativePath: String): File =
         File(packsDir, "${manifest.id}/assets/$relativePath")
+
+    private companion object {
+        val OVERVIEW_TYPES = setOf("png", "jpg", "jpeg", "webp")
+    }
 }

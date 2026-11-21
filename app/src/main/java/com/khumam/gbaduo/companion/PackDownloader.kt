@@ -20,18 +20,27 @@ class PackDownloader(
     private val tempDir: File,
 ) {
 
-    fun catalog(url: String = PackCatalog.URL): Fetch<List<CatalogPack>> {
+    fun catalog(url: String = PackCatalog.URL): Fetch<List<CatalogPack>> =
+        when (val raw = catalogJson(url)) {
+            is Fetch.Failed -> raw
+            is Fetch.Ok -> parseCatalog(raw.value)
+        }
+
+    /** The catalog as the server sent it, so a caller can keep a copy to parse later with [parseCatalog]. */
+    fun catalogJson(url: String = PackCatalog.URL): Fetch<String> {
         val response = try {
             http.get(url, emptyMap())
         } catch (e: IOException) {
             return Fetch.Failed(Fetch.Reason.OFFLINE, e.message)
         }
         if (response.code != 200) return Fetch.Failed(Fetch.Reason.OFFLINE, "HTTP ${response.code}")
-        return try {
-            Fetch.Ok(PackCatalog.parse(response.body.toString(Charsets.UTF_8)))
-        } catch (e: PackCatalog.UnsupportedCatalogException) {
-            Fetch.Failed(Fetch.Reason.UNSUPPORTED_CATALOG, e.message)
-        }
+        return Fetch.Ok(response.body.toString(Charsets.UTF_8))
+    }
+
+    fun parseCatalog(json: String): Fetch<List<CatalogPack>> = try {
+        Fetch.Ok(PackCatalog.parse(json))
+    } catch (e: PackCatalog.UnsupportedCatalogException) {
+        Fetch.Failed(Fetch.Reason.UNSUPPORTED_CATALOG, e.message)
     }
 
     fun install(pack: CatalogPack): Fetch<PackManifest> {

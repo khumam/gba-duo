@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.library
 
 import android.app.Activity
+import android.app.ActivityOptions
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
@@ -27,6 +28,7 @@ import com.khumam.gbaduo.companion.Fetch
 import com.khumam.gbaduo.companion.PackDownloader
 import com.khumam.gbaduo.companion.PackStore
 import com.khumam.gbaduo.companion.PackUpdates
+import com.khumam.gbaduo.companion.ui.CompanionShelfActivity
 import com.khumam.gbaduo.library.artwork.UrlHttp
 import com.khumam.gbaduo.library.artwork.ArtworkLoader
 import com.khumam.gbaduo.library.ui.CartridgeCarousel
@@ -110,6 +112,7 @@ class LibraryActivity : Activity() {
     private val compact by lazy { resources.configuration.screenWidthDp < COMPACT_WIDTH_DP }
 
     private val blink = Handler(Looper.getMainLooper())
+    private val shelfPost = Runnable { selectedEntry()?.let { sendShelf(it, focus = false) } }
     private val motion by lazy { Pixel.motionEnabled(this) }
     private val blinkStep = object : Runnable {
         override fun run() {
@@ -137,7 +140,7 @@ class LibraryActivity : Activity() {
         renderFilter()
         renderViewMode()
         findViewById<PixelButton>(R.id.split_play).setOnClickListener { play() }
-        findViewById<PixelButton>(R.id.split_pack).setOnClickListener { selectedEntry()?.let(::showCompanionMenu) }
+        findViewById<PixelButton>(R.id.split_pack).setOnClickListener { selectedEntry()?.let(::openCompanionPacks) }
         findViewById<PixelButton>(R.id.split_settings).setOnClickListener { selectedEntry()?.let(::openGameSettings) }
         findViewById<PixelButton>(R.id.split_favorite).setOnClickListener { toggleFavorite() }
         findViewById<PixelButton>(R.id.favorite_button).setOnClickListener { toggleFavorite() }
@@ -146,7 +149,7 @@ class LibraryActivity : Activity() {
 
         findViewById<PixelButton>(R.id.open_settings).setOnClickListener { openSettings() }
         findViewById<PixelButton>(R.id.play).setOnClickListener { play() }
-        findViewById<PixelButton>(R.id.pack_button).setOnClickListener { selectedEntry()?.let(::showCompanionMenu) }
+        findViewById<PixelButton>(R.id.pack_button).setOnClickListener { selectedEntry()?.let(::openCompanionPacks) }
         findViewById<PixelButton>(R.id.game_settings_button).setOnClickListener { selectedEntry()?.let(::openGameSettings) }
         emptyAction.setOnClickListener { startActivity(Intent(this, RomFoldersActivity::class.java)) }
     }
@@ -261,17 +264,78 @@ class LibraryActivity : Activity() {
         findViewById<View>(R.id.game_list_box).background = PixelBoxDrawable(this, Pixel.CREAM, shadowDp = 4f, borderDp = 3f)
         // Inside the box's border (3dp) and its hard shadow (4dp, right and bottom).
         Pixel.dp(this, 3f).toInt().let { edge -> Pixel.dp(this, 7f).toInt().let { far -> findViewById<View>(R.id.game_list_box).setPadding(edge, edge, far, far) } }
-        listOf(R.id.split_play to Pixel.YELLOW, R.id.split_pack to Pixel.CREAM, R.id.split_settings to Pixel.CREAM, R.id.split_favorite to Pixel.CREAM).forEach { (id, fill) ->
+        // The four actions are pictures, not words; the words stay for screen readers.
+        listOf(
+            Triple(R.id.split_play, Pixel.YELLOW, R.drawable.ic_play),
+            Triple(R.id.split_pack, Pixel.CREAM, R.drawable.ic_pack),
+            Triple(R.id.split_settings, Pixel.CREAM, R.drawable.ic_cog),
+            Triple(R.id.split_favorite, Pixel.CREAM, R.drawable.ic_heart),
+        ).forEach { (id, fill, picture) ->
             findViewById<PixelButton>(id).apply {
                 style(fill)
-                textSize = if (compact) 11f else 13f
+                iconify(this, picture)
                 minHeight = Pixel.dp(this@LibraryActivity, 40f).toInt()
+                if (compact) {
+                    // Narrow column: four equal squares that fit, instead of thin slivers sharing what is left.
+                    val size = Pixel.dp(this@LibraryActivity, SPLIT_ACTION_SIZE_DP).toInt()
+                    minHeight = size
+                    setMinWidth(0)
+                    minimumWidth = 0
+                    (layoutParams as LinearLayout.LayoutParams).apply {
+                        width = size
+                        height = size
+                        weight = 0f
+                        marginStart = if (id == R.id.split_play) 0 else Pixel.dp(this@LibraryActivity, 8f).toInt()
+                    }
+                }
             }
+        }
+        if (compact) {
+            findViewById<LinearLayout>(R.id.split_actions).gravity = android.view.Gravity.CENTER_HORIZONTAL
+            // The narrow screen gives the cartridge column more of the width, so the cartridge can grow into the space.
+            (findViewById<View>(R.id.split_left).layoutParams as LinearLayout.LayoutParams).weight = 1.4f
         }
         findViewById<PixelButton>(R.id.play).style(Pixel.YELLOW)
         findViewById<PixelButton>(R.id.pack_button).style(Pixel.CREAM)
         findViewById<PixelButton>(R.id.game_settings_button).style(Pixel.CREAM)
         findViewById<PixelButton>(R.id.favorite_button).style(Pixel.CREAM)
+        listOf(R.id.play to R.drawable.ic_play, R.id.pack_button to R.drawable.ic_pack, R.id.game_settings_button to R.drawable.ic_cog, R.id.favorite_button to R.drawable.ic_heart)
+            .forEach { (id, picture) ->
+                findViewById<PixelButton>(id).apply {
+                    iconify(this, picture)
+                    // All four are the same size: the play button is not wider than the rest.
+                    minHeight = Pixel.dp(this@LibraryActivity, ACTION_SIZE_DP).toInt()
+                    (layoutParams as LinearLayout.LayoutParams).apply {
+                        width = Pixel.dp(this@LibraryActivity, ACTION_SIZE_DP + 20f).toInt()
+                        height = Pixel.dp(this@LibraryActivity, ACTION_SIZE_DP).toInt()
+                        marginStart = if (id == R.id.play) 0 else Pixel.dp(this@LibraryActivity, 12f).toInt()
+                    }
+                    setMinWidth(0)
+                    minimumWidth = 0
+                }
+            }
+        if (!compact) {
+            // Wide windows: one bar on the page's own edges (the logo's left, Settings' right): the title and tags
+            // on the left, the four buttons on the right, centred against them. No row of its own for the buttons.
+            val bar = findViewById<LinearLayout>(R.id.info)
+            val tagRow = findViewById<LinearLayout>(R.id.tag_row)
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            bar.removeView(gameTitle)
+            bar.removeView(tagRow)
+            (actions.parent as android.view.ViewGroup).removeView(actions)
+            column.addView(gameTitle, LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+            column.addView(tagRow, LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = Pixel.dp(this@LibraryActivity, 8f).toInt() })
+            bar.orientation = LinearLayout.HORIZONTAL
+            bar.gravity = android.view.Gravity.CENTER_VERTICAL
+            // The logo's left edge and Settings' right edge, with room above the hints bar.
+            bar.setPadding(Pixel.dp(this, 32f).toInt(), 0, Pixel.dp(this, 28f).toInt(), Pixel.dp(this, 12f).toInt())
+            bar.addView(column, LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            bar.addView(actions, LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { marginStart = Pixel.dp(this@LibraryActivity, 24f).toInt() })
+            gameTitle.centered = false
+            fileName.maxWidth = Pixel.dp(this, 300f).toInt()
+        }
 
         pointer.apply { typeface = displayBold; textSize = 18f; setTextColor(Pixel.PINK); setShadowLayer(0.01f, 2f, 2f, Pixel.INK) }
 
@@ -314,6 +378,7 @@ class LibraryActivity : Activity() {
         splitArtwork.refresh()
         refresh()
         checkPackUpdates()
+        updateShelf()
         if (motion) blink.postDelayed(blinkStep, BLINK_MS)
     }
 
@@ -321,6 +386,13 @@ class LibraryActivity : Activity() {
         blink.removeCallbacks(blinkStep)
         pointer.alpha = 1f
         super.onPause()
+    }
+
+    override fun onStop() {
+        // The shelf only follows the library: it goes when the library leaves (a game starting, settings opening).
+        blink.removeCallbacks(shelfPost)
+        sendBroadcast(Intent(CompanionShelfActivity.ACTION_CLOSE).setPackage(packageName))
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -352,7 +424,7 @@ class LibraryActivity : Activity() {
                     else if (emptyAction.visibility == View.VISIBLE) emptyAction.performClick()
                 }
             }
-            KeyEvent.KEYCODE_BUTTON_Y -> if (event.repeatCount == 0) selectedEntry()?.let(::showCompanionMenu)
+            KeyEvent.KEYCODE_BUTTON_Y -> if (event.repeatCount == 0) selectedEntry()?.let(::openCompanionPacks)
             KeyEvent.KEYCODE_BUTTON_X -> if (event.repeatCount == 0) selectedEntry()?.let(::openGameSettings)
             KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_MENU -> if (event.repeatCount == 0) openSettings()
             else -> return super.onKeyDown(keyCode, event)
@@ -386,6 +458,7 @@ class LibraryActivity : Activity() {
         splitArtwork.bind(splitCart, entry)
         splitTitle.text = gameTitle.text
         position.text = getString(R.string.position_of, pad(index + 1), pad(carousel.items.size))
+        updateShelf()
     }
 
     // ---- filter and view --------------------------------------------------------------
@@ -437,10 +510,23 @@ class LibraryActivity : Activity() {
         }
     }
 
+    /** Swaps [button]'s label for [picture]; the label stays as its description for screen readers. */
+    private fun iconify(button: PixelButton, picture: Int) {
+        button.contentDescription = button.text
+        button.text = ""
+        button.icon = getDrawable(picture)
+    }
+
     private fun renderFavorite(entry: RomEntry) {
-        val text = getString(if (marks.isFavorite(entry.fileName)) R.string.favorite_remove else R.string.favorite_add)
-        findViewById<PixelButton>(R.id.favorite_button).text = text
-        findViewById<PixelButton>(R.id.split_favorite).text = text
+        val favorite = marks.isFavorite(entry.fileName)
+        val text = getString(if (favorite) R.string.favorite_remove else R.string.favorite_add)
+        // The icon is only ever a line heart; a favorite shows as a pink button face.
+        listOf(R.id.favorite_button, R.id.split_favorite).forEach { id ->
+            findViewById<PixelButton>(id).apply {
+                contentDescription = text
+                style(if (favorite) Pixel.PINK else Pixel.CREAM)
+            }
+        }
     }
 
     private fun renderViewMode() {
@@ -603,6 +689,53 @@ class LibraryActivity : Activity() {
         }
     }
 
+    /** The second screen's display when the library is on the main one, else null (one screen, or the library is already on the second). */
+    private fun shelfDisplayId(): Int? {
+        if ((display?.displayId ?: 0) != 0) return null
+        return ScreenSetup.secondaryDisplayId(this)
+    }
+
+    /** Dual screen: the second screen shows the companion carousel for the selected game, once the selection settles. */
+    private fun updateShelf() {
+        blink.removeCallbacks(shelfPost)
+        if (shelfDisplayId() == null) return
+        blink.postDelayed(shelfPost, SHELF_DEBOUNCE_MS)
+    }
+
+    /** The Companion pack button: on two screens the controller moves to the carousel on the second one, else the dialog. */
+    private fun openCompanionPacks(entry: RomEntry) {
+        blink.removeCallbacks(shelfPost)
+        if (shelfDisplayId() != null) sendShelf(entry, focus = true) else showCompanionMenu(entry)
+    }
+
+    private fun sendShelf(entry: RomEntry, focus: Boolean) {
+        val displayId = shelfDisplayId() ?: return
+        background(
+            work = { library.crc32(entry) ?: error("Could not read ${entry.fileName}") },
+            onResult = { result ->
+                // The selection may have moved on while the checksum was read.
+                if (selectedEntry()?.fileName != entry.fileName) return@background
+                result.onSuccess { crc ->
+                    val extras = Intent()
+                        .putExtra(CompanionShelfActivity.EXTRA_PLATFORM_ID, entry.platform.id)
+                        .putExtra(CompanionShelfActivity.EXTRA_TITLE, entry.title)
+                        .putExtra(CompanionShelfActivity.EXTRA_GAME_CODE, entry.gameCode)
+                        .putExtra(CompanionShelfActivity.EXTRA_CRC, crc)
+                        .putExtra(CompanionShelfActivity.EXTRA_FOCUS, focus)
+                    if (!focus && CompanionShelfActivity.alive) {
+                        // Launching an activity moves the controller to its screen; a running shelf is just told.
+                        sendBroadcast(extras.setAction(CompanionShelfActivity.ACTION_UPDATE).setPackage(packageName))
+                    } else {
+                        startActivity(
+                            extras.setClass(this, CompanionShelfActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle(),
+                        )
+                    }
+                }
+            },
+        )
+    }
+
     private fun showCompanionMenu(entry: RomEntry) {
         background(
             work = {
@@ -638,6 +771,7 @@ class LibraryActivity : Activity() {
                             .putExtra(GameSettingsActivity.EXTRA_PLATFORM, entry.platform.label)
                             .putExtra(GameSettingsActivity.EXTRA_PLATFORM_ID, entry.platform.id)
                             .putExtra(GameSettingsActivity.EXTRA_FILE_NAME, entry.fileName)
+                            .putExtra(GameSettingsActivity.EXTRA_ROM_URI, entry.uri?.toString())
                             .putExtra(GameSettingsActivity.EXTRA_CODE, entry.gameCode)
                             .putExtra(GameSettingsActivity.EXTRA_CRC, crc),
                     )
@@ -733,6 +867,9 @@ class LibraryActivity : Activity() {
         private const val KEY_SPLIT = "view_split"
         private const val JUMP = 5
         private const val BLINK_MS = 530L
+        private const val SHELF_DEBOUNCE_MS = 120L
+        private const val ACTION_SIZE_DP = 44f
+        private const val SPLIT_ACTION_SIZE_DP = 42f
         private const val COMPACT_WIDTH_DP = 700
         private const val WIDE_HUD_DP = 1000
     }

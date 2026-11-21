@@ -100,6 +100,38 @@ class RomLibrary(private val context: Context) {
     fun cachedCrc32(entry: RomEntry): Long? =
         entry.uri?.let { index.crc32(it.toString(), entry.size, entry.lastModified) }
 
+    /**
+     * Writes the ROM [entry] with [patch] applied as a new file beside it, which the library then lists as its own
+     * game (own saves, since its CRC32 differs). The original isn't touched. Blocking: call off the main thread.
+     * Throws [RomPatch.PatchException] for a patch that doesn't fit, [java.io.IOException] for anything else.
+     */
+    fun createPatchedCopy(entry: RomEntry, patchName: String, patch: ByteArray): String {
+        val uri = entry.uri ?: throw java.io.IOException("No file for ${entry.fileName}")
+        val rom = context.contentResolver.openInputStream(uri)?.use { RomArchive.readRom(entry.fileName, it) }
+            ?: throw java.io.IOException("Could not read ${entry.fileName}")
+        val patched = RomPatch.apply(rom.bytes, patch, patchName)
+        val folder = parentFolder(uri) ?: throw java.io.IOException("Could not find the folder of ${entry.fileName}")
+        val name = patchedName(rom.fileName, patchName)
+        folder.findFile(name)?.delete()
+        val file = folder.createFile("application/octet-stream", name) ?: throw java.io.IOException("Could not create $name")
+        context.contentResolver.openOutputStream(file.uri, "wt")?.use { it.write(patched) }
+            ?: throw java.io.IOException("Could not write $name")
+        return file.name ?: name
+    }
+
+    /** The library folder (or subfolder) that holds [uri]. */
+    private fun parentFolder(uri: Uri, ): DocumentFile? {
+        fun search(dir: DocumentFile, depth: Int): DocumentFile? {
+            val children = dir.listFiles()
+            if (children.any { it.uri == uri }) return dir
+            if (depth >= MAX_DEPTH) return null
+            return children.filter { it.isDirectory && it.name?.startsWith(".") == false }.firstNotNullOfOrNull { search(it, depth + 1) }
+        }
+        return folders.firstNotNullOfOrNull { tree ->
+            runCatching { DocumentFile.fromTreeUri(context, tree)?.let { search(it, 0) } }.getOrNull()
+        }
+    }
+
     private fun collectRomFiles(dir: DocumentFile, depth: Int = 0): List<DocumentFile> {
         val children = dir.listFiles()
         val files = children.filter { it.isFile && it.name?.let(RomArchive::isLibraryFileName) == true }
@@ -122,6 +154,14 @@ class RomLibrary(private val context: Context) {
     }
 
     companion object {
+        /** "Game.gba" patched with "Hack.ips" is "Game [Hack].gba". */
+        fun patchedName(romFileName: String, patchName: String): String {
+            val ext = romFileName.substringAfterLast('.', "gba")
+            val game = romFileName.substringBeforeLast('.')
+            val patch = patchName.substringBeforeLast('.')
+            return "$game [$patch].$ext".replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        }
+
         /** How many folders deep a library folder is scanned; a guard against runaway trees. */
         private const val MAX_DEPTH = 8
         private const val KEY_FOLDERS = "folder_uris"

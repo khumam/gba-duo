@@ -100,4 +100,32 @@ class PackCatalogTest {
         assertEquals(CatalogStatus.INSTALLED, PackCatalog.status(pack, "2.1.0", "0.1.8"))
         assertEquals(CatalogStatus.NEEDS_NEWER_APP, PackCatalog.status(pack, "1.0.0", "0.1.2"))
     }
+
+    @Test
+    fun parseReadsAnHttpsOverviewImage() {
+        val json = catalog(entry("a").replace("\"extra\":1", "\"overview\":\"https://x/a.png\""))
+        assertEquals("https://x/a.png", PackCatalog.parse(json).single().overview)
+    }
+
+    @Test
+    fun parseIgnoresMissingOrNonHttpsOverview() {
+        assertNull(PackCatalog.parse(catalog(entry("a"))).single().overview)
+        val insecure = catalog(entry("a").replace("\"extra\":1", "\"overview\":\"http://x/a.png\""))
+        assertNull(PackCatalog.parse(insecure).single().overview)
+    }
+
+    @Test
+    fun parseResolvesARepoRelativeOverviewAgainstTheCatalogsFolder() {
+        val json = catalog(entry("a").replace("\"extra\":1", "\"overview\":\"overview/a-overview.png\""))
+        assertEquals(
+            "https://raw.githubusercontent.com/khumam/gba-duo-companions/refs/heads/main/overview/a-overview.png",
+            PackCatalog.parse(json).single().overview,
+        )
+    }
+
+    @Test
+    fun parseRefusesAnOverviewPathThatClimbsOut() {
+        val json = catalog(entry("a").replace("\"extra\":1", "\"overview\":\"../secret.png\""))
+        assertNull(PackCatalog.parse(json).single().overview)
+    }
 }

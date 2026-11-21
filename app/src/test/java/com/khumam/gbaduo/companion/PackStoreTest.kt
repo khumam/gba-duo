@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.companion
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -59,5 +60,41 @@ class PackStoreTest {
         val store = PackStore(packsDir)
         assertEquals("demo-pipeline", store.byId("demo-pipeline")?.id)
         assertEquals(null, store.byId("missing"))
+    }
+
+    private fun installedWithOverview(vararg names: String): Pair<PackStore, PackManifest> {
+        val packsDir = createTempDir()
+        File(packsDir, "demo-pipeline/overview").mkdirs()
+        File(packsDir, "demo-pipeline/manifest.json").writeText(manifestJson)
+        names.forEach { File(packsDir, "demo-pipeline/overview/$it").writeBytes(byteArrayOf(1)) }
+        val store = PackStore(packsDir)
+        return store to store.byId("demo-pipeline")!!
+    }
+
+    @Test
+    fun overviewImageIsTheFirstPictureInTheOverviewFolder() {
+        val (store, pack) = installedWithOverview("b-page.png", "a-page.png")
+        assertEquals("a-page.png", store.overviewImage(pack)?.name)
+    }
+
+    @Test
+    fun overviewImageIgnoresHiddenFilesAndOtherTypes() {
+        val (store, pack) = installedWithOverview("._a.png", "notes.txt", ".DS_Store", "sheet.JPG")
+        assertEquals("sheet.JPG", store.overviewImage(pack)?.name)
+    }
+
+    @Test
+    fun noOverviewFolderMeansNoOverviewImage() {
+        val packsDir = createTempDir()
+        File(packsDir, "demo-pipeline").mkdirs()
+        File(packsDir, "demo-pipeline/manifest.json").writeText(manifestJson)
+        val store = PackStore(packsDir)
+        assertNull(store.overviewImage(store.byId("demo-pipeline")!!))
+    }
+
+    @Test
+    fun anEmptyOverviewFolderMeansNoOverviewImage() {
+        val (store, pack) = installedWithOverview()
+        assertNull(store.overviewImage(pack))
     }
 }

@@ -92,6 +92,25 @@
             android:exported="false"
             android:launchMode="singleInstance"
             android:taskAffinity="${applicationId}.companion" />
+
+        <!-- The companion pack carousel on the second screen, following the library's selection. -->
+        <activity
+            android:name=".companion.ui.CompanionShelfActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:taskAffinity="${applicationId}.shelf" />
+
+        <!-- Gives the controller back to the main screen after the shelf opens on the second one. -->
+        <activity
+            android:name=".companion.ui.FocusBackActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 
 </manifest>

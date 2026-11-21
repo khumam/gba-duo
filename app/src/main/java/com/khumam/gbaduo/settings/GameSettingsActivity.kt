@@ -13,6 +13,9 @@ import com.khumam.gbaduo.emu.ColorSettings
 import com.khumam.gbaduo.emu.ShaderChoice
 import com.khumam.gbaduo.emu.ShaderPreset
 import com.khumam.gbaduo.emu.ShaderSettings
+import com.khumam.gbaduo.library.RomEntry
+import com.khumam.gbaduo.library.RomLibrary
+import com.khumam.gbaduo.library.RomPatch
 import com.khumam.gbaduo.library.ui.Pixel
 import com.khumam.gbaduo.storage.GameSettings
 import com.khumam.gbaduo.storage.GameSettingsKeys
@@ -57,6 +60,9 @@ class GameSettingsActivity : PixelPage() {
         coverSummary = menuCard(R.drawable.ic_settings, Pixel.PINK, getString(R.string.game_settings_artwork), "") { openCover() }.second
         renderCover()
 
+        content.addView(label(getString(R.string.game_settings_patch)), spaced(24))
+        menuCard(R.drawable.ic_folders, Pixel.YELLOW, getString(R.string.patch_apply), getString(R.string.patch_apply_desc)) { pickPatch() }
+
         content.addView(label(getString(R.string.game_settings_save)), spaced(24))
         menuCard(R.drawable.ic_save, Pixel.CORAL, getString(R.string.save_load), getString(R.string.save_load_desc)) { pickSave() }
         focusFirst(shaderCard)
@@ -79,6 +85,49 @@ class GameSettingsActivity : PixelPage() {
         startActivity(Intent(this, CoverActivity::class.java).putExtras(intent))
     }
 
+    private fun pickPatch() {
+        if (intent.getStringExtra(EXTRA_ROM_URI) == null) return
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        startActivityForResult(intent, REQUEST_PICK_PATCH)
+    }
+
+    /** Reads the patch and writes the patched copy beside the ROM, off the main thread. */
+    private fun applyPatch(uri: Uri) {
+        val romUri = intent.getStringExtra(EXTRA_ROM_URI)?.let(Uri::parse) ?: return
+        val fileName = intent.getStringExtra(EXTRA_FILE_NAME) ?: return
+        val patchName = queryName(uri) ?: uri.lastPathSegment.orEmpty()
+        if (!RomPatch.isPatchFileName(patchName)) {
+            Toast.makeText(this, R.string.patch_not_a_patch, Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, R.string.patch_working, Toast.LENGTH_SHORT).show()
+        io.execute {
+            val message = runCatching {
+                val patch = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("unreadable")
+                val library = RomLibrary(this)
+                val entry = RomEntry(romUri, fileName, "", "")
+                getString(R.string.patch_done, library.createPatchedCopy(entry, patchName, patch))
+            }.getOrElse { e ->
+                when ((e as? RomPatch.PatchException)?.reason) {
+                    RomPatch.Reason.WRONG_ROM -> getString(R.string.patch_wrong_rom)
+                    RomPatch.Reason.CORRUPT -> getString(R.string.patch_corrupt)
+                    RomPatch.Reason.UNSUPPORTED -> getString(R.string.patch_not_a_patch)
+                    null -> getString(R.string.patch_failed, e.message ?: e.javaClass.simpleName)
+                }
+            }
+            runOnUiThread { if (!isDestroyed) Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    private fun queryName(uri: Uri): String? = runCatching {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }.getOrNull()
+
     private fun pickSave() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -89,8 +138,10 @@ class GameSettingsActivity : PixelPage() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_PICK_SAVE || resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK) return
         val uri = data?.data ?: return
+        if (requestCode == REQUEST_PICK_PATCH) { applyPatch(uri); return }
+        if (requestCode != REQUEST_PICK_SAVE) return
         io.execute {
             val bytes = runCatching {
                 contentResolver.openInputStream(uri)?.use(SaveImport::readCapped)
@@ -181,6 +232,8 @@ class GameSettingsActivity : PixelPage() {
 
     companion object {
         private const val REQUEST_PICK_SAVE = 1
+        private const val REQUEST_PICK_PATCH = 2
+        const val EXTRA_ROM_URI = "rom_uri"
         const val EXTRA_GAME_DIR = "game_dir"
         const val EXTRA_TITLE = "title"
         const val EXTRA_PLATFORM = "platform"

@@ -134,6 +134,7 @@
             android:visibility="gone">
 
             <LinearLayout
+                android:id="@+id/split_left"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
@@ -152,33 +153,44 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp" />
 
-                <com.khumam.gbaduo.library.ui.PixelButton
-                    android:id="@+id/split_play"
+                <LinearLayout
+                    android:id="@+id/split_actions"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:text="@string/play" />
+                    android:orientation="horizontal">
 
-                <com.khumam.gbaduo.library.ui.PixelButton
-                    android:id="@+id/split_pack"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:text="@string/companion_pack" />
+                    <com.khumam.gbaduo.library.ui.PixelButton
+                        android:id="@+id/split_play"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="@string/play" />
 
-                <com.khumam.gbaduo.library.ui.PixelButton
-                    android:id="@+id/split_settings"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:text="@string/game_settings" />
+                    <com.khumam.gbaduo.library.ui.PixelButton
+                        android:id="@+id/split_pack"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:text="@string/companion_pack" />
 
-                <com.khumam.gbaduo.library.ui.PixelButton
-                    android:id="@+id/split_favorite"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:text="@string/favorite_add" />
+                    <com.khumam.gbaduo.library.ui.PixelButton
+                        android:id="@+id/split_settings"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:text="@string/game_settings" />
+
+                    <com.khumam.gbaduo.library.ui.PixelButton
+                        android:id="@+id/split_favorite"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:text="@string/favorite_add" />
+                </LinearLayout>
             </LinearLayout>
 
             <FrameLayout
@@ -213,6 +225,7 @@
                 android:layout_height="wrap_content" />
 
             <LinearLayout
+                android:id="@+id/tag_row"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"

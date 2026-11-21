@@ -2,6 +2,7 @@ package com.khumam.gbaduo.library.ui
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.drawable.Drawable
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.text.TextPaint
@@ -58,6 +59,37 @@ class PixelButton @JvmOverloads constructor(
         minHeight = Pixel.dp(context, 48f).toInt()
         isClickable = true
         isFocusable = false
+    }
+
+    /** A picture in place of the label, centred on the button's face and drawn in the text colour. */
+    var icon: Drawable? = null
+        set(value) {
+            field = value?.mutate()
+            invalidate()
+        }
+    var iconSizePx = Pixel.dp(context, 24f).toInt()
+
+    /** Degrees the icon is turned about its centre, so a button can show something in progress. */
+    var iconRotation = 0f
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val picture = icon ?: return
+        // The face is the bounds minus the hard shadow on the right and bottom.
+        val faceW = width - box.shadow
+        val faceH = height - box.shadow
+        val left = ((faceW - iconSizePx) / 2).toInt()
+        val top = ((faceH - iconSizePx) / 2).toInt()
+        picture.setBounds(left, top, left + iconSizePx, top + iconSizePx)
+        picture.setTint(currentTextColor)
+        val save = canvas.save()
+        canvas.rotate(iconRotation, left + iconSizePx / 2f, top + iconSizePx / 2f)
+        picture.draw(canvas)
+        canvas.restoreToCount(save)
     }
 
     fun style(fill: Int, text: Int = Pixel.INK) {
