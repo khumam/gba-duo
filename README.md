@@ -191,16 +191,44 @@ the app with **⋮ > Companion pack > Get from the web…**, or download a pack'
 from its [releases](https://github.com/khumam/gba-duo-companions/releases) and add it
 with **⋮ > Import pack…**.
 
-| Game                                          | Pack                                   | Shows                                                                                              |
-| --------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Pokémon FireRed (US)                          | `pokemon-firered-companion` (+ `-v`, `-minimal`) | Town map, party, bag, Pokédex, trainer card and a battle page with both Pokémon's live stats; WIDE |
-| Pokémon LeafGreen (US)                        | `pokemon-leafgreen-companion` (+ `-v`, `-minimal`) | The same pages for LeafGreen; WIDE                                                              |
-| Metroid: Zero Mission                         | `metroid-zero-mission-companion`       | Explored map, suit and beams (tap to switch), area progress, bosses and tanks                      |
-| Metroid Fusion                                | `metroid-fusion-companion`             | Live map, upgrades, sector progress, bosses and your next objective                                |
-| The Legend of Zelda: The Minish Cap           | `zelda-the-minish-cap-companion`       | World map, items, Kinstones and quest progress; WIDE                                               |
-| The Legend of Zelda: Oracle of Ages           | `zelda-oracle-of-ages-companion`       | Era maps, seeds, all 64 rings, hearts and essences (early version)                                 |
-| Harvest Moon: Friends of Mineral Town (EU/US) | `harvest-moon-fomt-companion`          | Gold, date and time, stamina, held tool and rucksack, affection, Harvest Sprites' work             |
-| Golden Sun (US)                               | `golden-sun-companion`                 | Party, Djinn, Psynergy and an area map that follows your character; WIDE (early preview)           |
+Every pack copies one screen of its game (the Bag window, the pause menu, the save list) and keeps it live from the game's memory. Tap a tile to open it, and in many packs change the game from the second screen. A few of the 12 shown here; every pack has an overview sheet in [`overview/`](https://github.com/khumam/gba-duo-companions/tree/main/overview).
+
+<table>
+<tr>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/pokemon-firered-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/pokemon-firered-companion-overview.png" alt="Pokémon FireRed companion pack"></a><br><sub><b>Pokémon FireRed</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/pokemon-emerald-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/pokemon-emerald-companion-overview.png" alt="Pokémon Emerald companion pack"></a><br><sub><b>Pokémon Emerald</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/golden-sun-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/golden-sun-companion-overview.png" alt="Golden Sun companion pack"></a><br><sub><b>Golden Sun</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/zelda-the-minish-cap-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/zelda-the-minish-cap-companion-overview.png" alt="Zelda: The Minish Cap companion pack"></a><br><sub><b>Zelda: The Minish Cap</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/metroid-fusion-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/metroid-fusion-companion-overview.png" alt="Metroid Fusion companion pack"></a><br><sub><b>Metroid Fusion</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/castlevania-aria-of-sorrow-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/castlevania-aria-of-sorrow-companion-overview.png" alt="Castlevania: Aria of Sorrow companion pack"></a><br><sub><b>Castlevania: Aria of Sorrow</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/fire-emblem-the-sacred-stones-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/fire-emblem-the-sacred-stones-companion-overview.png" alt="Fire Emblem: The Sacred Stones companion pack"></a><br><sub><b>Fire Emblem: The Sacred Stones</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/mario-luigi-superstar-saga-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/mario-luigi-superstar-saga-companion-overview.png" alt="Mario & Luigi: Superstar Saga companion pack"></a><br><sub><b>Mario & Luigi: Superstar Saga</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/harvest-moon-fomt-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/harvest-moon-fomt-companion-overview.png" alt="Harvest Moon: FoMT companion pack"></a><br><sub><b>Harvest Moon: FoMT</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/mother-3-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/mother-3-companion-overview.png" alt="Mother 3 companion pack"></a><br><sub><b>Mother 3</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/zelda-a-link-to-the-past-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/zelda-a-link-to-the-past-companion-overview.png" alt="Zelda: A Link to the Past companion pack"></a><br><sub><b>Zelda: A Link to the Past</b></sub></td>
+<td align="center" width="33%"><a href="https://github.com/khumam/gba-duo-companions/tree/main/final-fantasy-vi-advance-companion"><img src="https://raw.githubusercontent.com/khumam/gba-duo-companions/main/overview/final-fantasy-vi-advance-companion-overview.png" alt="Final Fantasy VI Advance companion pack"></a><br><sub><b>Final Fantasy VI Advance</b></sub></td>
+</tr>
+</table>
+
+**28 packs** for these games:
+
+- **Pokémon**: FireRed, LeafGreen, Emerald, Ruby, Sapphire, Light Platinum, Unbound, Monomyth
+- **Zelda**: The Minish Cap, Oracle of Ages, A Link to the Past
+- **Metroid**: Fusion, Zero Mission
+- **Castlevania**: Aria of Sorrow, Circle of the Moon, Harmony of Dissonance
+- **Fire Emblem** and **Fire Emblem: The Sacred Stones**
+- **Golden Sun** and **The Lost Age**, **Mario & Luigi: Superstar Saga**, **Super Mario Land 2**
+- **Final Fantasy VI Advance**, **Final Fantasy Tactics Advance**, **Advance Wars**
+- **Harvest Moon: Friends of Mineral Town**, **Mother 3**, **Dragon Ball Z: Legacy of Goku II**
+
+Per-pack pages, versions and game codes are in the
+[pack list](https://github.com/khumam/gba-duo-companions#packs).
 
 Pokémon FireRed and LeafGreen come in three looks each. The pack list has versions,
 game codes and per-pack notes. Want a pack for another game?
