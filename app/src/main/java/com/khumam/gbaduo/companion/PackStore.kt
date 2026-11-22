@@ -17,6 +17,10 @@ class PackStore(private val packsDir: File) {
     fun matching(gameCode: String, crc32: Long = 0L): List<PackManifest> =
         list().filter { it.matches(gameCode, crc32) }
 
+    /** Packs mapped for another region of this game; see [PackManifest.matchesOtherRegion]. */
+    fun otherRegion(gameCode: String): List<PackManifest> =
+        list().filter { it.matchesOtherRegion(gameCode) }
+
     fun byId(id: String): PackManifest? = list().find { it.id == id }
 
     /**

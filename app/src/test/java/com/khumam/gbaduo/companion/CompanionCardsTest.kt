@@ -111,4 +111,42 @@ class CompanionCardsTest {
         )
         assertEquals("https://x/a.png", (cards[0] as CompanionCard.Installed).overview)
     }
+
+    @Test fun `other region packs follow exact ones and are marked`() {
+        val exact = installed("a")
+        val other = installed("b")
+        val cards = CompanionCards.build(listOf(exact), listOf(web("w")), null, "0.1.15", installedOtherRegion = listOf(other), webOtherRegion = listOf(web("x")))
+        assertEquals(
+            listOf(
+                CompanionCard.Installed(exact, false),
+                CompanionCard.Installed(other, false, otherRegion = true),
+                CompanionCard.Web(web("w"), update = false),
+                CompanionCard.Web(web("x"), update = false, otherRegion = true),
+                CompanionCard.Import,
+            ),
+            cards,
+        )
+    }
+
+    @Test fun `a pack matching the exact code is never marked other region`() {
+        val a = installed("a")
+        val cards = CompanionCards.build(listOf(a), emptyList(), null, "0.1.15", installedOtherRegion = listOf(a))
+        assertEquals(listOf(CompanionCard.Installed(a, false), CompanionCard.Import), cards)
+    }
+
+    @Test fun `same game family ignores region letter and GB codes`() {
+        assert(PackManifest.sameGame("BPRE", "BPRJ"))
+        assert(!PackManifest.sameGame("BPRE", "BPGE"))
+        assert(!PackManifest.sameGame("DMG-", "DMG-"))
+    }
+
+    @Test fun `a pack with crcs is not offered to another region`() {
+        val pinned = PackManifest.parse(
+            """{"id":"p","name":"p","version":"1.0.0","author":"a","formatVersion":1,
+                "match":{"gameCode":["BPRE"],"crc32":["0x1234"]},"tickHz":4,"layout":"layout.json","values":{}}""",
+        )
+        assert(!pinned.matchesOtherRegion("BPRJ"))
+        assert(installed("a").matchesOtherRegion("BPRJ"))
+        assert(!installed("a").matchesOtherRegion("BPRE"))
+    }
 }

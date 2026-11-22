@@ -8,10 +8,12 @@ sealed interface CompanionCard {
         val assigned: Boolean,
         val overview: String? = null,
         val description: String? = null,
+        /** Mapped for another region of this game: assigning it asks first. */
+        val otherRegion: Boolean = false,
     ) : CompanionCard
 
     /** A catalog pack to download; [update] when a (older) copy is already installed. */
-    data class Web(val pack: CatalogPack, val update: Boolean) : CompanionCard {
+    data class Web(val pack: CatalogPack, val update: Boolean, val otherRegion: Boolean = false) : CompanionCard {
         val overview: String? get() = pack.overview
     }
 
@@ -32,18 +34,28 @@ object CompanionCards {
         appVersion: String,
         /** The picture a pack carries itself (its `overview` folder), as a location; it wins over the catalog's. */
         localOverview: (PackManifest) -> String? = { null },
+        /** Packs for another region of the same game, listed after the exact ones. */
+        installedOtherRegion: List<PackManifest> = emptyList(),
+        webOtherRegion: List<CatalogPack> = emptyList(),
     ): List<CompanionCard> {
-        val installedVersions = installed.associate { it.id to it.version }
-        val downloads = web.mapNotNull { pack ->
+        val allInstalled = installed + installedOtherRegion.filter { o -> installed.none { it.id == o.id } }
+        val otherInstalledIds = installedOtherRegion.map { it.id }.toSet() - installed.map { it.id }.toSet()
+        val allWeb = web + webOtherRegion.filter { o -> web.none { it.id == o.id } }
+        val otherWebIds = webOtherRegion.map { it.id }.toSet() - web.map { it.id }.toSet()
+        val installedVersions = allInstalled.associate { it.id to it.version }
+        val downloads = allWeb.mapNotNull { pack ->
+            val other = pack.id in otherWebIds
             when (PackCatalog.status(pack, installedVersions[pack.id], appVersion)) {
-                CatalogStatus.NEW -> CompanionCard.Web(pack, update = false)
-                CatalogStatus.UPDATE -> CompanionCard.Web(pack, update = true)
+                CatalogStatus.NEW -> CompanionCard.Web(pack, update = false, otherRegion = other)
+                CatalogStatus.UPDATE -> CompanionCard.Web(pack, update = true, otherRegion = other)
                 CatalogStatus.INSTALLED, CatalogStatus.NEEDS_NEWER_APP -> null
             }
         }
         val replaced = downloads.filter { it.update }.map { it.pack.id }.toSet()
-        val catalog = web.associateBy { it.id }
-        val cards = installed.filter { it.id !in replaced }.map { CompanionCard.Installed(it, it.id == assignedId, localOverview(it) ?: catalog[it.id]?.overview, catalog[it.id]?.description?.ifBlank { null }) }
+        val catalog = allWeb.associateBy { it.id }
+        val cards = allInstalled.filter { it.id !in replaced }.map {
+            CompanionCard.Installed(it, it.id == assignedId, localOverview(it) ?: catalog[it.id]?.overview, catalog[it.id]?.description?.ifBlank { null }, it.id in otherInstalledIds)
+        }
         return cards + downloads + CompanionCard.Import
     }
 }

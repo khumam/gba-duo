@@ -26,8 +26,14 @@ class CompanionPackSource(
     private var failedAt: Long? = null
 
     fun cards(gameCode: String, crc32: Long, assignedId: String?): List<CompanionCard> {
-        val web = PackCatalog.forGame(catalog(), gameCode)
-        return CompanionCards.build(store.matching(gameCode, crc32), web, assignedId, appVersion) { store.overviewImage(it)?.toURI()?.toString() }
+        val all = catalog()
+        val web = PackCatalog.forGame(all, gameCode)
+        return CompanionCards.build(
+            store.matching(gameCode, crc32), web, assignedId, appVersion,
+            localOverview = { store.overviewImage(it)?.toURI()?.toString() },
+            installedOtherRegion = store.otherRegion(gameCode),
+            webOtherRegion = PackCatalog.relatedTo(all, gameCode),
+        )
     }
 
     /** The next [cards] fetches the catalog again. What was saved stays as the fallback if the fetch fails. */

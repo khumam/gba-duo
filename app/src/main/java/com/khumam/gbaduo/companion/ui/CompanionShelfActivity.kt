@@ -1,6 +1,7 @@
 package com.khumam.gbaduo.companion.ui
 
 import android.app.ActivityOptions
+import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -563,6 +564,7 @@ class CompanionShelfActivity : PixelPage() {
                 facts += "v${card.pack.version}"
                 body = card.description.orEmpty()
                 if (card.assigned) badges += getString(R.string.shelf_active)
+                if (card.otherRegion) badges += getString(R.string.pack_other_region)
                 if (card.pack.canWriteMemory) badges += getString(R.string.pack_modifies_game)
             }
             is CompanionCard.Web -> {
@@ -570,6 +572,7 @@ class CompanionShelfActivity : PixelPage() {
                 facts += "v${card.pack.version}"
                 body = card.pack.description
                 badges += getString(if (card.update) R.string.shelf_update else R.string.shelf_download)
+                if (card.otherRegion) badges += getString(R.string.pack_other_region)
                 if (card.pack.canModifyGame) badges += getString(R.string.pack_modifies_game)
             }
             CompanionCard.Import -> body = getString(if (packCount == 0) R.string.shelf_empty_hint else R.string.shelf_import_hint)
@@ -609,6 +612,25 @@ class CompanionShelfActivity : PixelPage() {
     // ---- applying ---------------------------------------------------------------------
 
     private fun apply(card: CompanionCard) {
+        val region = when (card) {
+            is CompanionCard.Installed -> if (card.otherRegion) card.pack.gameCodes to card.pack.canWriteMemory else null
+            is CompanionCard.Web -> if (card.otherRegion) card.pack.games.map { it.gameCode } to card.pack.canModifyGame else null
+            CompanionCard.Import -> null
+        }
+        if (region == null) return applyConfirmed(card)
+        // Same checks as applyConfirmed makes, before the warning: no point warning about a pack that won't be used.
+        if (region.second && HardcoreMode.enabled(this)) return toast(getString(R.string.pack_read_only_hardcore))
+        val message = getString(R.string.pack_region_message, region.first.joinToString(", "), gameCode) +
+            if (region.second) getString(R.string.pack_region_message_writes) else ""
+        AlertDialog.Builder(this)
+            .setTitle(R.string.pack_region_title)
+            .setMessage(message)
+            .setPositiveButton(R.string.pack_region_continue) { _, _ -> applyConfirmed(card) }
+            .setNegativeButton(R.string.pack_region_cancel, null)
+            .show()
+    }
+
+    private fun applyConfirmed(card: CompanionCard) {
         val game = storage ?: return
         when (card) {
             is CompanionCard.Installed -> {

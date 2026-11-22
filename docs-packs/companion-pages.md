@@ -311,6 +311,9 @@ local area = gfx.layers{
 - Images are at most 256 x 256 px. Up to 96 are kept (fewer when they're large);
   one dropped from the cache is decoded again when asked for.
 - Colour 0 is transparent in sprites, as on the GBA.
+- GBADuo offers a pack for other regions of the same game (same first three letters of the game
+  code) after a warning, unless its manifest lists `crc32`s. Read the game code in `main.lua` if
+  your addresses differ per region.
 - Addresses differ between a game's releases: check the game code
   (`mem.u8(0x080000AC)` onward) and keep a table per release, as
   `zelda-the-minish-cap-revamp-companion`'s `rom_gfx.lua` does for its world map

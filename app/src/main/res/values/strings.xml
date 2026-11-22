@@ -342,6 +342,12 @@
     <string name="pack_writes_confirm">Some companion packs can change a game\'s memory when you tap them, for example to equip an item.\n\nEach pack still asks before its first change in each game, and only acts on your taps. A bad change can crash a game or spoil a save.</string>
     <string name="pack_writes_turn_on">Turn on</string>
     <string name="pack_modifies_game">can modify the game</string>
+    <string name="pack_other_region">other region</string>
+    <string name="pack_region_title">Different game region</string>
+    <string name="pack_region_message">This pack is mapped for a different region than your game (pack: %1$s, game: %2$s), so it may have an issue or glitch. Please let me know if you have an issue.</string>
+    <string name="pack_region_message_writes">\n\nThis pack can change the game\'s memory. On another region its addresses may be wrong and could damage your save, so keep a backup.</string>
+    <string name="pack_region_continue">Use anyway</string>
+    <string name="pack_region_cancel">Cancel</string>
     <string name="pack_permission_off">Off: Settings > Companion keeps every pack from changing games</string>
     <string name="pack_permission_hardcore">Off in hardcore mode</string>
 

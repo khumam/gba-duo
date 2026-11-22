@@ -37,6 +37,13 @@ data class PackManifest(
     fun matches(gameCode: String, crc32: Long): Boolean =
         gameCode in gameCodes && (crc32s.isEmpty() || crc32 in crc32s)
 
+    /**
+     * Same game, another region or revision (GBA codes share their first three letters), for a pack that doesn't pin
+     * ROM checksums: a checksum belongs to one ROM, so a pack that lists CRCs is never offered to another region.
+     */
+    fun matchesOtherRegion(gameCode: String): Boolean =
+        crc32s.isEmpty() && gameCode !in gameCodes && gameCodes.any { sameGame(it, gameCode) }
+
     class InvalidManifestException(message: String) : Exception(message)
 
     companion object {
@@ -47,6 +54,13 @@ data class PackManifest(
         private const val GAME_SCRIPT_FORMAT_VERSION = 4
 
         const val MEMORY_WRITE = "memory-write"
+
+        /** GB/GBC codes (`DMG-`/`CGB-`) carry no game identity, so they never count as the same game. */
+        fun sameGame(a: String, b: String): Boolean {
+            val x = a.trim().uppercase()
+            val y = b.trim().uppercase()
+            return x.length == 4 && y.length == 4 && '-' !in x && '-' !in y && x.take(3) == y.take(3)
+        }
 
         /** Every permission a manifest may ask for. Anything else is refused, so a typo can't pass silently. */
         val PERMISSIONS = setOf(MEMORY_WRITE)
