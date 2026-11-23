@@ -382,6 +382,12 @@
     <string name="shader_removed">%1$s removed</string>
     <string name="shader_start_failed">Shader could not start: %1$s</string>
     <string name="shader_library_title">Library</string>
+    <string name="clock_games">Games</string>
+    <string name="clock_playtime">Playtime</string>
+    <string name="clock_last">Last played</string>
+    <string name="clock_battery">Battery</string>
+    <string name="clock_none">—</string>
+    <string name="clock_charging">%s ⚡</string>
     <string name="shelf_title">Companion packs</string>
     <string name="shelf_loading">Looking for packs…</string>
     <string name="shelf_import">Import from file</string>

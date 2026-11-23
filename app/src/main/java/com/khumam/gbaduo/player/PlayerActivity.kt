@@ -7,6 +7,7 @@ import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.content.Context
@@ -136,6 +137,7 @@ class PlayerActivity : Activity() {
         // mGBA's own CRC32 is over the same bytes, so this matches NativeCore.crc32().
         val header = RomHeader.parse(rom.fileName, romBytes.copyOf(minOf(romBytes.size, RomHeader.SIZE)))
         val crc32 = RomIndex.crc32Of(romBytes)
+        GameMarksStore.setLastTitle(this, GameTitle.display(romFileName, header.title))   // the second screen's clock
         val storage = GameStorage.forGame(filesDir, header.platform, header.title, header.gameCode, crc32)
         LegacyMigration.migrate(filesDir, romFileName, crc32, storage)
         storage.ensureDirs()
@@ -560,8 +562,15 @@ class PlayerActivity : Activity() {
         if (!hasFocus && ::input.isInitialized) input.releaseAll()
     }
 
+    /** When this screen last came to the front, for the playtime total; 0 while it is not in front. */
+    private var resumedAtMs = 0L
+
     override fun onPause() {
         resumed = false
+        if (resumedAtMs != 0L) {
+            GameMarksStore.addPlaytime(this, SystemClock.elapsedRealtime() - resumedAtMs)
+            resumedAtMs = 0L
+        }
         super.onPause()
         if (::emu.isInitialized) {
             emu.paused = true
@@ -573,6 +582,7 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        resumedAtMs = SystemClock.elapsedRealtime()
         if (::emu.isInitialized) emu.paused = companionOverlay?.isShowing == true
         refreshWritePermission?.invoke()
     }

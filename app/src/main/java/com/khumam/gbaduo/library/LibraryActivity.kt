@@ -112,7 +112,7 @@ class LibraryActivity : Activity() {
     private val compact by lazy { resources.configuration.screenWidthDp < COMPACT_WIDTH_DP }
 
     private val blink = Handler(Looper.getMainLooper())
-    private val shelfPost = Runnable { selectedEntry()?.let { sendShelf(it, focus = false) } }
+    private val shelfPost = Runnable { launchClock() }
     private val motion by lazy { Pixel.motionEnabled(this) }
     private val blinkStep = object : Runnable {
         override fun run() {
@@ -410,13 +410,15 @@ class LibraryActivity : Activity() {
     override fun onStart() {
         super.onStart()
         CompanionShelfActivity.libraryShown = true
+        CompanionShelfActivity.gameStarting = false
     }
 
     override fun onStop() {
-        // The shelf only follows the library: it goes when the library leaves (a game starting, settings opening).
+        // The second screen follows the library: a game starting closes it, settings opening puts it back on the clock.
         CompanionShelfActivity.libraryShown = false
         blink.removeCallbacks(shelfPost)
-        sendBroadcast(Intent(CompanionShelfActivity.ACTION_CLOSE).setPackage(packageName))
+        val action = if (CompanionShelfActivity.gameStarting) CompanionShelfActivity.ACTION_CLOSE else CompanionShelfActivity.ACTION_RESET
+        sendBroadcast(Intent(action).setPackage(packageName))
         super.onStop()
     }
 
@@ -562,6 +564,7 @@ class LibraryActivity : Activity() {
     private fun play() {
         val entry = selectedEntry() ?: return
         val uri = entry.uri ?: return
+        CompanionShelfActivity.gameStarting = true
         val intent = Intent(this, PlayerActivity::class.java)
         intent.putExtra(PlayerActivity.EXTRA_ROM_URI, uri.toString())
         intent.putExtra(PlayerActivity.EXTRA_ROM_FILE_NAME, entry.fileName)
@@ -591,6 +594,7 @@ class LibraryActivity : Activity() {
             if (generation != refreshGeneration) return@background // a newer refresh superseded this one
             val (entries, codes, updateCodes) = result.getOrDefault(Triple(emptyList<RomEntry>(), emptySet(), emptySet()))
             allEntries = entries
+            GameMarksStore.setGameCount(this, entries.size)   // the second screen's clock
             marks = GameMarksStore.load(this)   // played games move up Recent between visits
             packCodes = codes
             filterPackCodes = codes.map { it.uppercase() }.toSet() + packUpdates.catalogGameCodes()
@@ -720,20 +724,29 @@ class LibraryActivity : Activity() {
         return ScreenSetup.secondaryDisplayId(this)
     }
 
-    /** Dual screen: the second screen shows the companion carousel for the selected game, once the selection settles. */
+    /** Dual screen: makes sure the second screen is up. It shows the clock; the packs only open from the Companion pack button. */
     private fun updateShelf() {
         blink.removeCallbacks(shelfPost)
-        if (shelfDisplayId() == null) return
+        if (shelfDisplayId() == null || CompanionShelfActivity.alive) return
         blink.postDelayed(shelfPost, SHELF_DEBOUNCE_MS)
+    }
+
+    private fun launchClock() {
+        val displayId = shelfDisplayId() ?: return
+        if (!CompanionShelfActivity.libraryShown || CompanionShelfActivity.alive) return
+        startActivity(
+            Intent(this, CompanionShelfActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle(),
+        )
     }
 
     /** The Companion pack button: on two screens the controller moves to the carousel on the second one, else the dialog. */
     private fun openCompanionPacks(entry: RomEntry) {
         blink.removeCallbacks(shelfPost)
-        if (shelfDisplayId() != null) sendShelf(entry, focus = true) else showCompanionMenu(entry)
+        if (shelfDisplayId() != null) sendShelf(entry) else showCompanionMenu(entry)
     }
 
-    private fun sendShelf(entry: RomEntry, focus: Boolean) {
+    private fun sendShelf(entry: RomEntry) {
         val displayId = shelfDisplayId() ?: return
         background(
             work = { library.crc32(entry) ?: error("Could not read ${entry.fileName}") },
@@ -747,16 +760,12 @@ class LibraryActivity : Activity() {
                         .putExtra(CompanionShelfActivity.EXTRA_TITLE, entry.title)
                         .putExtra(CompanionShelfActivity.EXTRA_GAME_CODE, entry.gameCode)
                         .putExtra(CompanionShelfActivity.EXTRA_CRC, crc)
-                        .putExtra(CompanionShelfActivity.EXTRA_FOCUS, focus)
-                    if (!focus && CompanionShelfActivity.alive) {
-                        // Launching an activity moves the controller to its screen; a running shelf is just told.
-                        sendBroadcast(extras.setAction(CompanionShelfActivity.ACTION_UPDATE).setPackage(packageName))
-                    } else {
-                        startActivity(
-                            extras.setClass(this, CompanionShelfActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                            ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle(),
-                        )
-                    }
+                        .putExtra(CompanionShelfActivity.EXTRA_FOCUS, true)
+                    // Launching (or re-launching) the screen moves the controller to it.
+                    startActivity(
+                        extras.setClass(this, CompanionShelfActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle(),
+                    )
                 }
             },
         )

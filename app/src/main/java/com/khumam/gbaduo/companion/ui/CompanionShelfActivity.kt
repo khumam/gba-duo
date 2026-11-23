@@ -47,9 +47,10 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * The companion packs for the game selected in the library, as a carousel: packs on the device, packs on the web,
- * and a last card to import one from a file. A applies the focused card straight away. Meant for the second
- * screen; the library sends it the selected game and re-sends as the selection changes.
+ * The second screen while the library is up. By default it shows the clock ([CompanionClockView]); the Companion pack
+ * button brings up the packs for the selected game as a carousel: packs on the device, packs on the web, and a last
+ * card to import one from a file. A applies the focused card straight away. B goes back to the clock, and so does
+ * leaving the library for settings; a game starting closes the screen.
  */
 class CompanionShelfActivity : PixelPage() {
 
@@ -85,6 +86,8 @@ class CompanionShelfActivity : PixelPage() {
     private var storage: GameStorage? = null
     private var gameCode = ""
     private var crc = 0L
+    private lateinit var clock: CompanionClockView
+    private var closing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,6 +95,10 @@ class CompanionShelfActivity : PixelPage() {
         val packsDir = File(filesDir, "packs")
         source = CompanionPackSource(PackStore(packsDir), PackDownloader(UrlHttp(), packsDir, cacheDir), packsDir, BuildConfig.VERSION_NAME, cacheFile = File(cacheDir, "catalog.cache"))
         page(getString(R.string.shelf_title), listOf("◀ ▶" to getString(R.string.shelf_hint_choose), "▲ ▼" to getString(R.string.shelf_hint_read), "A" to getString(R.string.shelf_hint_apply), "X" to getString(R.string.shelf_hint_reload)))
+        // The clock covers the whole page until the Companion pack button asks for the packs.
+        clock = CompanionClockView(this)
+        addContentView(clock, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (intent.getBooleanExtra(EXTRA_FOCUS, false)) clock.visibility = View.GONE
         row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             clipChildren = false
@@ -170,21 +177,40 @@ class CompanionShelfActivity : PixelPage() {
 
     private val closer = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == ACTION_UPDATE) load(intent) else close()
+            if (intent.action == ACTION_RESET) showClock() else close()
         }
     }
 
     override fun onStart() {
         super.onStart()
-        ContextCompat.registerReceiver(this, closer, IntentFilter(ACTION_CLOSE).apply { addAction(ACTION_UPDATE) }, ContextCompat.RECEIVER_NOT_EXPORTED)
-        // Launched just as the library left (a game starting): its close was sent before this could hear it.
-        if (!libraryShown) close()
+        ContextCompat.registerReceiver(this, closer, IntentFilter(ACTION_CLOSE).apply { addAction(ACTION_RESET) }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // Launched just as the library left for a game: its close was sent before this could hear it.
+        if (gameStarting) close()
     }
 
     /** Goes at once as far as the library can tell, so its next selection launches a new shelf instead of updating this one. */
     private fun close() {
         alive = false
+        closing = true
         finish()
+    }
+
+    /** The clock covers the packs again and the controller goes back to the library. */
+    private fun showClock() {
+        controllerHere = false
+        clock.refresh()
+        clock.visibility = View.VISIBLE
+    }
+
+    private fun showPacks() {
+        clock.visibility = View.GONE
+    }
+
+    /** The page's Back button finishes it; here that means back to the clock, since the clock is what the screen is for. */
+    override fun finish() {
+        if (closing) { super.finish(); return }
+        returnToLibrary()
+        showClock()
     }
 
     override fun onStop() {
@@ -222,7 +248,7 @@ class CompanionShelfActivity : PixelPage() {
             return true
         }
         if (event.keyCode == KeyEvent.KEYCODE_BUTTON_B || event.keyCode == KeyEvent.KEYCODE_BACK) {
-            if (event.action == KeyEvent.ACTION_UP) returnToLibrary()
+            if (event.action == KeyEvent.ACTION_UP) { returnToLibrary(); showClock() }
             return true
         }
         return super.dispatchKeyEvent(event)
@@ -272,6 +298,8 @@ class CompanionShelfActivity : PixelPage() {
     }
 
     private fun load(intent: Intent) {
+        if (!intent.hasExtra(EXTRA_GAME_CODE)) return // the clock alone: no game yet
+        if (intent.getBooleanExtra(EXTRA_FOCUS, false)) showPacks()
         gameCode = intent.getStringExtra(EXTRA_GAME_CODE).orEmpty()
         crc = intent.getLongExtra(EXTRA_CRC, 0L)
         if (intent.getBooleanExtra(EXTRA_FOCUS, false)) controllerHere = true
@@ -733,8 +761,11 @@ class CompanionShelfActivity : PixelPage() {
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
 
     companion object {
-        /** The library re-sends the selected game to a running shelf this way: no launch, so no focus change. */
-        const val ACTION_UPDATE = "com.khumam.gbaduo.SHELF_UPDATE"
+        /** Sent by the library when it leaves for something other than a game (settings): back to the clock. */
+        const val ACTION_RESET = "com.khumam.gbaduo.SHELF_RESET"
+
+        /** Set by the library when a game is starting: the screen closes instead of going back to the clock. */
+        @Volatile var gameStarting = false
 
         /** Whether a shelf is up in this process. */
         @Volatile var alive = false
@@ -743,7 +774,7 @@ class CompanionShelfActivity : PixelPage() {
         /** Set by the library while it is on screen; a shelf starting without it closes. */
         @Volatile var libraryShown = false
 
-        /** Sent by the library when it leaves the screen: the shelf only follows it. */
+        /** Sent by the library when a game starts. */
         const val ACTION_CLOSE = "com.khumam.gbaduo.SHELF_CLOSE"
         const val EXTRA_PLATFORM_ID = "platform_id"
         const val EXTRA_TITLE = "title"
