@@ -32,17 +32,29 @@ import java.util.Locale
  */
 class CompanionClockView(context: Context) : FrameLayout(context) {
 
+    // The app's wordmark, as on the library's top bar; GBA is lifted a shade so it reads on the dark page.
+    private val wordmark = OutlineText(context).apply {
+        text = context.getString(R.string.app_name).uppercase()
+        accentFrom = text.length - "DUO".length
+        setTextSizeSp(30f)
+        fillColor = Pixel.PURPLE_LIGHT
+        strokeColor = PixelPage.SHADE
+        shadowColor = PixelPage.SHADE
+        centered = true
+    }
+    // The clock itself is something you read, so the body face rather than Silkscreen.
     private val time = OutlineText(context).apply {
-        setTextSizeSp(72f)
+        paint.typeface = Fonts.body(context, 600)
+        setTextSizeSp(64f)
         fillColor = Pixel.YELLOW
         strokeColor = PixelPage.SHADE
         shadowColor = PixelPage.SHADE
         centered = true
     }
     private val date = TextView(context).apply {
-        typeface = Fonts.display(context)
-        textSize = 13f
-        letterSpacing = 0.1f
+        typeface = Fonts.body(context, 500)
+        textSize = 15f
+        letterSpacing = 0.06f
         gravity = Gravity.CENTER
         setTextColor(Pixel.ON_INK_SOFT)
     }
@@ -66,6 +78,7 @@ class CompanionClockView(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
+        column.addView(wordmark, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(18) })
         column.addView(time, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(date, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
         column.addView(row(games, playtime), rowParams(top = 22))
@@ -126,8 +139,8 @@ class CompanionClockView(context: Context) : FrameLayout(context) {
     /** A lavender pixel card: a small Silkscreen label over the value. */
     private inner class Tile(label: Int) {
         val value = TextView(context).apply {
-            typeface = Fonts.display(context, bold = true)
-            textSize = 18f
+            typeface = Fonts.body(context, 600)
+            textSize = 20f
             setTextColor(Pixel.INK)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
@@ -139,9 +152,9 @@ class CompanionClockView(context: Context) : FrameLayout(context) {
             setPadding(dp(14), dp(10), dp(14) + box.shadow.toInt(), dp(10) + box.shadow.toInt())
             addView(TextView(context).apply {
                 text = context.getString(label).uppercase()
-                typeface = Fonts.display(context)
-                textSize = 10f
-                letterSpacing = 0.08f
+                typeface = Fonts.body(context, 500)
+                textSize = 12f
+                letterSpacing = 0.06f
                 setTextColor(Pixel.INK_SOFT)
                 isSingleLine = true
             })
