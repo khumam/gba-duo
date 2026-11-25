@@ -30,6 +30,10 @@ sealed interface KeyResult {
 class InputMapper(private val scheme: ControlScheme = ControlScheme.DEFAULT) {
 
     @Volatile private var pressed = 0
+
+    /** `GbaKeys` bits held on the on-screen touch controller; added to the buttons' own. */
+    @Volatile var touchKeys = 0
+
     @Volatile private var ffHeld = false
     @Volatile private var ffToggled = false
 
@@ -121,11 +125,12 @@ class InputMapper(private val scheme: ControlScheme = ControlScheme.DEFAULT) {
 
     /** Emu thread, once per frame. Includes the hotkey button's tap for [TAP_FRAMES] calls after its release. */
     fun keys(): Int {
+        val held = pressed or touchKeys
         if (tapFrames.get() > 0) {
             tapFrames.decrementAndGet()
-            return pressed or tapBit
+            return held or tapBit
         }
-        return pressed
+        return held
     }
 
     fun fastForward(): Boolean = ffHeld || ffToggled

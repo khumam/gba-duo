@@ -52,6 +52,10 @@
     <string name="controls_ff_mode">Fast-forward: %s</string>
     <string name="controls_ff_hold">Hold</string>
     <string name="controls_ff_toggle">Toggle</string>
+    <string name="controls_touch_title">Touch controller</string>
+    <string name="controls_touch_off">Off: play with the built-in buttons</string>
+    <string name="controls_touch_on">On: GBA buttons over the game screen</string>
+    <string name="controls_touch_note">Shows a translucent D-pad, A, B, L, R, Start, Select and a menu button over the game. Works together with the physical buttons. Applies from the next game you start.</string>
     <string name="hotkey_quick_menu">Open quick menu</string>
     <string name="hotkey_companion">Show or hide companion</string>
     <string name="companion_show">Companion screen</string>

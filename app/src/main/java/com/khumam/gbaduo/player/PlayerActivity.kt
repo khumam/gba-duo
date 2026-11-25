@@ -52,6 +52,7 @@ import com.khumam.gbaduo.library.RomArchive
 import com.khumam.gbaduo.library.RomHeader
 import com.khumam.gbaduo.library.RomIndex
 import com.khumam.gbaduo.controls.ControlPrefs
+import com.khumam.gbaduo.controls.TouchControlsSettings
 import com.khumam.gbaduo.controls.HotkeyAction
 import com.khumam.gbaduo.emu.KeyResult
 import com.khumam.gbaduo.storage.GameSettingsKeys
@@ -81,6 +82,7 @@ class PlayerActivity : Activity() {
     private var achievementPopups: AchievementPopups? = null
     private var saveMirror: SaveMirror? = null
     private var perfOverlay: PerfOverlayView? = null
+    private var touchController: TouchControllerView? = null
 
     /**
      * Whether this is Android's top resumed activity: the one on the top focused display,
@@ -183,9 +185,18 @@ class PlayerActivity : Activity() {
         emu.start()
         perfOverlay = PerfOverlayView(findViewById(android.R.id.content) as android.widget.FrameLayout, PerfOverlaySettings.default(this)) { emu.framesRun }
             .also { it.attach() }
+        if (TouchControlsSettings.enabled(this)) addTouchController(gameView)
 
         // The quick menu and companion screen talk to the core, so wait until the emu thread has loaded it.
         waitForLoadThenSetUp(gameView, header, crc32, storage)
+    }
+
+    /** Settings > Controller > Touch controller: the on-screen GBA buttons, just above the game picture. */
+    private fun addTouchController(gameView: GameView) {
+        val root = gameView.parent as ViewGroup
+        val view = TouchControllerView(this, onKeys = { input.touchKeys = it }, onMenu = ::openQuickMenu)
+        root.addView(view, root.indexOfChild(gameView) + 1, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        touchController = view
     }
 
     /** Wide view off, wide or extra wide for this game (from the companion screen's button), kept in the game's settings. */
@@ -503,6 +514,8 @@ class PlayerActivity : Activity() {
         val overlay = companionOverlay ?: return
         if (overlay.isShowing) return
         if (::input.isInitialized) input.releaseAll()
+        // The companion sits under the touch controller in the view stack, so the controller steps aside.
+        touchController?.visibility = View.GONE
         emu.paused = true
         overlay.show()
         emu.requestSnapshot()
@@ -512,6 +525,7 @@ class PlayerActivity : Activity() {
         val overlay = companionOverlay ?: return
         if (!overlay.isShowing) return
         overlay.hide()
+        touchController?.visibility = View.VISIBLE
         if (::input.isInitialized) input.releaseAll()
         emu.paused = !resumed
     }
@@ -519,6 +533,7 @@ class PlayerActivity : Activity() {
     /** Lifts held keys first, so nothing stays pressed while the menu has the focus. */
     private fun openQuickMenu() {
         if (::input.isInitialized) input.releaseAll()
+        touchController?.releaseAll()
         quickMenu?.show()
     }
 
