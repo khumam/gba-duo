@@ -562,6 +562,29 @@ class PlayerActivity : Activity() {
         if (!hasFocus && ::input.isInitialized) input.releaseAll()
     }
 
+    /** True while the second screen's companion is put away because the game left the foreground (Home). */
+    private var companionAway = false
+
+    /** Home or the menu button: the game goes to the background, so the companion goes with it instead of staying on the other screen. */
+    override fun onStop() {
+        companionPresentation?.let { it.hide(); companionAway = true }
+        companionActivity?.activity?.let { it.moveTaskToBack(true); companionAway = true }
+        super.onStop()
+    }
+
+    /** Back in the foreground: bring the companion back. */
+    override fun onStart() {
+        super.onStart()
+        if (!companionAway) return
+        companionAway = false
+        try {
+            companionPresentation?.show()
+        } catch (e: WindowManager.InvalidDisplayException) {
+            Log.w("PlayerActivity", "Companion screen unavailable after returning", e)
+        }
+        companionActivity?.let { CompanionActivity.raise(this, it) }
+    }
+
     /** When this screen last came to the front, for the playtime total; 0 while it is not in front. */
     private var resumedAtMs = 0L
 

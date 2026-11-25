@@ -115,6 +115,13 @@ class CompanionActivity : Activity() {
             }
         }
 
+        /** Brings [session]'s activity back to the front of the display it is on, after it was moved to the back. */
+        fun raise(from: Activity, session: Session) {
+            val displayId = session.activity?.display?.displayId ?: return
+            val intent = Intent(from, CompanionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { from.startActivity(intent, ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle()) }
+        }
+
         /** Ends [session]: finishes its activity, or stops it from showing if it's still starting. */
         fun close(session: Session) {
             if (current === session) current = null
