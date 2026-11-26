@@ -13,8 +13,8 @@ android {
         applicationId = "com.khumam.gbaduo"
         minSdk = 30
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.0.2"
+        versionCode = 20
+        versionName = "1.0.3"
 
         ndk {
             abiFilters += "arm64-v8a"
