@@ -13,6 +13,12 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.text.BasicText
@@ -215,7 +221,36 @@ private fun CssNode(node: CompanionNode, tree: CompanionTree, platform: Companio
             transformOrigin = TransformOrigin(origin.first, origin.second)
         }
         .drawBehind { drawCssBox(paint, platform) }
-    if (style.keyword("overflow") != "visible") modifier = modifier.clip(CssShape(paint))
+    if (style.keyword("overflow") != "visible" || node.zoom != null) modifier = modifier.clip(CssShape(paint))
+    // A zoomable box: its own background and clip stay put, everything inside is scaled and panned (pinch, drag).
+    node.zoom?.let { zoom ->
+        modifier = modifier
+            .onSizeChanged { zoom.size = it }
+            .pointerInput(zoom) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        val factor = event.calculateZoom()
+                        val pan = event.calculatePan()
+                        val pointers = event.changes.count { it.pressed }
+                        // one finger pans only once zoomed in; two fingers always pinch
+                        if ((pointers > 1 || zoom.scale > zoom.spec.min) && (factor != 1f || pan != Offset.Zero)) {
+                            zoom.gesture(event.calculateCentroid(useCurrent = true), pan, factor)
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
+                    zoom.gestureEnd()
+                }
+            }
+            .graphicsLayer {
+                transformOrigin = TransformOrigin(0f, 0f)
+                this.scaleX = zoom.scale
+                this.scaleY = zoom.scale
+                translationX = zoom.offset.x
+                translationY = zoom.offset.y
+            }
+    }
     // `overflow: auto|scroll` makes this box's content actually scrollable (vertically — the
     // engine has no per-axis overflow-x/overflow-y, and vertical lists are the overwhelmingly
     // common case). Compose's verticalScroll modifier works transparently with CssMeasurePolicy

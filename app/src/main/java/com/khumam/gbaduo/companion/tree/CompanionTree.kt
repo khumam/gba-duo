@@ -7,6 +7,7 @@ import com.khumam.gbaduo.companion.Binding
 import com.khumam.gbaduo.companion.ScopedValues
 import com.khumam.gbaduo.companion.Widget
 import com.khumam.gbaduo.companion.WidgetMeta
+import com.khumam.gbaduo.companion.ZoomSpec
 import com.khumam.gbaduo.companion.style.ComputedStyle
 import com.khumam.gbaduo.companion.style.CssParser
 import com.khumam.gbaduo.companion.style.CssWarning
@@ -42,6 +43,9 @@ class CompanionTree(
     private val dirty = LinkedHashSet<CompanionNode>()
 
     private val uiState = LinkedHashMap<String, Any?>()
+
+    /** The zoomable boxes' specs by UI key, so the `zoom` action knows each one's limits. */
+    private val zoomSpecs = HashMap<String, ZoomSpec>()
     private val history = HashMap<String, ArrayDeque<String>>()
     private val initialPages = HashMap<String, String>()
     private var snapshot: Any? = null
@@ -133,6 +137,16 @@ class CompanionTree(
                     if (previous != null) setUi(action.state, previous)
                 }
                 is Action.Call -> calls += Action.Call(action.name, action.args.map { actionValue(it, context) })
+                is Action.Zoom -> {
+                    val spec = zoomSpecs[action.state] ?: ZoomSpec(state = action.state)
+                    val current = (uiState[action.state] as? Number)?.toFloat() ?: spec.min
+                    val next = when (action.step) {
+                        "in" -> current * ZOOM_STEP
+                        "out" -> current / ZOOM_STEP
+                        else -> spec.min
+                    }.coerceIn(spec.min, spec.max)
+                    setUi(action.state, (next * 100f).toInt() / 100f)
+                }
             }
         }
         if (changed) {
@@ -201,6 +215,7 @@ class CompanionTree(
         bindCommon(node, widget)
         if (meta.onClick.isNotEmpty()) bindClick(node, meta.onClick)
         if (meta.draggable || meta.onDrop.isNotEmpty()) bindDragDrop(node, meta)
+        meta.zoom?.let { bindZoom(node, it) }
 
         when (widget) {
             is Widget.Column -> widget.children.forEach { inflate(it, node) }
@@ -246,6 +261,13 @@ class CompanionTree(
                 setBound(node, declarations)
             }
         }
+    }
+
+    private fun bindZoom(node: CompanionNode, spec: ZoomSpec) {
+        zoomSpecs[spec.state] = spec
+        val zoom = ZoomState(spec) { scale -> setUiValue(spec.state, scale) }
+        node.zoom = zoom
+        node.bindings += { _ -> zoom.setTarget((uiState[spec.state] as? Number)?.toFloat() ?: spec.min) }
     }
 
     private fun bindClick(node: CompanionNode, actions: List<Action>) {
@@ -471,6 +493,9 @@ class CompanionTree(
     companion object {
         /** The snapshot key bindings read UI state from (`$ui.page`). */
         const val UI_KEY = "ui"
+
+        /** One `zoom: in` / `out` step. */
+        const val ZOOM_STEP = 1.5f
         private const val MAX_HISTORY = 32
         private val WHOLE_BINDING = Regex("^\\{([^{}]+)\\}$")
 

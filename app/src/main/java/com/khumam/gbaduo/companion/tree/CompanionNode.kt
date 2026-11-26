@@ -61,6 +61,10 @@ class CompanionNode internal constructor(
     var onDrop: ((payload: Any?) -> Unit)? = null
         internal set
 
+    /** Set on a zoomable box (`"zoom"` in layout.json): its scale and pan. */
+    var zoom: ZoomState? = null
+        internal set
+
     /** Set on a text field: the text it shows, how long it may be, and what editing and submitting do. */
     var input: InputState? = null
         internal set

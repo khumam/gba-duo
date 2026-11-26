@@ -19,6 +19,16 @@ data class PageEntry(val name: String, val child: Widget)
  * where that binding is truthy) and `onDrop` (what
  * dropping a dragged widget on it does; the payload is `{drag}` in its actions).
  */
+/**
+ * A zoomable box (`"zoom": { "min": 1, "max": 4, "state": "zoom" }`, or `"zoom": true`): pinch to zoom, drag to pan,
+ * the scale kept in UI key [state] so the `zoom` action (+ / - buttons) and the script see it.
+ */
+data class ZoomSpec(val min: Float = 1f, val max: Float = 4f, val state: String = DEFAULT_STATE) {
+    companion object {
+        const val DEFAULT_STATE = "zoom"
+    }
+}
+
 data class WidgetMeta(
     val id: String? = null,
     val classes: Set<String> = emptySet(),
@@ -31,6 +41,8 @@ data class WidgetMeta(
     val onDrop: List<Action> = emptyList(),
     /** Binding path: when set, the widget can be dragged only while it is truthy (e.g. only items that can be equipped). */
     val dragIf: String? = null,
+    /** Set on a zoomable box. */
+    val zoom: ZoomSpec? = null,
 ) {
     companion object {
         val NONE = WidgetMeta()
@@ -310,8 +322,31 @@ object LayoutParser {
         val drag = if (draggable) JsonTree.convertValue(obj.opt("drag")) else null
         val dragIf = if (draggable && obj.has("dragIf")) bindingKey(obj.getString("dragIf")) else null
         val id = if (obj.has("id")) obj.getString("id") else null
-        if (id == null && classes.isEmpty() && inline.isEmpty() && classIf.isEmpty() && bindStyle.isEmpty() && onClick.isEmpty() && !draggable && onDrop.isEmpty()) return WidgetMeta.NONE
-        return WidgetMeta(id, classes, inline, classIf, bindStyle, onClick, draggable, drag, onDrop, dragIf)
+        val zoom = parseZoom(obj.opt("zoom"), source, warnings)
+        if (id == null && classes.isEmpty() && inline.isEmpty() && classIf.isEmpty() && bindStyle.isEmpty() && onClick.isEmpty() && !draggable && onDrop.isEmpty() && zoom == null) return WidgetMeta.NONE
+        return WidgetMeta(id, classes, inline, classIf, bindStyle, onClick, draggable, drag, onDrop, dragIf, zoom)
+    }
+
+    /** `"zoom": true` or `{ "min", "max", "state" }`; null (with a warning when malformed) otherwise. */
+    private fun parseZoom(value: Any?, source: String, warnings: MutableList<CssWarning>): ZoomSpec? {
+        when (value) {
+            null, JSONObject.NULL, false -> return null
+            true -> return ZoomSpec()
+            is JSONObject -> {
+                val min = value.optDouble("min", 1.0).toFloat()
+                val max = value.optDouble("max", 4.0).toFloat()
+                val state = value.optString("state", ZoomSpec.DEFAULT_STATE)
+                if (!(min > 0f) || max < min || !Actions.isValidKey(state)) {
+                    warnings += CssWarning("$source: zoom needs 0 < min <= max and a valid state name")
+                    return null
+                }
+                return ZoomSpec(min, max, state)
+            }
+            else -> {
+                warnings += CssWarning("$source: zoom must be true or an object")
+                return null
+            }
+        }
     }
 
     private fun stringMap(obj: JSONObject?): Map<String, String> {

@@ -16,6 +16,9 @@ sealed class Action {
     /** Returns to the page shown before the last [Navigate] on [state] (or its initial page). */
     data class Back(val state: String) : Action()
 
+    /** Steps a zoomable box's scale (UI key [state]): `in` (x1.5), `out` (/1.5) or `reset` (its minimum). */
+    data class Zoom(val step: String, val state: String) : Action()
+
     /** Calls the pack script's `actions.<name>(args...)` on the emulator thread. */
     data class Call(val name: String, val args: List<Any?>) : Action()
 }
@@ -52,6 +55,15 @@ object Actions {
         val actions = mutableListOf<Action>()
         for (key in obj.keys) {
             if (key !in KNOWN) warnings += "unknown action key '$key'"
+        }
+        when (val zoom = obj["zoom"]) {
+            null -> Unit
+            "in", "out", "reset" -> {
+                val zoomState = obj["state"]?.toString() ?: ZoomSpec.DEFAULT_STATE
+                if (isValidKey(zoomState)) actions += Action.Zoom(zoom as String, zoomState) else warnings += "invalid state name '$zoomState'"
+                return actions
+            }
+            else -> warnings += "'zoom' must be \"in\", \"out\" or \"reset\""
         }
         val state = obj["state"]?.toString() ?: DEFAULT_STATE
         if (!isValidKey(state)) {
@@ -108,5 +120,5 @@ object Actions {
             (action !is Action.Call).also { if (!it) warnings += "a script can't return 'call'; call the Lua function directly" }
         }
 
-    private val KNOWN = setOf("set", "navigate", "back", "state", "call", "args")
+    private val KNOWN = setOf("set", "navigate", "back", "state", "call", "args", "zoom")
 }
